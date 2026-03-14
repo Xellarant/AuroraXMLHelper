@@ -1369,9 +1369,101 @@ function genItemXml(item, source, prefix) {
   return lines;
 }
 
+function inferFeatRules(benefits, featId) {
+  const rules = [];
+
+  const abilityMap = {
+    'strength': 'strength', 'str': 'strength',
+    'dexterity': 'dexterity', 'dex': 'dexterity',
+    'constitution': 'constitution', 'con': 'constitution',
+    'intelligence': 'intelligence', 'int': 'intelligence',
+    'wisdom': 'wisdom', 'wis': 'wisdom',
+    'charisma': 'charisma', 'cha': 'charisma'
+  };
+
+  const skillMap = {
+    'acrobatics': 'acrobatics', 'animal handling': 'animal handling',
+    'arcana': 'arcana', 'athletics': 'athletics', 'deception': 'deception',
+    'history': 'history', 'insight': 'insight', 'intimidation': 'intimidation',
+    'investigation': 'investigation', 'medicine': 'medicine', 'nature': 'nature',
+    'perception': 'perception', 'performance': 'performance', 'persuasion': 'persuasion',
+    'religion': 'religion', 'sleight of hand': 'sleight of hand',
+    'stealth': 'stealth', 'survival': 'survival'
+  };
+
+  benefits.forEach(b => {
+    const txt = (typeof b === 'string' ? b : b.text || '').toLowerCase();
+
+    // Ability score increase: "increase your strength score by 1"
+    const asiMatch = txt.match(/increase your (\w+(?:\s\w+)?) (?:score )?by (\d+)/i);
+    if (asiMatch) {
+      const ability = abilityMap[asiMatch[1].toLowerCase()];
+      const val = parseInt(asiMatch[2]);
+      if (ability && val) {
+        rules.push(`\t\t\t<stat name="${ability}" value="${val}" />`);
+        return;
+      }
+    }
+
+    // Proficiency with a skill
+    const skillProfMatch = txt.match(/gain proficiency (?:in |with )?(?:the )?(\w+(?:\s\w+)?) skill/i);
+    if (skillProfMatch) {
+      const skill = skillMap[skillProfMatch[1].toLowerCase()];
+      if (skill) {
+        const skillId = 'ID_PROFICIENCY_SKILL_' + skill.toUpperCase().replace(/\s/g, '');
+        rules.push(`\t\t\t<grant type="Proficiency" id="${skillId}" />`);
+        return;
+      }
+    }
+
+    // Proficiency with a tool by name (engineering kit, hacking tools, mechanic tools, etc.)
+    const toolMatch = txt.match(/gain proficiency with (?:the )?(.+?)(?:\.|$)/i);
+    if (toolMatch) {
+      const toolName = toolMatch[1].trim().toLowerCase();
+      const toolIds = {
+        'mechanic tools':    'ID_MODERN_PROFICIENCY_TOOL_MECHANIC_TOOLS',
+        'engineering kit':   'ID_MODERN_PROFICIENCY_TOOL_ENGINEERING_KIT',
+        'hacking tools':     'ID_MODERN_PROFICIENCY_TOOL_HACKING_TOOLS',
+        'disguise kit':      'ID_PROFICIENCY_TOOL_PROFICIENCY_DISGUISE_KIT',
+        'vehicles (land)':   'ID_MODERN_PROFICIENCY_VEHICLES_LAND',
+        'land vehicles':     'ID_MODERN_PROFICIENCY_VEHICLES_LAND',
+      };
+      // Check for simple weapon/armor category proficiency
+      const weapCat = {
+        'simple weapons': 'ID_PROFICIENCY_WEAPON_PROFICIENCY_SIMPLE_WEAPONS',
+        'martial weapons': 'ID_PROFICIENCY_WEAPON_PROFICIENCY_MARTIAL_WEAPONS',
+        'light armor': 'ID_PROFICIENCY_ARMOR_PROFICIENCY_LIGHT_ARMOR',
+        'medium armor': 'ID_PROFICIENCY_ARMOR_PROFICIENCY_MEDIUM_ARMOR',
+        'heavy armor': 'ID_PROFICIENCY_ARMOR_PROFICIENCY_HEAVY_ARMOR',
+        'shields': 'ID_PROFICIENCY_ARMOR_PROFICIENCY_SHIELDS',
+      };
+      const tid = toolIds[toolName] || weapCat[toolName];
+      if (tid) {
+        rules.push(`\t\t\t<grant type="Proficiency" id="${tid}" />`);
+        return;
+      }
+    }
+
+    // Double proficiency bonus for a skill (expertise)
+    const expertiseMatch = txt.match(/add twice your proficiency bonus.+?(\w+(?:\s\w+)?) (?:check|skill)/i);
+    if (expertiseMatch) {
+      const skill = skillMap[expertiseMatch[1].toLowerCase()];
+      if (skill) {
+        rules.push(`\t\t\t<stat name="${skill}:proficiency" value="proficiency" bonus="double" />`);
+        return;
+      }
+    }
+
+    // No pattern matched — benefit is sheet-only, no rule generated
+  });
+
+  return rules;
+}
+
 function genFeatXml(feat, source, prefix) {
   const id = `${prefix}_FEAT_${idify(feat.name)}`;
   const benefits = Array.isArray(feat.benefits) ? feat.benefits : [];
+  const rules = inferFeatRules(benefits, id);
   const lines = [];
   lines.push(`\t<element name="${escAttrXml(feat.name)}" type="Feat" source="${escAttrXml(source)}" id="${id}">`);
   if (feat.prerequisite) lines.push(`\t\t<requirements></requirements>`);
@@ -1389,10 +1481,14 @@ function genFeatXml(feat, source, prefix) {
   lines.push(`\t\t</description>`);
   const allText = [feat.description||"", ...benefits.map(b => typeof b === "string" ? b : (b.text||""))].join(" ");
   lines.push(`\t\t<sheet><description>${escXml(allText)}</description></sheet>`);
-  lines.push(`\t\t<rules></rules>`);
+  lines.push(`\t\t<rules>`);
+  rules.forEach(r => lines.push(r));
+  lines.push(`\t\t</rules>`);
   lines.push(`\t</element>`);
   return lines;
 }
+
+
 
 
 function genMagicXml(item, source, prefix) {
@@ -1419,3 +1515,49 @@ function generateAndDownload() {
   const xml = generateXml();
   const blob = new Blob([xml], { type: 'application/xml' });
   const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const name = (document.getElementById('sourceName').value || 'homebrew').toLowerCase().replace(/\s+/g,'_');
+  a.href = url;
+  a.download = `${name}.xml`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function showXmlPreview() {
+  const wrap = document.getElementById('xmlPreviewWrap');
+  wrap.classList.toggle('hidden');
+  if (!wrap.classList.contains('hidden')) {
+    document.getElementById('xmlPreview').textContent = generateXml();
+  }
+}
+
+// ─────────────────────────────────────────────
+// Utilities
+// ─────────────────────────────────────────────
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function escAttr(s) { return String(s||'').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+function escXml(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function escAttrXml(s) { return escXml(s).replace(/"/g,'&quot;'); }
+
+function ordinal(n) {
+  const s = ['th','st','nd','rd'];
+  const v = n % 100;
+  return s[(v-20)%10] || s[v] || s[0];
+}
+
+function resetAll() {
+  extractedData = {};
+  pdfFile = null;
+  document.getElementById('pdfFile').value = '';
+  document.getElementById('fileInfo').classList.add('hidden');
+  document.getElementById('uploadZone').classList.remove('hidden');
+  document.getElementById('stepReview').classList.add('hidden');
+  document.getElementById('reviewArea').classList.add('hidden');
+  document.getElementById('sourceName').value = '';
+  checkExtractReady();
+}
+</script>
+</body>
+</html>
