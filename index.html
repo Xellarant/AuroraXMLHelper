@@ -1,0 +1,1332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Aurora XML Helper</title>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600&family=Crimson+Pro:ital,wght@0,300;0,400;0,600;1,300;1,400&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --ink: #1a1612;
+    --parchment: #f5f0e8;
+    --parchment-dark: #ece5d5;
+    --parchment-mid: #e5dcc8;
+    --gold: #8b6914;
+    --gold-light: #c49a2a;
+    --gold-pale: #f0e0a0;
+    --red: #8b1a1a;
+    --red-light: #c0392b;
+    --muted: #6b5d4f;
+    --border: #c4a96a;
+    --border-light: #ddd0b0;
+    --success: #2d6a4f;
+    --success-bg: #d8f3dc;
+    --shadow: 0 2px 12px rgba(26,22,18,0.12);
+    --shadow-lg: 0 8px 32px rgba(26,22,18,0.18);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Crimson Pro', Georgia, serif;
+    background: var(--parchment);
+    color: var(--ink);
+    min-height: 100vh;
+    font-size: 16px;
+    line-height: 1.6;
+  }
+
+  /* Parchment texture via repeating pattern */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      repeating-linear-gradient(0deg, transparent, transparent 28px, rgba(196,169,106,0.04) 28px, rgba(196,169,106,0.04) 29px),
+      repeating-linear-gradient(90deg, transparent, transparent 28px, rgba(196,169,106,0.03) 28px, rgba(196,169,106,0.03) 29px);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  header {
+    background: var(--ink);
+    padding: 1.5rem 2rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 3px solid var(--gold);
+    position: relative;
+    z-index: 10;
+  }
+
+  header::after {
+    content: '';
+    position: absolute;
+    bottom: -6px;
+    left: 0; right: 0;
+    height: 2px;
+    background: var(--gold-light);
+    opacity: 0.4;
+  }
+
+  .logo {
+    font-family: 'Cinzel', serif;
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: var(--gold-light);
+    letter-spacing: 0.08em;
+  }
+
+  .logo span {
+    color: var(--parchment);
+    font-weight: 400;
+  }
+
+  .header-sub {
+    font-size: 0.8rem;
+    color: var(--muted);
+    font-style: italic;
+    letter-spacing: 0.05em;
+  }
+
+  main {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 2rem 1.5rem;
+    position: relative;
+    z-index: 1;
+  }
+
+  /* ── Cards ── */
+  .card {
+    background: #fff;
+    border: 1px solid var(--border-light);
+    border-radius: 4px;
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+    box-shadow: var(--shadow);
+    position: relative;
+  }
+
+  .card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, var(--gold), var(--gold-light), var(--gold));
+    border-radius: 4px 4px 0 0;
+  }
+
+  .card-title {
+    font-family: 'Cinzel', serif;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--gold);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    margin-bottom: 1rem;
+  }
+
+  /* ── Forms ── */
+  label {
+    display: block;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--muted);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+
+  input[type="text"],
+  input[type="password"],
+  select,
+  textarea {
+    width: 100%;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    background: var(--parchment);
+    color: var(--ink);
+    font-family: 'Crimson Pro', serif;
+    font-size: 1rem;
+    transition: border-color 0.15s, box-shadow 0.15s;
+    margin-bottom: 1rem;
+  }
+
+  input[type="text"]:focus,
+  input[type="password"]:focus,
+  select:focus,
+  textarea:focus {
+    outline: none;
+    border-color: var(--gold);
+    box-shadow: 0 0 0 3px rgba(139,105,20,0.12);
+    background: #fff;
+  }
+
+  textarea { resize: vertical; min-height: 80px; }
+
+  /* ── Buttons ── */
+  .btn {
+    font-family: 'Cinzel', serif;
+    font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    padding: 0.55rem 1.25rem;
+    border-radius: 3px;
+    border: none;
+    cursor: pointer;
+    transition: all 0.15s;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .btn-primary {
+    background: var(--gold);
+    color: #fff;
+  }
+  .btn-primary:hover { background: var(--gold-light); }
+  .btn-primary:disabled { background: var(--border); cursor: not-allowed; }
+
+  .btn-secondary {
+    background: transparent;
+    color: var(--gold);
+    border: 1px solid var(--border);
+  }
+  .btn-secondary:hover { background: var(--parchment-dark); }
+
+  .btn-danger {
+    background: transparent;
+    color: var(--red);
+    border: 1px solid #e0a0a0;
+    font-size: 0.72rem;
+    padding: 0.35rem 0.75rem;
+  }
+  .btn-danger:hover { background: #fdf0f0; }
+
+  .btn-success {
+    background: var(--success);
+    color: #fff;
+  }
+  .btn-success:hover { opacity: 0.88; }
+
+  /* ── Upload zone ── */
+  .upload-zone {
+    border: 2px dashed var(--border);
+    border-radius: 4px;
+    padding: 2.5rem;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    background: var(--parchment);
+  }
+
+  .upload-zone:hover, .upload-zone.drag-over {
+    border-color: var(--gold);
+    background: var(--gold-pale);
+  }
+
+  .upload-zone input { display: none; }
+
+  .upload-icon {
+    font-size: 2.5rem;
+    margin-bottom: 0.75rem;
+    display: block;
+    color: var(--gold);
+  }
+
+  .upload-zone p { color: var(--muted); font-style: italic; }
+  .upload-zone strong { color: var(--gold); font-style: normal; }
+
+  /* ── Element type checkboxes ── */
+  .type-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 10px;
+    margin-bottom: 1rem;
+  }
+
+  .type-check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0.6rem 0.9rem;
+    border: 1px solid var(--border-light);
+    border-radius: 3px;
+    cursor: pointer;
+    transition: all 0.15s;
+    background: var(--parchment);
+    font-size: 0.9rem;
+  }
+
+  .type-check:hover { border-color: var(--gold); background: var(--gold-pale); }
+  .type-check input { accent-color: var(--gold); width: 15px; height: 15px; }
+  .type-check.checked { border-color: var(--gold); background: var(--gold-pale); }
+
+  /* ── Tabs ── */
+  .tabs {
+    display: flex;
+    border-bottom: 2px solid var(--border);
+    margin-bottom: 1.5rem;
+    gap: 0;
+    flex-wrap: wrap;
+  }
+
+  .tab {
+    font-family: 'Cinzel', serif;
+    font-size: 0.75rem;
+    letter-spacing: 0.08em;
+    padding: 0.6rem 1.1rem;
+    cursor: pointer;
+    border: 1px solid transparent;
+    border-bottom: none;
+    color: var(--muted);
+    background: transparent;
+    transition: all 0.15s;
+    position: relative;
+    top: 2px;
+  }
+
+  .tab:hover { color: var(--gold); }
+
+  .tab.active {
+    color: var(--gold);
+    background: #fff;
+    border-color: var(--border);
+    border-bottom-color: #fff;
+  }
+
+  .tab-badge {
+    display: inline-block;
+    background: var(--gold);
+    color: #fff;
+    font-size: 0.65rem;
+    padding: 1px 6px;
+    border-radius: 10px;
+    margin-left: 4px;
+    font-family: 'Crimson Pro', serif;
+    font-style: normal;
+  }
+
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  /* ── Element cards in review ── */
+  .element-card {
+    border: 1px solid var(--border-light);
+    border-radius: 3px;
+    margin-bottom: 1rem;
+    overflow: hidden;
+    background: #fff;
+  }
+
+  .element-card-header {
+    background: var(--parchment-dark);
+    padding: 0.6rem 1rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--border-light);
+    cursor: pointer;
+  }
+
+  .element-card-header h3 {
+    font-family: 'Cinzel', serif;
+    font-size: 0.85rem;
+    color: var(--ink);
+    font-weight: 600;
+  }
+
+  .element-card-header .element-type-badge {
+    font-size: 0.7rem;
+    background: var(--gold-pale);
+    color: var(--gold);
+    border: 1px solid var(--border);
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-family: 'Crimson Pro', serif;
+    font-style: italic;
+  }
+
+  .element-card-body {
+    padding: 1rem;
+    display: none;
+  }
+
+  .element-card-body.open { display: block; }
+
+  .field-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0 1rem;
+  }
+
+  .field-row-3 {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 0 1rem;
+  }
+
+  .field-full { grid-column: 1 / -1; }
+
+  /* ── Status / alerts ── */
+  .alert {
+    padding: 0.75rem 1rem;
+    border-radius: 3px;
+    margin-bottom: 1rem;
+    font-size: 0.9rem;
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .alert-info { background: #eef4ff; border: 1px solid #b0c8f0; color: #1a3a6b; }
+  .alert-success { background: var(--success-bg); border: 1px solid #95d5a5; color: var(--success); }
+  .alert-error { background: #fdf0f0; border: 1px solid #e0a0a0; color: var(--red); }
+  .alert-warning { background: #fff8e8; border: 1px solid #e0c870; color: #6b4d10; }
+
+  /* ── Progress ── */
+  .progress-wrap {
+    background: var(--parchment-mid);
+    border-radius: 20px;
+    height: 8px;
+    overflow: hidden;
+    margin: 0.75rem 0;
+  }
+
+  .progress-bar {
+    height: 100%;
+    background: linear-gradient(90deg, var(--gold), var(--gold-light));
+    border-radius: 20px;
+    transition: width 0.4s ease;
+  }
+
+  /* ── Spinner ── */
+  .spinner {
+    display: inline-block;
+    width: 16px; height: 16px;
+    border: 2px solid rgba(139,105,20,0.3);
+    border-top-color: var(--gold);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    flex-shrink: 0;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── XML preview ── */
+  .xml-preview {
+    background: #1a1a1a;
+    color: #d4c9a8;
+    padding: 1rem 1.25rem;
+    border-radius: 3px;
+    font-family: 'Courier New', monospace;
+    font-size: 0.78rem;
+    line-height: 1.6;
+    max-height: 360px;
+    overflow-y: auto;
+    white-space: pre;
+    margin-top: 1rem;
+    border: 1px solid #333;
+  }
+
+  .xml-preview .xml-tag { color: #c49a2a; }
+  .xml-preview .xml-attr { color: #80b4d4; }
+  .xml-preview .xml-val { color: #a8d4a0; }
+  .xml-preview .xml-comment { color: #666; font-style: italic; }
+
+  /* ── Divider ── */
+  .divider {
+    border: none;
+    border-top: 1px solid var(--border-light);
+    margin: 1.25rem 0;
+  }
+
+  /* ── Misc ── */
+  .row { display: flex; gap: 1rem; align-items: flex-start; flex-wrap: wrap; }
+  .row > * { flex: 1; min-width: 0; }
+  .text-muted { color: var(--muted); font-style: italic; font-size: 0.9rem; }
+  .mt-1 { margin-top: 0.5rem; }
+  .mb-0 { margin-bottom: 0 !important; }
+  .hidden { display: none !important; }
+
+  /* section headings */
+  .section-label {
+    font-family: 'Cinzel', serif;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    color: var(--muted);
+    text-transform: uppercase;
+    border-bottom: 1px solid var(--border-light);
+    padding-bottom: 4px;
+    margin-bottom: 0.75rem;
+    margin-top: 1rem;
+  }
+
+  .checkbox-inline {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.9rem;
+    color: var(--muted);
+    margin-bottom: 1rem;
+    cursor: pointer;
+  }
+  .checkbox-inline input { accent-color: var(--gold); }
+
+  /* key indicator */
+  .key-set { color: var(--success); font-size: 0.8rem; }
+  .key-unset { color: var(--red-light); font-size: 0.8rem; }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <div class="logo">Aurora <span>XML Helper</span></div>
+    <div class="header-sub">D&amp;D Supplement → Aurora Builder XML</div>
+  </div>
+  <div id="keyStatus" class="key-unset">⚠ API key not set</div>
+</header>
+
+<main>
+
+  <!-- Step 1: API Key -->
+  <div class="card" id="stepKey">
+    <div class="card-title">① Gemini API Key</div>
+    <p class="text-muted" style="margin-bottom:1rem;">Your key is stored only in your browser's local storage and never sent anywhere except directly to Google's API.</p>
+    <label>Gemini API Key</label>
+    <div style="display:flex; gap:0.75rem; align-items:center; margin-bottom:1rem;">
+      <input type="password" id="apiKeyInput" placeholder="AIza..." style="flex:1; min-width:0; margin-bottom:0;" />
+      <button class="btn btn-primary" style="flex-shrink:0; white-space:nowrap;" onclick="saveKey()">Save Key</button>
+    </div>
+    <p class="text-muted" style="font-size:0.8rem;">Don't have one? Get a free key at <a href="https://aistudio.google.com" target="_blank" style="color:var(--gold);">aistudio.google.com</a></p>
+  </div>
+
+  <!-- Step 2: Upload -->
+  <div class="card" id="stepUpload">
+    <div class="card-title">② Upload Supplement PDF</div>
+
+    <div class="upload-zone" id="uploadZone" onclick="document.getElementById('pdfFile').click()" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event)">
+      <input type="file" id="pdfFile" accept=".pdf" onchange="handleFileSelect(event)" />
+      <span class="upload-icon">📜</span>
+      <p><strong>Click to browse</strong> or drag &amp; drop a PDF here</p>
+      <p style="font-size:0.85rem; margin-top:4px;">Supports any D&amp;D supplement in PDF format</p>
+    </div>
+
+    <div id="fileInfo" class="alert alert-success hidden" style="margin-top:1rem; margin-bottom:0;">
+      <span>📄</span>
+      <div>
+        <strong id="fileName"></strong>
+        <span id="fileSize" style="color:var(--muted); margin-left:8px;"></span>
+        <button class="btn btn-danger" style="margin-left:12px;" onclick="clearFile()">Remove</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Step 3: Options -->
+  <div class="card" id="stepOptions">
+    <div class="card-title">③ Extraction Options</div>
+
+    <label>Source Name (appears in XML)</label>
+    <input type="text" id="sourceName" placeholder="e.g. Modern Handbook" />
+
+    <label>Element Types to Extract</label>
+    <div class="type-grid" id="typeGrid">
+      <label class="type-check" id="chk-spell">
+        <input type="checkbox" value="spell" onchange="updateTypeCheck(this)" checked /> Spells
+      </label>
+      <label class="type-check checked" id="chk-archetype">
+        <input type="checkbox" value="archetype" onchange="updateTypeCheck(this)" checked /> Subclasses
+      </label>
+      <label class="type-check" id="chk-item">
+        <input type="checkbox" value="item" onchange="updateTypeCheck(this)" checked /> Items / Equipment
+      </label>
+      <label class="type-check" id="chk-feat">
+        <input type="checkbox" value="feat" onchange="updateTypeCheck(this)" checked /> Feats
+      </label>
+      <label class="type-check" id="chk-magic">
+        <input type="checkbox" value="magic" onchange="updateTypeCheck(this)" checked /> Magic Items
+      </label>
+    </div>
+
+    <button class="btn btn-primary" id="extractBtn" onclick="startExtraction()" disabled>
+      <span class="spinner hidden" id="extractSpinner"></span>
+      Extract from PDF
+    </button>
+  </div>
+
+  <!-- Step 4: Review -->
+  <div class="card hidden" id="stepReview">
+    <div class="card-title">④ Review &amp; Edit Extracted Elements</div>
+
+    <div id="extractProgress" class="hidden">
+      <div class="alert alert-info">
+        <span class="spinner"></span>
+        <span id="progressMsg">Sending to Gemini...</span>
+      </div>
+      <div class="progress-wrap"><div class="progress-bar" id="progressBar" style="width:0%"></div></div>
+    </div>
+
+    <div id="reviewArea" class="hidden">
+      <div class="alert alert-success" id="reviewSummary"></div>
+
+      <div class="tabs" id="reviewTabs"></div>
+      <div id="reviewPanels"></div>
+
+      <hr class="divider" />
+      <div style="display:flex; gap:1rem; flex-wrap:wrap; align-items:center;">
+        <button class="btn btn-success" onclick="generateAndDownload()">⬇ Download XML</button>
+        <button class="btn btn-secondary" onclick="showXmlPreview()">Preview XML</button>
+        <button class="btn btn-secondary" onclick="resetAll()">Start Over</button>
+      </div>
+
+      <div id="xmlPreviewWrap" class="hidden">
+        <div class="xml-preview" id="xmlPreview"></div>
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<script>
+// ─────────────────────────────────────────────
+// State
+// ─────────────────────────────────────────────
+let pdfFile = null;
+let extractedData = {}; // { spell: [...], archetype: [...], item: [...], feat: [...], magic: [...] }
+let apiKey = '';
+
+const TYPE_LABELS = {
+  spell: 'Spells',
+  archetype: 'Subclasses',
+  item: 'Items / Equipment',
+  feat: 'Feats',
+  magic: 'Magic Items'
+};
+
+// ─────────────────────────────────────────────
+// Init
+// ─────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', () => {
+  const saved = localStorage.getItem('gemini_api_key');
+  if (saved) {
+    apiKey = saved;
+    document.getElementById('apiKeyInput').value = saved;
+    setKeyStatus(true);
+  }
+  updateTypeCheck();
+  checkExtractReady();
+  // Mark initially checked boxes
+  document.querySelectorAll('.type-check input:checked').forEach(cb => {
+    cb.closest('.type-check').classList.add('checked');
+  });
+});
+
+// ─────────────────────────────────────────────
+// API Key
+// ─────────────────────────────────────────────
+function saveKey() {
+  const val = document.getElementById('apiKeyInput').value.trim();
+  if (!val) return;
+  apiKey = val;
+  localStorage.setItem('gemini_api_key', val);
+  setKeyStatus(true);
+  checkExtractReady();
+}
+
+function setKeyStatus(ok) {
+  const el = document.getElementById('keyStatus');
+  el.textContent = ok ? '✓ API key saved' : '⚠ API key not set';
+  el.className = ok ? 'key-set' : 'key-unset';
+}
+
+// ─────────────────────────────────────────────
+// File handling
+// ─────────────────────────────────────────────
+function handleDragOver(e) { e.preventDefault(); document.getElementById('uploadZone').classList.add('drag-over'); }
+function handleDragLeave() { document.getElementById('uploadZone').classList.remove('drag-over'); }
+function handleDrop(e) {
+  e.preventDefault();
+  handleDragLeave();
+  const f = e.dataTransfer.files[0];
+  if (f && f.type === 'application/pdf') setFile(f);
+}
+function handleFileSelect(e) { if (e.target.files[0]) setFile(e.target.files[0]); }
+
+function setFile(f) {
+  pdfFile = f;
+  document.getElementById('uploadZone').classList.add('hidden');
+  const info = document.getElementById('fileInfo');
+  info.classList.remove('hidden');
+  document.getElementById('fileName').textContent = f.name;
+  document.getElementById('fileSize').textContent = `(${(f.size / 1024 / 1024).toFixed(2)} MB)`;
+  // Auto-fill source name from filename
+  if (!document.getElementById('sourceName').value) {
+    document.getElementById('sourceName').value = f.name.replace(/\.pdf$/i, '').replace(/[_-]/g, ' ');
+  }
+  checkExtractReady();
+}
+
+function clearFile() {
+  pdfFile = null;
+  document.getElementById('pdfFile').value = '';
+  document.getElementById('fileInfo').classList.add('hidden');
+  document.getElementById('uploadZone').classList.remove('hidden');
+  checkExtractReady();
+}
+
+// ─────────────────────────────────────────────
+// Type checkboxes
+// ─────────────────────────────────────────────
+function updateTypeCheck(cb) {
+  if (cb) cb.closest('.type-check').classList.toggle('checked', cb.checked);
+  checkExtractReady();
+}
+
+function getSelectedTypes() {
+  return Array.from(document.querySelectorAll('.type-check input:checked')).map(c => c.value);
+}
+
+function checkExtractReady() {
+  const ready = apiKey && pdfFile && getSelectedTypes().length > 0;
+  document.getElementById('extractBtn').disabled = !ready;
+}
+
+// ─────────────────────────────────────────────
+// Prompts per element type
+// ─────────────────────────────────────────────
+const PROMPTS = {
+  spell: `Extract ALL spells from this D&D supplement PDF. Return a JSON array of spell objects.
+Each object must have these exact fields:
+{
+  "name": "Spell Name",
+  "school": "Evocation",
+  "level": 0,
+  "castingTime": "1 action",
+  "range": "30 feet",
+  "hasVerbal": true,
+  "hasSomatic": true,
+  "hasMaterial": false,
+  "material": "",
+  "duration": "Instantaneous",
+  "isConcentration": false,
+  "isRitual": false,
+  "isTechnomagic": false,
+  "classes": ["Bard","Cleric","Druid","Sorcerer","Warlock","Wizard"],
+  "description": "Full spell description in plain text.",
+  "higherLevels": ""
+}
+Return ONLY a valid JSON array. No markdown, no explanation, no backticks.`,
+
+  archetype: `Extract ALL subclasses/archetypes from this D&D supplement PDF. Return a JSON array.
+Each object:
+{
+  "name": "Subclass Name",
+  "class": "Barbarian",
+  "supports": "Primal Path",
+  "description": "Subclass flavour description.",
+  "features": [
+    {
+      "name": "Feature Name",
+      "level": 3,
+      "action": "",
+      "usage": "",
+      "description": "Full feature description."
+    }
+  ]
+}
+The 'supports' field must be the Aurora archetype support string: 'Primal Path' for Barbarian, 'Bard College' for Bard, 'Divine Domain' for Cleric, 'Druid Circle' for Druid, 'Martial Archetype' for Fighter, 'Monastic Tradition' for Monk, 'Sacred Oath' for Paladin, 'Ranger Archetype' for Ranger, 'Roguish Archetype' for Rogue, 'Sorcerous Origin' for Sorcerer, 'Otherworldly Patron' for Warlock, 'Arcane Tradition' for Wizard.
+Return ONLY a valid JSON array. No markdown, no explanation, no backticks.`,
+
+  item: `Extract ALL mundane items and equipment (weapons, armor, tools, gear) from this D&D supplement PDF. Return a JSON array.
+Each object:
+{
+  "name": "Item Name",
+  "category": "Weapons",
+  "cost": "50",
+  "currency": "gp",
+  "weight": "2",
+  "description": "Item description.",
+  "isWeapon": false,
+  "weaponType": "",
+  "damage": "",
+  "damageType": "",
+  "properties": "",
+  "isTool": false,
+  "proficiencyId": ""
+}
+Return ONLY a valid JSON array. No markdown, no explanation, no backticks.`,
+
+  feat: `Extract ALL feats from this D&D supplement PDF. Return a JSON array.
+Each object:
+{
+  "name": "Feat Name",
+  "prerequisite": "",
+  "description": "Full feat description.",
+  "benefits": [
+    { "type": "ability_score", "ability": "", "value": 0 },
+    { "type": "proficiency", "proficiencyId": "" },
+    { "type": "text", "text": "Description of benefit." }
+  ]
+}
+Return ONLY a valid JSON array. No markdown, no explanation, no backticks.`,
+
+  magic: `Extract ALL magic items from this D&D supplement PDF. Return a JSON array.
+Each object:
+{
+  "name": "Magic Item Name",
+  "type": "Wondrous Item",
+  "rarity": "Uncommon",
+  "requiresAttunement": false,
+  "description": "Full description of the item and its properties.",
+  "charges": 0,
+  "recharge": ""
+}
+Return ONLY a valid JSON array. No markdown, no explanation, no backticks.`
+};
+
+// ─────────────────────────────────────────────
+// Extraction
+// ─────────────────────────────────────────────
+async function startExtraction() {
+  const types = getSelectedTypes();
+  if (!types.length || !pdfFile || !apiKey) return;
+
+  document.getElementById('stepReview').classList.remove('hidden');
+  document.getElementById('extractProgress').classList.remove('hidden');
+  document.getElementById('reviewArea').classList.add('hidden');
+  document.getElementById('extractBtn').disabled = true;
+
+  const spinner = document.getElementById('extractSpinner');
+  spinner.classList.remove('hidden');
+
+  extractedData = {};
+  let step = 0;
+
+  for (const type of types) {
+    setProgress(step / types.length * 100, `Extracting ${TYPE_LABELS[type]}...`);
+    try {
+      const result = await callGemini(pdfFile, PROMPTS[type]);
+      extractedData[type] = result;
+    } catch (err) {
+      extractedData[type] = [];
+      console.error(`Error extracting ${type}:`, err);
+    }
+    step++;
+  }
+
+  setProgress(100, 'Done!');
+  spinner.classList.add('hidden');
+  document.getElementById('extractBtn').disabled = false;
+
+  setTimeout(() => {
+    document.getElementById('extractProgress').classList.add('hidden');
+    buildReviewUI();
+    document.getElementById('reviewArea').classList.remove('hidden');
+  }, 600);
+}
+
+async function callGemini(file, prompt) {
+  // Convert PDF to base64
+  const base64 = await fileToBase64(file);
+
+  const body = {
+    contents: [{
+      parts: [
+        { inline_data: { mime_type: 'application/pdf', data: base64 } },
+        { text: prompt }
+      ]
+    }],
+    generationConfig: { temperature: 0.1, maxOutputTokens: 8192 }
+  };
+
+  const resp = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+  );
+
+  if (!resp.ok) {
+    const err = await resp.json();
+    throw new Error(err.error?.message || 'Gemini API error');
+  }
+
+  const data = await resp.json();
+  let text = data.candidates?.[0]?.content?.parts?.[0]?.text || '[]';
+  // Strip markdown code fences if present
+  text = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+  return JSON.parse(text);
+}
+
+function fileToBase64(file) {
+  return new Promise((res, rej) => {
+    const reader = new FileReader();
+    reader.onload = () => res(reader.result.split(',')[1]);
+    reader.onerror = rej;
+    reader.readAsDataURL(file);
+  });
+}
+
+function setProgress(pct, msg) {
+  document.getElementById('progressBar').style.width = pct + '%';
+  document.getElementById('progressMsg').textContent = msg;
+}
+
+// ─────────────────────────────────────────────
+// Review UI builder
+// ─────────────────────────────────────────────
+function buildReviewUI() {
+  const total = Object.values(extractedData).reduce((s, a) => s + a.length, 0);
+  document.getElementById('reviewSummary').textContent =
+    `✓ Extracted ${total} elements across ${Object.keys(extractedData).length} type(s). Review below — expand each entry to edit, then download.`;
+
+  const tabsEl = document.getElementById('reviewTabs');
+  const panelsEl = document.getElementById('reviewPanels');
+  tabsEl.innerHTML = '';
+  panelsEl.innerHTML = '';
+
+  let first = true;
+  for (const [type, items] of Object.entries(extractedData)) {
+    if (!items.length) continue;
+    const tabId = `tab-${type}`;
+    const panelId = `panel-${type}`;
+
+    const tab = document.createElement('button');
+    tab.className = 'tab' + (first ? ' active' : '');
+    tab.id = tabId;
+    tab.innerHTML = `${TYPE_LABELS[type]} <span class="tab-badge">${items.length}</span>`;
+    tab.onclick = () => switchTab(type);
+    tabsEl.appendChild(tab);
+
+    const panel = document.createElement('div');
+    panel.className = 'tab-panel' + (first ? ' active' : '');
+    panel.id = panelId;
+    panel.innerHTML = buildPanelHTML(type, items);
+    panelsEl.appendChild(panel);
+
+    first = false;
+  }
+}
+
+function switchTab(type) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.getElementById(`tab-${type}`).classList.add('active');
+  document.getElementById(`panel-${type}`).classList.add('active');
+}
+
+function buildPanelHTML(type, items) {
+  return items.map((item, i) => {
+    const header = item.name || `Unnamed ${type} #${i+1}`;
+    const badge = type === 'spell' ? `Level ${item.level} ${item.school}` :
+                  type === 'archetype' ? item.class :
+                  type === 'feat' ? 'Feat' :
+                  type === 'magic' ? item.rarity :
+                  item.category || 'Item';
+    return `
+    <div class="element-card" id="card-${type}-${i}">
+      <div class="element-card-header" onclick="toggleCard('${type}',${i})">
+        <h3>${escHtml(header)}</h3>
+        <span class="element-type-badge">${escHtml(badge)}</span>
+      </div>
+      <div class="element-card-body" id="body-${type}-${i}">
+        ${buildFieldsHTML(type, item, i)}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function toggleCard(type, i) {
+  const body = document.getElementById(`body-${type}-${i}`);
+  body.classList.toggle('open');
+}
+
+// ─────────────────────────────────────────────
+// Field builders per type
+// ─────────────────────────────────────────────
+function buildFieldsHTML(type, item, i) {
+  const id = `${type}-${i}`;
+  if (type === 'spell') return buildSpellFields(item, id);
+  if (type === 'archetype') return buildArchetypeFields(item, id);
+  if (type === 'item') return buildItemFields(item, id);
+  if (type === 'feat') return buildFeatFields(item, id);
+  if (type === 'magic') return buildMagicFields(item, id);
+  return '';
+}
+
+function buildSpellFields(s, id) {
+  const classes = ['Bard','Cleric','Druid','Sorcerer','Warlock','Wizard'];
+  const schools = ['Abjuration','Conjuration','Divination','Enchantment','Evocation','Illusion','Necromancy','Transmutation'];
+  return `
+    <div class="field-row">
+      <div><label>Name</label><input type="text" value="${escAttr(s.name)}" data-field="name" data-id="${id}" onchange="updateField(this)" /></div>
+      <div>
+        <label>School</label>
+        <select data-field="school" data-id="${id}" onchange="updateField(this)">
+          ${schools.map(sc => `<option ${s.school===sc?'selected':''}>${sc}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    <div class="field-row-3">
+      <div><label>Level (0=cantrip)</label><input type="text" value="${s.level}" data-field="level" data-id="${id}" onchange="updateField(this)" /></div>
+      <div><label>Casting Time</label><input type="text" value="${escAttr(s.castingTime)}" data-field="castingTime" data-id="${id}" onchange="updateField(this)" /></div>
+      <div><label>Range</label><input type="text" value="${escAttr(s.range)}" data-field="range" data-id="${id}" onchange="updateField(this)" /></div>
+    </div>
+    <div class="field-row">
+      <div><label>Duration</label><input type="text" value="${escAttr(s.duration)}" data-field="duration" data-id="${id}" onchange="updateField(this)" /></div>
+      <div><label>Material Component</label><input type="text" value="${escAttr(s.material||'')}" data-field="material" data-id="${id}" onchange="updateField(this)" /></div>
+    </div>
+    <div class="field-row">
+      <div>
+        <label>Classes (comma-separated)</label>
+        <input type="text" value="${escAttr((s.classes||[]).join(', '))}" data-field="classes" data-id="${id}" onchange="updateFieldArr(this)" />
+      </div>
+    </div>
+    <div style="display:flex; gap:1.5rem; flex-wrap:wrap; margin-bottom:1rem;">
+      ${chk('hasVerbal','Verbal',s.hasVerbal,id)}
+      ${chk('hasSomatic','Somatic',s.hasSomatic,id)}
+      ${chk('hasMaterial','Material',s.hasMaterial,id)}
+      ${chk('isConcentration','Concentration',s.isConcentration,id)}
+      ${chk('isRitual','Ritual',s.isRitual,id)}
+      ${chk('isTechnomagic','Technomagic',s.isTechnomagic,id)}
+    </div>
+    <div><label>Description</label><textarea rows="4" data-field="description" data-id="${id}" onchange="updateField(this)">${escHtml(s.description||'')}</textarea></div>
+    <div><label>At Higher Levels (leave blank if none)</label><textarea rows="2" data-field="higherLevels" data-id="${id}" onchange="updateField(this)">${escHtml(s.higherLevels||'')}</textarea></div>`;
+}
+
+function buildArchetypeFields(a, id) {
+  const supports = ['Primal Path','Bard College','Divine Domain','Druid Circle','Martial Archetype','Monastic Tradition','Sacred Oath','Ranger Archetype','Roguish Archetype','Sorcerous Origin','Otherworldly Patron','Arcane Tradition'];
+  return `
+    <div class="field-row">
+      <div><label>Name</label><input type="text" value="${escAttr(a.name)}" data-field="name" data-id="${id}" onchange="updateField(this)" /></div>
+      <div><label>Class</label><input type="text" value="${escAttr(a.class||'')}" data-field="class" data-id="${id}" onchange="updateField(this)" /></div>
+    </div>
+    <div>
+      <label>Supports (Aurora archetype category)</label>
+      <select data-field="supports" data-id="${id}" onchange="updateField(this)">
+        ${supports.map(s => `<option ${a.supports===s?'selected':''}>${s}</option>`).join('')}
+      </select>
+    </div>
+    <div><label>Subclass Description</label><textarea rows="3" data-field="description" data-id="${id}" onchange="updateField(this)">${escHtml(a.description||'')}</textarea></div>
+    <div class="section-label">Features</div>
+    ${(a.features||[]).map((f,fi) => `
+      <div style="border:1px solid var(--border-light); border-radius:3px; padding:0.75rem; margin-bottom:0.75rem; background:var(--parchment);">
+        <div class="field-row">
+          <div><label>Feature Name</label><input type="text" value="${escAttr(f.name)}" data-field="features.${fi}.name" data-id="${id}" onchange="updateNestedField(this)" /></div>
+          <div><label>Level</label><input type="text" value="${f.level}" data-field="features.${fi}.level" data-id="${id}" onchange="updateNestedField(this)" /></div>
+        </div>
+        <div class="field-row">
+          <div><label>Action (e.g. Bonus Action)</label><input type="text" value="${escAttr(f.action||'')}" data-field="features.${fi}.action" data-id="${id}" onchange="updateNestedField(this)" /></div>
+          <div><label>Usage (e.g. 1/Short Rest)</label><input type="text" value="${escAttr(f.usage||'')}" data-field="features.${fi}.usage" data-id="${id}" onchange="updateNestedField(this)" /></div>
+        </div>
+        <div><label>Description</label><textarea rows="3" data-field="features.${fi}.description" data-id="${id}" onchange="updateNestedField(this)">${escHtml(f.description||'')}</textarea></div>
+      </div>`).join('')}`;
+}
+
+function buildItemFields(item, id) {
+  return `
+    <div class="field-row">
+      <div><label>Name</label><input type="text" value="${escAttr(item.name)}" data-field="name" data-id="${id}" onchange="updateField(this)" /></div>
+      <div><label>Category</label><input type="text" value="${escAttr(item.category||'')}" data-field="category" data-id="${id}" onchange="updateField(this)" /></div>
+    </div>
+    <div class="field-row-3">
+      <div><label>Cost</label><input type="text" value="${escAttr(item.cost||'')}" data-field="cost" data-id="${id}" onchange="updateField(this)" /></div>
+      <div><label>Currency</label>
+        <select data-field="currency" data-id="${id}" onchange="updateField(this)">
+          ${['gp','sp','cp','pp'].map(c=>`<option ${item.currency===c?'selected':''}>${c}</option>`).join('')}
+        </select>
+      </div>
+      <div><label>Weight (lb)</label><input type="text" value="${escAttr(item.weight||'')}" data-field="weight" data-id="${id}" onchange="updateField(this)" /></div>
+    </div>
+    <div class="field-row">
+      <div><label>Damage (if weapon)</label><input type="text" value="${escAttr(item.damage||'')}" data-field="damage" data-id="${id}" onchange="updateField(this)" /></div>
+      <div><label>Properties</label><input type="text" value="${escAttr(item.properties||'')}" data-field="properties" data-id="${id}" onchange="updateField(this)" /></div>
+    </div>
+    <div><label>Description</label><textarea rows="3" data-field="description" data-id="${id}" onchange="updateField(this)">${escHtml(item.description||'')}</textarea></div>`;
+}
+
+function buildFeatFields(feat, id) {
+  return `
+    <div class="field-row">
+      <div><label>Name</label><input type="text" value="${escAttr(feat.name)}" data-field="name" data-id="${id}" onchange="updateField(this)" /></div>
+      <div><label>Prerequisite (leave blank if none)</label><input type="text" value="${escAttr(feat.prerequisite||'')}" data-field="prerequisite" data-id="${id}" onchange="updateField(this)" /></div>
+    </div>
+    <div><label>Description</label><textarea rows="4" data-field="description" data-id="${id}" onchange="updateField(this)">${escHtml(feat.description||'')}</textarea></div>`;
+}
+
+function buildMagicFields(item, id) {
+  const rarities = ['Common','Uncommon','Rare','Very Rare','Legendary','Artifact'];
+  return `
+    <div class="field-row">
+      <div><label>Name</label><input type="text" value="${escAttr(item.name)}" data-field="name" data-id="${id}" onchange="updateField(this)" /></div>
+      <div><label>Type</label><input type="text" value="${escAttr(item.type||'Wondrous Item')}" data-field="type" data-id="${id}" onchange="updateField(this)" /></div>
+    </div>
+    <div class="field-row">
+      <div>
+        <label>Rarity</label>
+        <select data-field="rarity" data-id="${id}" onchange="updateField(this)">
+          ${rarities.map(r=>`<option ${item.rarity===r?'selected':''}>${r}</option>`).join('')}
+        </select>
+      </div>
+      <div><label>Charges (0 if none)</label><input type="text" value="${item.charges||0}" data-field="charges" data-id="${id}" onchange="updateField(this)" /></div>
+    </div>
+    <div class="field-row">
+      ${chk('requiresAttunement','Requires Attunement',item.requiresAttunement,id)}
+    </div>
+    <div><label>Recharge (e.g. "Recharges at dawn")</label><input type="text" value="${escAttr(item.recharge||'')}" data-field="recharge" data-id="${id}" onchange="updateField(this)" /></div>
+    <div><label>Description</label><textarea rows="4" data-field="description" data-id="${id}" onchange="updateField(this)">${escHtml(item.description||'')}</textarea></div>`;
+}
+
+function chk(field, label, val, id) {
+  return `<label class="checkbox-inline">
+    <input type="checkbox" ${val?'checked':''} data-field="${field}" data-id="${id}" onchange="updateFieldBool(this)" /> ${label}
+  </label>`;
+}
+
+// ─────────────────────────────────────────────
+// Field update helpers
+// ─────────────────────────────────────────────
+function parseId(id) {
+  const parts = id.split('-');
+  return { type: parts[0], index: parseInt(parts[1]) };
+}
+
+function updateField(el) {
+  const { type, index } = parseId(el.dataset.id);
+  extractedData[type][index][el.dataset.field] = el.value;
+}
+
+function updateFieldBool(el) {
+  const { type, index } = parseId(el.dataset.id);
+  extractedData[type][index][el.dataset.field] = el.checked;
+}
+
+function updateFieldArr(el) {
+  const { type, index } = parseId(el.dataset.id);
+  extractedData[type][index][el.dataset.field] = el.value.split(',').map(s => s.trim()).filter(Boolean);
+}
+
+function updateNestedField(el) {
+  const { type, index } = parseId(el.dataset.id);
+  const parts = el.dataset.field.split('.');
+  // e.g. features.0.name
+  let obj = extractedData[type][index];
+  for (let i = 0; i < parts.length - 1; i++) {
+    obj = obj[parts[i]];
+  }
+  obj[parts[parts.length - 1]] = el.value;
+}
+
+// ─────────────────────────────────────────────
+// XML Generation
+// ─────────────────────────────────────────────
+function generateXml() {
+  const source = escXml(document.getElementById('sourceName').value || 'Homebrew');
+  const prefix = 'ID_' + source.toUpperCase().replace(/[^A-Z0-9]/g, '_');
+  const lines = [];
+
+  lines.push(`<?xml version="1.0" encoding="utf-8" ?>`);
+  lines.push(`<elements>`);
+  lines.push(`\t<info>`);
+  lines.push(`\t\t<n>${escXml(source)}</n>`);
+  lines.push(`\t\t<description>Elements extracted from ${escXml(source)}.</description>`);
+  lines.push(`\t\t<author url="">Homebrew</author>`);
+  lines.push(`\t\t<update version="0.1.0">`);
+  lines.push(`\t\t\t<file name="${escAttrXml(source.toLowerCase().replace(/\s+/g,'_'))}.xml" url="" />`);
+  lines.push(`\t\t</update>`);
+  lines.push(`\t</info>`);
+  lines.push('');
+
+  for (const [type, items] of Object.entries(extractedData)) {
+    if (!items.length) continue;
+    lines.push(`\t<!-- ===== ${TYPE_LABELS[type].toUpperCase()} ===== -->`);
+    for (const item of items) {
+      if (type === 'spell') lines.push(...genSpellXml(item, source, prefix));
+      if (type === 'archetype') lines.push(...genArchetypeXml(item, source, prefix));
+      if (type === 'item') lines.push(...genItemXml(item, source, prefix));
+      if (type === 'feat') lines.push(...genFeatXml(item, source, prefix));
+      if (type === 'magic') lines.push(...genMagicXml(item, source, prefix));
+      lines.push('');
+    }
+  }
+
+  lines.push(`</elements>`);
+  return lines.join('\n');
+}
+
+function idify(name) {
+  return name.toUpperCase().replace(/[^A-Z0-9]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g,'');
+}
+
+function genSpellXml(s, source, prefix) {
+  const id = `${prefix}_SPELL_${idify(s.name)}`;
+  const supports = (s.classes || []).join(', ');
+  const lines = [];
+  lines.push(`\t<element name="${escAttrXml(s.name)}" type="Spell" source="${escAttrXml(source)}" id="${id}">`);
+  lines.push(`\t\t<supports>${escXml(supports)}</supports>`);
+  lines.push(`\t\t<description>`);
+  lines.push(`\t\t\t<p>${escXml(s.description || '')}</p>`);
+  if (s.higherLevels) lines.push(`\t\t\t<p class="indent"><b><i>At Higher Levels.</i></b> ${escXml(s.higherLevels)}</p>`);
+  lines.push(`\t\t</description>`);
+  lines.push(`\t\t<setters>`);
+  lines.push(`\t\t\t<set name="keywords">${s.isTechnomagic ? 'technomagic' : ''}</set>`);
+  lines.push(`\t\t\t<set name="school">${escXml(s.school)}</set>`);
+  lines.push(`\t\t\t<set name="level">${s.level}</set>`);
+  lines.push(`\t\t\t<set name="isRitual">${!!s.isRitual}</set>`);
+  lines.push(`\t\t\t<set name="time">${escXml(s.castingTime)}</set>`);
+  lines.push(`\t\t\t<set name="range">${escXml(s.range)}</set>`);
+  lines.push(`\t\t\t<set name="hasVerbalComponent">${!!s.hasVerbal}</set>`);
+  lines.push(`\t\t\t<set name="hasSomaticComponent">${!!s.hasSomatic}</set>`);
+  lines.push(`\t\t\t<set name="hasMaterialComponent">${!!s.hasMaterial}</set>`);
+  lines.push(`\t\t\t<set name="materialComponent">${escXml(s.material || '')}</set>`);
+  lines.push(`\t\t\t<set name="duration">${escXml(s.duration)}</set>`);
+  lines.push(`\t\t\t<set name="isConcentration">${!!s.isConcentration}</set>`);
+  lines.push(`\t\t</setters>`);
+  lines.push(`\t</element>`);
+  return lines;
+}
+
+function genArchetypeXml(a, source, prefix) {
+  const archId = `${prefix}_ARCHETYPE_${idify(a.class||'')}_${idify(a.name)}`;
+  const lines = [];
+  lines.push(`\t<element name="${escAttrXml(a.name)}" type="Archetype" source="${escAttrXml(source)}" id="${archId}">`);
+  lines.push(`\t\t<supports>${escXml(a.supports||'')}</supports>`);
+  lines.push(`\t\t<description>`);
+  lines.push(`\t\t\t<p>${escXml(a.description||'')}</p>`);
+  (a.features||[]).forEach(f => {
+    const fid = `${archId}_FEATURE_${idify(f.name)}`;
+    lines.push(`\t\t\t<div element="${fid}" />`);
+  });
+  lines.push(`\t\t</description>`);
+  lines.push(`\t\t<sheet display="false" />`);
+  lines.push(`\t\t<rules>`);
+  (a.features||[]).forEach(f => {
+    const fid = `${archId}_FEATURE_${idify(f.name)}`;
+    lines.push(`\t\t\t<grant type="Archetype Feature" id="${fid}" level="${f.level}" />`);
+  });
+  lines.push(`\t\t</rules>`);
+  lines.push(`\t</element>`);
+
+  (a.features||[]).forEach(f => {
+    const fid = `${archId}_FEATURE_${idify(f.name)}`;
+    lines.push(`\t<element name="${escAttrXml(f.name)}" type="Archetype Feature" source="${escAttrXml(source)}" id="${fid}">`);
+    lines.push(`\t\t<description>`);
+    lines.push(`\t\t\t<p><em>${f.level}${ordinal(f.level)}-level ${escXml(a.name)} feature</em></p>`);
+    lines.push(`\t\t\t<p>${escXml(f.description||'')}</p>`);
+    lines.push(`\t\t</description>`);
+    const sheetAttrs = [
+      f.action ? `action="${escAttrXml(f.action)}"` : '',
+      f.usage ? `usage="${escAttrXml(f.usage)}"` : ''
+    ].filter(Boolean).join(' ');
+    lines.push(`\t\t<sheet${sheetAttrs ? ' '+sheetAttrs : ''}>`);
+    lines.push(`\t\t\t<description>${escXml(f.description||'')}</description>`);
+    lines.push(`\t\t</sheet>`);
+    lines.push(`\t</element>`);
+  });
+
+  return lines;
+}
+
+function genItemXml(item, source, prefix) {
+  const id = `${prefix}_ITEM_${idify(item.name)}`;
+  const lines = [];
+  lines.push(`\t<element name="${escAttrXml(item.name)}" type="Item" source="${escAttrXml(source)}" id="${id}">`);
+  lines.push(`\t\t<description><p>${escXml(item.description||'')}</p></description>`);
+  lines.push(`\t\t<setters>`);
+  lines.push(`\t\t\t<set name="category">${escXml(item.category||'Equipment')}</set>`);
+  lines.push(`\t\t\t<set name="cost" currency="${escXml(item.currency||'gp')}">${escXml(item.cost||'0')}</set>`);
+  lines.push(`\t\t\t<set name="weight" lb="${escXml(item.weight||'0')}">${escXml(item.weight||'0')} lb.</set>`);
+  if (item.damage) lines.push(`\t\t\t<set name="damage">${escXml(item.damage)}</set>`);
+  if (item.properties) lines.push(`\t\t\t<set name="properties">${escXml(item.properties)}</set>`);
+  lines.push(`\t\t</setters>`);
+  lines.push(`\t</element>`);
+  return lines;
+}
+
+function genFeatXml(feat, source, prefix) {
+  const id = `${prefix}_FEAT_${idify(feat.name)}`;
+  const lines = [];
+  lines.push(`\t<element name="${escAttrXml(feat.name)}" type="Feat" source="${escAttrXml(source)}" id="${id}">`);
+  if (feat.prerequisite) lines.push(`\t\t<requirements></requirements>`);
+  lines.push(`\t\t<description>`);
+  if (feat.prerequisite) lines.push(`\t\t\t<p class="flavor"><em>Prerequisite: ${escXml(feat.prerequisite)}</em></p>`);
+  lines.push(`\t\t\t<p>${escXml(feat.description||'')}</p>`);
+  lines.push(`\t\t</description>`);
+  lines.push(`\t\t<sheet><description>${escXml(feat.description||'')}</description></sheet>`);
+  lines.push(`\t\t<rules></rules>`);
+  lines.push(`\t</element>`);
+  return lines;
+}
+
+function genMagicXml(item, source, prefix) {
+  const id = `${prefix}_MAGIC_ITEM_${idify(item.name)}`;
+  const lines = [];
+  lines.push(`\t<element name="${escAttrXml(item.name)}" type="Magic Item" source="${escAttrXml(source)}" id="${id}">`);
+  lines.push(`\t\t<description><p>${escXml(item.description||'')}</p></description>`);
+  lines.push(`\t\t<setters>`);
+  lines.push(`\t\t\t<set name="category">Magic Items</set>`);
+  lines.push(`\t\t\t<set name="type">${escXml(item.type||'Wondrous Item')}</set>`);
+  lines.push(`\t\t\t<set name="rarity">${escXml(item.rarity||'Uncommon')}</set>`);
+  lines.push(`\t\t\t<set name="attunement">${!!item.requiresAttunement}</set>`);
+  if (item.charges > 0) lines.push(`\t\t\t<set name="charges">${item.charges}</set>`);
+  if (item.recharge) lines.push(`\t\t\t<set name="recharge">${escXml(item.recharge)}</set>`);
+  lines.push(`\t\t</setters>`);
+  lines.push(`\t</element>`);
+  return lines;
+}
+
+// ─────────────────────────────────────────────
+// Download & Preview
+// ─────────────────────────────────────────────
+function generateAndDownload() {
+  const xml = generateXml();
+  const blob = new Blob([xml], { type: 'application/xml' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const name = (document.getElementById('sourceName').value || 'homebrew').toLowerCase().replace(/\s+/g,'_');
+  a.href = url;
+  a.download = `${name}.xml`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function showXmlPreview() {
+  const wrap = document.getElementById('xmlPreviewWrap');
+  wrap.classList.toggle('hidden');
+  if (!wrap.classList.contains('hidden')) {
+    document.getElementById('xmlPreview').textContent = generateXml();
+  }
+}
+
+// ─────────────────────────────────────────────
+// Utilities
+// ─────────────────────────────────────────────
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function escAttr(s) { return String(s||'').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+function escXml(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function escAttrXml(s) { return escXml(s).replace(/"/g,'&quot;'); }
+
+function ordinal(n) {
+  const s = ['th','st','nd','rd'];
+  const v = n % 100;
+  return s[(v-20)%10] || s[v] || s[0];
+}
+
+function resetAll() {
+  extractedData = {};
+  pdfFile = null;
+  document.getElementById('pdfFile').value = '';
+  document.getElementById('fileInfo').classList.add('hidden');
+  document.getElementById('uploadZone').classList.remove('hidden');
+  document.getElementById('stepReview').classList.add('hidden');
+  document.getElementById('reviewArea').classList.add('hidden');
+  document.getElementById('sourceName').value = '';
+  checkExtractReady();
+}
+</script>
+</body>
+</html>
