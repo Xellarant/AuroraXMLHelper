@@ -498,10 +498,12 @@
     <div class="card-title">① Gemini API Key</div>
     <p class="text-muted" style="margin-bottom:1rem;">Your key is stored only in your browser's local storage and never sent anywhere except directly to Google's API.</p>
     <label>Gemini API Key</label>
-    <div style="display:flex; gap:0.75rem; align-items:center; margin-bottom:1rem;">
-      <input type="password" id="apiKeyInput" placeholder="AIza..." style="flex:1; min-width:0; margin-bottom:0;" />
+    <div style="display:flex; gap:0.75rem; align-items:center; margin-bottom:0.75rem; flex-wrap:wrap;">
+      <input type="password" id="apiKeyInput" placeholder="AIza..." style="flex:1; min-width:180px; margin-bottom:0;" />
       <button class="btn btn-primary" style="flex-shrink:0; white-space:nowrap;" onclick="saveKey()">Save Key</button>
+      <button class="btn btn-secondary" style="flex-shrink:0; white-space:nowrap;" id="testKeyBtn" onclick="testKey()">Test Key</button>
     </div>
+    <div id="keyTestResult" class="hidden" style="margin-bottom:0.75rem;"></div>
     <p class="text-muted" style="font-size:0.8rem;">Don't have one? Get a free key at <a href="https://aistudio.google.com" target="_blank" style="color:var(--gold);">aistudio.google.com</a></p>
   </div>
 
@@ -556,6 +558,9 @@
       <span class="spinner hidden" id="extractSpinner"></span>
       Extract from PDF
     </button>
+    <p class="text-muted" id="extractHint" style="margin-top:0.5rem; font-size:0.82rem;">
+      Button is enabled when a valid API key is saved, a PDF is uploaded, and at least one element type is selected.
+    </p>
   </div>
 
   <!-- Step 4: Review -->
@@ -563,11 +568,12 @@
     <div class="card-title">④ Review &amp; Edit Extracted Elements</div>
 
     <div id="extractProgress" class="hidden">
-      <div class="alert alert-info">
-        <span class="spinner"></span>
+      <div class="alert alert-info" id="progressAlert">
+        <span class="spinner" id="progressSpinner"></span>
         <span id="progressMsg">Sending to Gemini...</span>
       </div>
       <div class="progress-wrap"><div class="progress-bar" id="progressBar" style="width:0%"></div></div>
+      <div id="extractErrors" class="hidden"></div>
     </div>
 
     <div id="reviewArea" class="hidden">
@@ -630,17 +636,55 @@ window.addEventListener('DOMContentLoaded', () => {
 // ─────────────────────────────────────────────
 function saveKey() {
   const val = document.getElementById('apiKeyInput').value.trim();
-  if (!val) return;
+  if (!val) { showKeyTestResult(false, 'Please enter an API key.'); return; }
   apiKey = val;
   localStorage.setItem('gemini_api_key', val);
   setKeyStatus(true);
   checkExtractReady();
+  showKeyTestResult(true, '✓ Key saved. Use Test Key to verify it works.');
 }
 
 function setKeyStatus(ok) {
   const el = document.getElementById('keyStatus');
   el.textContent = ok ? '✓ API key saved' : '⚠ API key not set';
   el.className = ok ? 'key-set' : 'key-unset';
+}
+
+async function testKey() {
+  const val = document.getElementById('apiKeyInput').value.trim();
+  if (!val) { showKeyTestResult(false, 'Please enter a key first.'); return; }
+  const btn = document.getElementById('testKeyBtn');
+  btn.disabled = true;
+  btn.textContent = 'Testing...';
+  showKeyTestResult(null, '');
+  try {
+    const resp = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${val}`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents: [{ parts: [{ text: 'Say OK' }] }], generationConfig: { maxOutputTokens: 5 } }) }
+    );
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error?.message || `HTTP ${resp.status}`);
+    showKeyTestResult(true, '✓ Key is valid and working.');
+    // Auto-save if test passes
+    apiKey = val;
+    localStorage.setItem('gemini_api_key', val);
+    setKeyStatus(true);
+    checkExtractReady();
+  } catch(err) {
+    showKeyTestResult(false, '✗ ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Test Key';
+  }
+}
+
+function showKeyTestResult(ok, msg) {
+  const el = document.getElementById('keyTestResult');
+  if (!msg) { el.classList.add('hidden'); return; }
+  el.className = 'alert ' + (ok ? 'alert-success' : 'alert-error');
+  el.textContent = msg;
+  el.classList.remove('hidden');
 }
 
 // ─────────────────────────────────────────────
@@ -804,7 +848,10 @@ async function startExtraction() {
   spinner.classList.remove('hidden');
 
   extractedData = {};
+  const errors = [];
   let step = 0;
+  document.getElementById('extractErrors').classList.add('hidden');
+  document.getElementById('extractErrors').innerHTML = '';
 
   for (const type of types) {
     setProgress(step / types.length * 100, `Extracting ${TYPE_LABELS[type]}...`);
@@ -813,6 +860,7 @@ async function startExtraction() {
       extractedData[type] = result;
     } catch (err) {
       extractedData[type] = [];
+      errors.push(`${TYPE_LABELS[type]}: ${err.message}`);
       console.error(`Error extracting ${type}:`, err);
     }
     step++;
@@ -822,11 +870,18 @@ async function startExtraction() {
   spinner.classList.add('hidden');
   document.getElementById('extractBtn').disabled = false;
 
+  if (errors.length) {
+    const errEl = document.getElementById('extractErrors');
+    errEl.className = 'alert alert-error';
+    errEl.innerHTML = '<strong>Errors during extraction:</strong><br>' + errors.map(e => '• ' + e).join('<br>');
+    errEl.classList.remove('hidden');
+  }
+
   setTimeout(() => {
     document.getElementById('extractProgress').classList.add('hidden');
     buildReviewUI();
     document.getElementById('reviewArea').classList.remove('hidden');
-  }, 600);
+  }, 800);
 }
 
 async function callGemini(file, prompt) {
@@ -844,7 +899,7 @@ async function callGemini(file, prompt) {
   };
 
   const resp = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
     { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
   );
 
@@ -854,9 +909,33 @@ async function callGemini(file, prompt) {
   }
 
   const data = await resp.json();
-  let text = data.candidates?.[0]?.content?.parts?.[0]?.text || '[]';
-  // Strip markdown code fences if present
-  text = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+
+  // Check for blocked/empty response
+  if (data.promptFeedback?.blockReason) {
+    throw new Error(`Blocked by Gemini: ${data.promptFeedback.blockReason}`);
+  }
+  if (!data.candidates?.length) {
+    throw new Error('Gemini returned no candidates. The PDF may be too large or the response was filtered.');
+  }
+
+  let text = data.candidates[0]?.content?.parts?.[0]?.text || '';
+  if (!text) throw new Error('Gemini returned an empty response.');
+
+  // Strip markdown code fences
+  text = text.replace(/^```(?:json)?\s*/im, '').replace(/\s*```\s*$/im, '').trim();
+
+  // Find the JSON array even if Gemini wrapped it in an object
+  const arrStart = text.indexOf('[');
+  const arrEnd = text.lastIndexOf(']');
+  if (arrStart !== -1 && arrEnd !== -1 && arrEnd > arrStart) {
+    text = text.slice(arrStart, arrEnd + 1);
+  } else if (text.startsWith('{')) {
+    // Gemini sometimes returns {"items": [...]} — unwrap it
+    const parsed = JSON.parse(text);
+    const firstArr = Object.values(parsed).find(v => Array.isArray(v));
+    if (firstArr) return firstArr;
+  }
+
   return JSON.parse(text);
 }
 
@@ -879,8 +958,18 @@ function setProgress(pct, msg) {
 // ─────────────────────────────────────────────
 function buildReviewUI() {
   const total = Object.values(extractedData).reduce((s, a) => s + a.length, 0);
-  document.getElementById('reviewSummary').textContent =
-    `✓ Extracted ${total} elements across ${Object.keys(extractedData).length} type(s). Review below — expand each entry to edit, then download.`;
+  const summaryEl = document.getElementById('reviewSummary');
+  if (total === 0) {
+    summaryEl.className = 'alert alert-warning';
+    summaryEl.innerHTML = '<strong>No elements were extracted.</strong> This usually means the API key is invalid, the PDF could not be read, or Gemini returned an error. Check the error messages above, use Test Key to verify your key, and try again.';
+  } else {
+    const breakdown = Object.entries(extractedData)
+      .filter(([,arr]) => arr.length > 0)
+      .map(([type, arr]) => `${arr.length} ${TYPE_LABELS[type]}`)
+      .join(', ');
+    summaryEl.className = 'alert alert-success';
+    summaryEl.textContent = `✓ Extracted ${total} elements: ${breakdown}. Expand each entry to review and edit, then download.`;
+  }
 
   const tabsEl = document.getElementById('reviewTabs');
   const panelsEl = document.getElementById('reviewPanels');
