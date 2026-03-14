@@ -499,7 +499,11 @@
     <p class="text-muted" style="margin-bottom:1rem;">Your key is stored only in your browser's local storage and never sent anywhere except directly to Google's API.</p>
     <label>Gemini API Key</label>
     <div style="display:flex; gap:0.75rem; align-items:center; margin-bottom:0.75rem; flex-wrap:wrap;">
-      <input type="password" id="apiKeyInput" placeholder="AIza..." style="flex:1; min-width:180px; margin-bottom:0;" />
+      <div style="position:relative; flex:1; min-width:180px;">
+        <input type="password" id="apiKeyInput" placeholder="AIza..." style="width:100%; margin-bottom:0; padding-right:2.5rem;" />
+        <button onclick="toggleKeyVisibility()" id="keyVisBtn" title="Show/hide key"
+          style="position:absolute; right:8px; top:50%; transform:translateY(-50%); background:none; border:none; cursor:pointer; font-size:1rem; color:var(--muted); padding:0; line-height:1;">👁</button>
+      </div>
       <button class="btn btn-primary" style="flex-shrink:0; white-space:nowrap;" onclick="saveKey()">Save Key</button>
       <button class="btn btn-secondary" style="flex-shrink:0; white-space:nowrap;" id="testKeyBtn" onclick="testKey()">Test Key</button>
     </div>
@@ -634,6 +638,15 @@ window.addEventListener('DOMContentLoaded', () => {
 // ─────────────────────────────────────────────
 // API Key
 // ─────────────────────────────────────────────
+function toggleKeyVisibility() {
+  const input = document.getElementById('apiKeyInput');
+  const btn = document.getElementById('keyVisBtn');
+  const isHidden = input.type === 'password';
+  input.type = isHidden ? 'text' : 'password';
+  btn.textContent = isHidden ? '🙈' : '👁';
+  btn.title = isHidden ? 'Hide key' : 'Show key';
+}
+
 function saveKey() {
   const val = document.getElementById('apiKeyInput').value.trim();
   if (!val) { showKeyTestResult(false, 'Please enter an API key.'); return; }
@@ -743,94 +756,59 @@ function checkExtractReady() {
 // Prompts per element type
 // ─────────────────────────────────────────────
 const PROMPTS = {
-  spell: `Extract ALL spells from this D&D supplement PDF. Return a JSON array of spell objects.
-Each object must have these exact fields:
-{
-  "name": "Spell Name",
-  "school": "Evocation",
-  "level": 0,
-  "castingTime": "1 action",
-  "range": "30 feet",
-  "hasVerbal": true,
-  "hasSomatic": true,
-  "hasMaterial": false,
-  "material": "",
-  "duration": "Instantaneous",
-  "isConcentration": false,
-  "isRitual": false,
-  "isTechnomagic": false,
-  "classes": ["Bard","Cleric","Druid","Sorcerer","Warlock","Wizard"],
-  "description": "Full spell description in plain text.",
-  "higherLevels": ""
-}
-Return ONLY a valid JSON array. No markdown, no explanation, no backticks.`,
+  spell: `Extract ALL spells from this PDF. Return a JSON array where every element has:
+name, school, level (integer 0-9), castingTime, range,
+hasVerbal (bool), hasSomatic (bool), hasMaterial (bool), material (string),
+duration, isConcentration (bool), isRitual (bool), isTechnomagic (bool),
+classes (array of strings from: Bard, Cleric, Druid, Sorcerer, Warlock, Wizard),
+description (complete full text of the spell),
+higherLevels (At Higher Levels text, empty string if none).
+Include every spell. Do not truncate descriptions.`,
 
-  archetype: `Extract ALL subclasses/archetypes from this D&D supplement PDF. Return a JSON array.
-Each object:
-{
-  "name": "Subclass Name",
-  "class": "Barbarian",
-  "supports": "Primal Path",
-  "description": "Subclass flavour description.",
-  "features": [
-    {
-      "name": "Feature Name",
-      "level": 3,
-      "action": "",
-      "usage": "",
-      "description": "Full feature description."
-    }
-  ]
-}
-The 'supports' field must be the Aurora archetype support string: 'Primal Path' for Barbarian, 'Bard College' for Bard, 'Divine Domain' for Cleric, 'Druid Circle' for Druid, 'Martial Archetype' for Fighter, 'Monastic Tradition' for Monk, 'Sacred Oath' for Paladin, 'Ranger Archetype' for Ranger, 'Roguish Archetype' for Rogue, 'Sorcerous Origin' for Sorcerer, 'Otherworldly Patron' for Warlock, 'Arcane Tradition' for Wizard.
-Return ONLY a valid JSON array. No markdown, no explanation, no backticks.`,
+  archetype: `Extract ALL subclasses and archetypes from this PDF. Return a JSON array where every element has:
+name, class (parent class name e.g. Barbarian), supports (Aurora category — use exactly:
+Primal Path, Bard College, Divine Domain, Druid Circle, Martial Archetype, Monastic Tradition,
+Sacred Oath, Ranger Archetype, Roguish Archetype, Sorcerous Origin, Otherworldly Patron, Arcane Tradition),
+description (flavour text only),
+features (array of objects with: name, level (integer), action (e.g. Bonus Action, or empty string),
+usage (e.g. 1/Short Rest, or empty string), description (COMPLETE mechanical text of the feature
+including every bullet point, every condition, every number — do not summarise or truncate)).
+Include every subclass and every one of its features.`,
 
-  item: `Extract ALL mundane items and equipment (weapons, armor, tools, gear) from this D&D supplement PDF. Return a JSON array.
-Each object:
-{
-  "name": "Item Name",
-  "category": "Weapons",
-  "cost": "50",
-  "currency": "gp",
-  "weight": "2",
-  "description": "Item description.",
-  "isWeapon": false,
-  "weaponType": "",
-  "damage": "",
-  "damageType": "",
-  "properties": "",
-  "isTool": false,
-  "proficiencyId": ""
-}
-Return ONLY a valid JSON array. No markdown, no explanation, no backticks.`,
+  item: `Extract ALL equipment, weapons, armor, tools, and gear from this PDF.
+Return a JSON array where every element has:
+name, category (Weapons/Armor/Tools/Gear),
+cost (number only e.g. "50"), currency (gp/sp/cp),
+weight (number only e.g. "2"),
+description (the full descriptive text for this item — include special rules, usage instructions,
+and any mechanics not captured in other fields. Do NOT repeat the item name, cost, weight,
+damage dice, or properties list in this field as those are stored separately),
+damage (e.g. 2d6 piercing, empty if not a weapon),
+damageType (empty if not a weapon),
+properties (comma-separated weapon/armor properties e.g. "reload 6, two-handed, burst fire", empty if none).
+Include every item listed in equipment tables and descriptions.
+Keep descriptions focused — omit flavour text that simply restates the item category or reiterates stats.`,
 
-  feat: `Extract ALL feats from this D&D supplement PDF. Return a JSON array.
-Each object:
-{
-  "name": "Feat Name",
-  "prerequisite": "",
-  "description": "Full feat description.",
-  "benefits": [
-    { "type": "ability_score", "ability": "", "value": 0 },
-    { "type": "proficiency", "proficiencyId": "" },
-    { "type": "text", "text": "Description of benefit." }
-  ]
-}
-Return ONLY a valid JSON array. No markdown, no explanation, no backticks.`,
 
-  magic: `Extract ALL magic items from this D&D supplement PDF. Return a JSON array.
-Each object:
-{
-  "name": "Magic Item Name",
-  "type": "Wondrous Item",
-  "rarity": "Uncommon",
-  "requiresAttunement": false,
-  "description": "Full description of the item and its properties.",
-  "charges": 0,
-  "recharge": ""
-}
-Return ONLY a valid JSON array. No markdown, no explanation, no backticks.`
+  feat: `Extract ALL feats from this PDF.
+Return a JSON array where every element has:
+name (string),
+prerequisite (string, empty if none),
+fullText (string — the COMPLETE text of the feat exactly as it appears in the PDF,
+including the opening sentence AND every bullet point. Do not omit anything.).
+Include every feat.`,
+
+  magic: `Extract ALL magic items from this PDF. Return a JSON array where every element has:
+name, type (e.g. Wondrous Item, Weapon, Armor, Ring, Staff, Wand, Potion, Scroll),
+rarity (Common/Uncommon/Rare/Very Rare/Legendary/Artifact),
+requiresAttunement (bool),
+description (complete full text including all properties, charges, and effects),
+charges (integer, 0 if none),
+recharge (text describing when charges reset, empty if not applicable).
+Include every magic item.`
 };
+
+
 
 // ─────────────────────────────────────────────
 // Extraction
@@ -849,31 +827,30 @@ async function startExtraction() {
 
   extractedData = {};
   const errors = [];
-  let step = 0;
   document.getElementById('extractErrors').classList.add('hidden');
   document.getElementById('extractErrors').innerHTML = '';
 
   for (const type of types) {
-    setProgress(step / types.length * 100, `Extracting ${TYPE_LABELS[type]}...`);
     try {
-      const result = await callGemini(pdfFile, PROMPTS[type]);
-      extractedData[type] = result;
+      const result = await callGemini(pdfFile, type, (msg, pct) => setProgress(pct * 100, msg));
+      extractedData[type] = type === 'feat' ? result.map(parseFeatFullText) : result;
+      const failed = result.filter(r => r._error);
+      if (failed.length) errors.push(`${TYPE_LABELS[type]}: ${failed.length} item(s) need review`);
     } catch (err) {
       extractedData[type] = [];
       errors.push(`${TYPE_LABELS[type]}: ${err.message}`);
       console.error(`Error extracting ${type}:`, err);
     }
-    step++;
   }
 
-  setProgress(100, 'Done!');
+  setProgress(100, 'All done!');
   spinner.classList.add('hidden');
   document.getElementById('extractBtn').disabled = false;
 
   if (errors.length) {
     const errEl = document.getElementById('extractErrors');
-    errEl.className = 'alert alert-error';
-    errEl.innerHTML = '<strong>Errors during extraction:</strong><br>' + errors.map(e => '• ' + e).join('<br>');
+    errEl.className = 'alert alert-warning';
+    errEl.innerHTML = '<strong>Notes:</strong><br>' + errors.map(e => '• ' + e).join('<br>');
     errEl.classList.remove('hidden');
   }
 
@@ -882,61 +859,69 @@ async function startExtraction() {
     buildReviewUI();
     document.getElementById('reviewArea').classList.remove('hidden');
   }, 800);
+
+
 }
 
-async function callGemini(file, prompt) {
-  // Convert PDF to base64
-  const base64 = await fileToBase64(file);
-
+async function geminiRaw(base64, promptText) {
   const body = {
-    contents: [{
-      parts: [
-        { inline_data: { mime_type: 'application/pdf', data: base64 } },
-        { text: prompt }
-      ]
-    }],
-    generationConfig: { temperature: 0.1, maxOutputTokens: 8192 }
+    contents: [{ parts: [
+      { inline_data: { mime_type: 'application/pdf', data: base64 } },
+      { text: promptText }
+    ]}],
+    generationConfig: {
+      temperature: 0.1,
+      maxOutputTokens: 65536,
+      response_mime_type: 'application/json'
+    }
   };
-
   const resp = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
     { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
   );
-
   if (!resp.ok) {
-    const err = await resp.json();
-    throw new Error(err.error?.message || 'Gemini API error');
+    const err = await resp.json().catch(() => ({}));
+    throw new Error(err.error?.message || `HTTP ${resp.status}`);
   }
-
   const data = await resp.json();
+  if (data.promptFeedback?.blockReason) throw new Error(`Blocked: ${data.promptFeedback.blockReason}`);
+  if (!data.candidates?.length) throw new Error('No candidates returned — PDF may be too large or response was filtered.');
+  const text = data.candidates[0]?.content?.parts?.[0]?.text || '';
+  if (!text) throw new Error('Empty response from Gemini.');
+  return text;
+}
 
-  // Check for blocked/empty response
-  if (data.promptFeedback?.blockReason) {
-    throw new Error(`Blocked by Gemini: ${data.promptFeedback.blockReason}`);
-  }
-  if (!data.candidates?.length) {
-    throw new Error('Gemini returned no candidates. The PDF may be too large or the response was filtered.');
-  }
-
-  let text = data.candidates[0]?.content?.parts?.[0]?.text || '';
-  if (!text) throw new Error('Gemini returned an empty response.');
-
-  // Strip markdown code fences
+function safeParseJson(text) {
+  // JSON mode should give us clean JSON, but guard anyway
   text = text.replace(/^```(?:json)?\s*/im, '').replace(/\s*```\s*$/im, '').trim();
-
-  // Find the JSON array even if Gemini wrapped it in an object
-  const arrStart = text.indexOf('[');
-  const arrEnd = text.lastIndexOf(']');
-  if (arrStart !== -1 && arrEnd !== -1 && arrEnd > arrStart) {
-    text = text.slice(arrStart, arrEnd + 1);
-  } else if (text.startsWith('{')) {
-    // Gemini sometimes returns {"items": [...]} — unwrap it
-    const parsed = JSON.parse(text);
-    const firstArr = Object.values(parsed).find(v => Array.isArray(v));
-    if (firstArr) return firstArr;
+  try { return JSON.parse(text); } catch(e) {}
+  const aS = text.indexOf('['), aE = text.lastIndexOf(']');
+  if (aS !== -1 && aE > aS) { try { return JSON.parse(text.slice(aS, aE+1)); } catch(e) {} }
+  const oS = text.indexOf('{'), oE = text.lastIndexOf('}');
+  if (oS !== -1 && oE > oS) {
+    try {
+      const o = JSON.parse(text.slice(oS, oE+1));
+      return Array.isArray(o) ? o : (Object.values(o).find(v => Array.isArray(v)) || o);
+    } catch(e) {}
   }
+  throw new Error('JSON parse failed. Response: ' + text.slice(0, 150).replace(/\n/g,' '));
+}
 
-  return JSON.parse(text);
+function archetypeSupport(cls) {
+  const m = { Barbarian:'Primal Path', Bard:'Bard College', Cleric:'Divine Domain', Druid:'Druid Circle',
+    Fighter:'Martial Archetype', Monk:'Monastic Tradition', Paladin:'Sacred Oath', Ranger:'Ranger Archetype',
+    Rogue:'Roguish Archetype', Sorcerer:'Sorcerous Origin', Warlock:'Otherworldly Patron', Wizard:'Arcane Tradition' };
+  return m[cls] || cls;
+}
+
+// Single call per element type — JSON mode ensures valid output regardless of special characters
+async function callGemini(file, type, progressCallback) {
+  const base64 = await fileToBase64(file);
+  progressCallback(`Extracting ${TYPE_LABELS[type]}...`, 0.1);
+  const text = await geminiRaw(base64, PROMPTS[type]);
+  progressCallback(`Parsing ${TYPE_LABELS[type]}...`, 0.8);
+  const parsed = safeParseJson(text);
+  return Array.isArray(parsed) ? parsed : (Object.values(parsed).find(v => Array.isArray(v)) || []);
 }
 
 function fileToBase64(file) {
@@ -1137,13 +1122,24 @@ function buildItemFields(item, id) {
 }
 
 function buildFeatFields(feat, id) {
+  const benefits = Array.isArray(feat.benefits) ? feat.benefits : [];
+  const benefitsHtml = benefits.length
+    ? benefits.map((b, bi) => `
+        <div style="display:flex; gap:8px; align-items:flex-start; margin-bottom:6px;">
+          <span style="color:var(--gold); font-size:1.1rem; line-height:1.5; flex-shrink:0;">•</span>
+          <textarea rows="2" style="flex:1; margin-bottom:0;" data-field="benefits.${bi}" data-id="${id}" onchange="updateBenefit(this)">${escHtml(b)}</textarea>
+        </div>`).join('')
+    : '<p class="text-muted" style="font-size:0.85rem;">No benefits extracted — check the PDF and add manually if needed.</p>';
   return `
     <div class="field-row">
       <div><label>Name</label><input type="text" value="${escAttr(feat.name)}" data-field="name" data-id="${id}" onchange="updateField(this)" /></div>
       <div><label>Prerequisite (leave blank if none)</label><input type="text" value="${escAttr(feat.prerequisite||'')}" data-field="prerequisite" data-id="${id}" onchange="updateField(this)" /></div>
     </div>
-    <div><label>Description</label><textarea rows="4" data-field="description" data-id="${id}" onchange="updateField(this)">${escHtml(feat.description||'')}</textarea></div>`;
+    <div><label>Description (opening sentence)</label><textarea rows="2" data-field="description" data-id="${id}" onchange="updateField(this)">${escHtml(feat.description||'')}</textarea></div>
+    <div class="section-label" style="margin-top:0.75rem;">Benefits</div>
+    ${benefitsHtml}`;
 }
+
 
 function buildMagicFields(item, id) {
   const rarities = ['Common','Uncommon','Rare','Very Rare','Legendary','Artifact'];
@@ -1195,6 +1191,45 @@ function updateFieldBool(el) {
 function updateFieldArr(el) {
   const { type, index } = parseId(el.dataset.id);
   extractedData[type][index][el.dataset.field] = el.value.split(',').map(s => s.trim()).filter(Boolean);
+}
+
+function parseFeatFullText(feat) {
+  let raw = feat.fullText || feat.description || '';
+  if (!raw) return { ...feat, description: '', benefits: [] };
+
+  // Backfill prerequisite if Gemini included it in fullText but not in its own field
+  let prereq = feat.prerequisite || '';
+  const prereqMatch = raw.match(/^prerequisite[^:]*:\s*([^\n]+)/i);
+  if (prereqMatch) {
+    if (!prereq) prereq = prereqMatch[1].trim();
+    raw = raw.replace(/^prerequisite[^:]*:[^\n]+\n?/i, '').trim();
+  }
+
+  // Split on common bullet markers Gemini uses
+  const bulletRe = /(?:^|\n)\s*(?:[•\-\*]|\d+[.)])\s+/m;
+
+  if (!bulletRe.test(raw)) {
+    return { ...feat, prerequisite: prereq, description: raw.trim(), benefits: [] };
+  }
+
+  const firstBullet = raw.search(bulletRe);
+  const intro = raw.slice(0, firstBullet).trim();
+  const bulletSection = raw.slice(firstBullet);
+
+  const bullets = bulletSection
+    .split(/(?:^|\n)\s*(?:[•\-\*]|\d+[.)])\s+/m)
+    .map(s => s.trim())
+    .filter(Boolean);
+
+  return { ...feat, prerequisite: prereq, description: intro, benefits: bullets };
+}
+
+
+function updateBenefit(el) {
+  const { type, index } = parseId(el.dataset.id);
+  const bi = parseInt(el.dataset.field.split('.')[1]);
+  if (!Array.isArray(extractedData[type][index].benefits)) extractedData[type][index].benefits = [];
+  extractedData[type][index].benefits[bi] = el.value;
 }
 
 function updateNestedField(el) {
@@ -1336,18 +1371,29 @@ function genItemXml(item, source, prefix) {
 
 function genFeatXml(feat, source, prefix) {
   const id = `${prefix}_FEAT_${idify(feat.name)}`;
+  const benefits = Array.isArray(feat.benefits) ? feat.benefits : [];
   const lines = [];
   lines.push(`\t<element name="${escAttrXml(feat.name)}" type="Feat" source="${escAttrXml(source)}" id="${id}">`);
   if (feat.prerequisite) lines.push(`\t\t<requirements></requirements>`);
   lines.push(`\t\t<description>`);
   if (feat.prerequisite) lines.push(`\t\t\t<p class="flavor"><em>Prerequisite: ${escXml(feat.prerequisite)}</em></p>`);
-  lines.push(`\t\t\t<p>${escXml(feat.description||'')}</p>`);
+  lines.push(`\t\t\t<p>${escXml(feat.description||"")}</p>`);
+  if (benefits.length) {
+    lines.push(`\t\t\t<ul>`);
+    benefits.forEach(b => {
+      const txt = typeof b === "string" ? b : (b.text || "");
+      lines.push(`\t\t\t\t<li>${escXml(txt)}</li>`);
+    });
+    lines.push(`\t\t\t</ul>`);
+  }
   lines.push(`\t\t</description>`);
-  lines.push(`\t\t<sheet><description>${escXml(feat.description||'')}</description></sheet>`);
+  const allText = [feat.description||"", ...benefits.map(b => typeof b === "string" ? b : (b.text||""))].join(" ");
+  lines.push(`\t\t<sheet><description>${escXml(allText)}</description></sheet>`);
   lines.push(`\t\t<rules></rules>`);
   lines.push(`\t</element>`);
   return lines;
 }
+
 
 function genMagicXml(item, source, prefix) {
   const id = `${prefix}_MAGIC_ITEM_${idify(item.name)}`;
@@ -1373,49 +1419,3 @@ function generateAndDownload() {
   const xml = generateXml();
   const blob = new Blob([xml], { type: 'application/xml' });
   const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  const name = (document.getElementById('sourceName').value || 'homebrew').toLowerCase().replace(/\s+/g,'_');
-  a.href = url;
-  a.download = `${name}.xml`;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-function showXmlPreview() {
-  const wrap = document.getElementById('xmlPreviewWrap');
-  wrap.classList.toggle('hidden');
-  if (!wrap.classList.contains('hidden')) {
-    document.getElementById('xmlPreview').textContent = generateXml();
-  }
-}
-
-// ─────────────────────────────────────────────
-// Utilities
-// ─────────────────────────────────────────────
-function escHtml(s) {
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
-function escAttr(s) { return String(s||'').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
-function escXml(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-function escAttrXml(s) { return escXml(s).replace(/"/g,'&quot;'); }
-
-function ordinal(n) {
-  const s = ['th','st','nd','rd'];
-  const v = n % 100;
-  return s[(v-20)%10] || s[v] || s[0];
-}
-
-function resetAll() {
-  extractedData = {};
-  pdfFile = null;
-  document.getElementById('pdfFile').value = '';
-  document.getElementById('fileInfo').classList.add('hidden');
-  document.getElementById('uploadZone').classList.remove('hidden');
-  document.getElementById('stepReview').classList.add('hidden');
-  document.getElementById('reviewArea').classList.add('hidden');
-  document.getElementById('sourceName').value = '';
-  checkExtractReady();
-}
-</script>
-</body>
-</html>
