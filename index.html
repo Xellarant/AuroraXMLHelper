@@ -476,6 +476,31 @@
   }
   .checkbox-inline input { accent-color: var(--gold); }
 
+
+  /* ── Edit confirmation flash ── */
+  .field-saved {
+    border-color: var(--success) !important;
+    transition: border-color 0.1s;
+  }
+
+  /* ── Changes pending badge ── */
+  .btn-pending { position: relative; display: inline-block; }
+  .pending-badge {
+    display: none;
+    position: absolute;
+    top: -7px;
+    right: -7px;
+    background: var(--red-light);
+    color: #fff;
+    font-size: 0.6rem;
+    font-family: 'Crimson Pro', serif;
+    font-style: italic;
+    padding: 1px 5px;
+    border-radius: 8px;
+    white-space: nowrap;
+    pointer-events: none;
+  }
+  .btn-pending.has-changes .pending-badge { display: block; }
   /* key indicator */
   .key-set { color: var(--success); font-size: 0.8rem; }
   .key-unset { color: var(--red-light); font-size: 0.8rem; }
@@ -577,8 +602,9 @@
         <span id="progressMsg">Sending to Gemini...</span>
       </div>
       <div class="progress-wrap"><div class="progress-bar" id="progressBar" style="width:0%"></div></div>
-      <div id="extractErrors" class="hidden"></div>
     </div>
+
+    <div id="extractErrors" class="hidden" style="margin-bottom:1rem;"></div>
 
     <div id="reviewArea" class="hidden">
       <div class="alert alert-success" id="reviewSummary"></div>
@@ -588,8 +614,8 @@
 
       <hr class="divider" />
       <div style="display:flex; gap:1rem; flex-wrap:wrap; align-items:center;">
-        <button class="btn btn-success" onclick="generateAndDownload()">⬇ Download XML</button>
-        <button class="btn btn-secondary" onclick="showXmlPreview()">Preview XML</button>
+        <div class="btn-pending" id="downloadBtnWrap"><button class="btn btn-success" onclick="generateAndDownload()">⬇ Download XML</button><span class="pending-badge">● changes pending</span></div>
+        <div class="btn-pending" id="previewBtnWrap"><button class="btn btn-secondary" onclick="showXmlPreview()">Preview XML</button><span class="pending-badge">● changes pending</span></div>
         <button class="btn btn-secondary" onclick="resetAll()">Start Over</button>
       </div>
 
@@ -788,8 +814,6 @@ damageType (empty if not a weapon),
 properties (comma-separated weapon/armor properties e.g. "reload 6, two-handed, burst fire", empty if none).
 Include every item listed in equipment tables and descriptions.
 Keep descriptions focused — omit flavour text that simply restates the item category or reiterates stats.`,
-
-
   feat: `Extract ALL feats from this PDF.
 Return a JSON array where every element has:
 name (string),
@@ -808,8 +832,6 @@ recharge (text describing when charges reset, empty if not applicable).
 Include every magic item.`
 };
 
-
-
 // ─────────────────────────────────────────────
 // Extraction
 // ─────────────────────────────────────────────
@@ -821,14 +843,13 @@ async function startExtraction() {
   document.getElementById('extractProgress').classList.remove('hidden');
   document.getElementById('reviewArea').classList.add('hidden');
   document.getElementById('extractBtn').disabled = true;
-
-  const spinner = document.getElementById('extractSpinner');
-  spinner.classList.remove('hidden');
+  document.getElementById('extractSpinner').classList.remove('hidden');
 
   extractedData = {};
   const errors = [];
   document.getElementById('extractErrors').classList.add('hidden');
   document.getElementById('extractErrors').innerHTML = '';
+  document.getElementById('progressBar').style.width = '0%';
 
   for (const type of types) {
     try {
@@ -844,7 +865,7 @@ async function startExtraction() {
   }
 
   setProgress(100, 'All done!');
-  spinner.classList.add('hidden');
+  document.getElementById('extractSpinner').classList.add('hidden');
   document.getElementById('extractBtn').disabled = false;
 
   if (errors.length) {
@@ -858,9 +879,8 @@ async function startExtraction() {
     document.getElementById('extractProgress').classList.add('hidden');
     buildReviewUI();
     document.getElementById('reviewArea').classList.remove('hidden');
+    markChanged();
   }, 800);
-
-
 }
 
 async function geminiRaw(base64, promptText) {
@@ -1139,8 +1159,6 @@ function buildFeatFields(feat, id) {
     <div class="section-label" style="margin-top:0.75rem;">Benefits</div>
     ${benefitsHtml}`;
 }
-
-
 function buildMagicFields(item, id) {
   const rarities = ['Common','Uncommon','Rare','Very Rare','Legendary','Artifact'];
   return `
@@ -1181,16 +1199,19 @@ function parseId(id) {
 function updateField(el) {
   const { type, index } = parseId(el.dataset.id);
   extractedData[type][index][el.dataset.field] = el.value;
+  flashField(el);
 }
 
 function updateFieldBool(el) {
   const { type, index } = parseId(el.dataset.id);
   extractedData[type][index][el.dataset.field] = el.checked;
+  markChanged();
 }
 
 function updateFieldArr(el) {
   const { type, index } = parseId(el.dataset.id);
   extractedData[type][index][el.dataset.field] = el.value.split(',').map(s => s.trim()).filter(Boolean);
+  flashField(el);
 }
 
 function parseFeatFullText(feat) {
@@ -1223,13 +1244,12 @@ function parseFeatFullText(feat) {
 
   return { ...feat, prerequisite: prereq, description: intro, benefits: bullets };
 }
-
-
 function updateBenefit(el) {
   const { type, index } = parseId(el.dataset.id);
   const bi = parseInt(el.dataset.field.split('.')[1]);
   if (!Array.isArray(extractedData[type][index].benefits)) extractedData[type][index].benefits = [];
   extractedData[type][index].benefits[bi] = el.value;
+  flashField(el);
 }
 
 function updateNestedField(el) {
@@ -1240,7 +1260,36 @@ function updateNestedField(el) {
   for (let i = 0; i < parts.length - 1; i++) {
     obj = obj[parts[i]];
   }
-  obj[parts[parts.length - 1]] = el.value;
+  const finalKey = parts[parts.length - 1];
+  obj[finalKey] = finalKey === 'level' ? (parseInt(el.value) || 0) : el.value;
+}
+
+
+// ─────────────────────────────────────────────
+// Change tracking
+// ─────────────────────────────────────────────
+let hasUnsavedChanges = false;
+
+function markChanged() {
+  hasUnsavedChanges = true;
+  const dw = document.getElementById('downloadBtnWrap');
+  const pw = document.getElementById('previewBtnWrap');
+  if (dw) dw.classList.add('has-changes');
+  if (pw) pw.classList.add('has-changes');
+}
+
+function clearChanged() {
+  hasUnsavedChanges = false;
+  const dw = document.getElementById('downloadBtnWrap');
+  const pw = document.getElementById('previewBtnWrap');
+  if (dw) dw.classList.remove('has-changes');
+  if (pw) pw.classList.remove('has-changes');
+}
+
+function flashField(el) {
+  el.classList.add('field-saved');
+  setTimeout(() => el.classList.remove('field-saved'), 1200);
+  markChanged();
 }
 
 // ─────────────────────────────────────────────
@@ -1267,6 +1316,7 @@ function generateXml() {
     if (!items.length) continue;
     lines.push(`\t<!-- ===== ${TYPE_LABELS[type].toUpperCase()} ===== -->`);
     for (const item of items) {
+      if (item._error) continue; // skip items that failed extraction
       if (type === 'spell') lines.push(...genSpellXml(item, source, prefix));
       if (type === 'archetype') lines.push(...genArchetypeXml(item, source, prefix));
       if (type === 'item') lines.push(...genItemXml(item, source, prefix));
@@ -1466,7 +1516,7 @@ function genFeatXml(feat, source, prefix) {
   const rules = inferFeatRules(benefits, id);
   const lines = [];
   lines.push(`\t<element name="${escAttrXml(feat.name)}" type="Feat" source="${escAttrXml(source)}" id="${id}">`);
-  if (feat.prerequisite) lines.push(`\t\t<requirements></requirements>`);
+  if (feat.prerequisite) lines.push(`\t\t<requirements><!-- Prerequisite: ${escXml(feat.prerequisite)} — add requirement IDs manually --></requirements>`);
   lines.push(`\t\t<description>`);
   if (feat.prerequisite) lines.push(`\t\t\t<p class="flavor"><em>Prerequisite: ${escXml(feat.prerequisite)}</em></p>`);
   lines.push(`\t\t\t<p>${escXml(feat.description||"")}</p>`);
@@ -1487,9 +1537,6 @@ function genFeatXml(feat, source, prefix) {
   lines.push(`\t</element>`);
   return lines;
 }
-
-
-
 
 function genMagicXml(item, source, prefix) {
   const id = `${prefix}_MAGIC_ITEM_${idify(item.name)}`;
@@ -1521,6 +1568,7 @@ function generateAndDownload() {
   a.download = `${name}.xml`;
   a.click();
   URL.revokeObjectURL(url);
+  clearChanged();
 }
 
 function showXmlPreview() {
@@ -1528,6 +1576,7 @@ function showXmlPreview() {
   wrap.classList.toggle('hidden');
   if (!wrap.classList.contains('hidden')) {
     document.getElementById('xmlPreview').textContent = generateXml();
+    clearChanged();
   }
 }
 
@@ -1542,9 +1591,13 @@ function escXml(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&l
 function escAttrXml(s) { return escXml(s).replace(/"/g,'&quot;'); }
 
 function ordinal(n) {
-  const s = ['th','st','nd','rd'];
-  const v = n % 100;
-  return s[(v-20)%10] || s[v] || s[0];
+  if (n >= 11 && n <= 13) return 'th';
+  switch (n % 10) {
+    case 1: return 'st';
+    case 2: return 'nd';
+    case 3: return 'rd';
+    default: return 'th';
+  }
 }
 
 function resetAll() {
@@ -1555,6 +1608,12 @@ function resetAll() {
   document.getElementById('uploadZone').classList.remove('hidden');
   document.getElementById('stepReview').classList.add('hidden');
   document.getElementById('reviewArea').classList.add('hidden');
+  document.getElementById('extractProgress').classList.add('hidden');
+  document.getElementById('extractErrors').classList.add('hidden');
+  document.getElementById('extractErrors').innerHTML = '';
+  document.getElementById('keyTestResult').classList.add('hidden');
+  document.getElementById('progressBar').style.width = '0%';
+  document.getElementById('xmlPreviewWrap').classList.add('hidden');
   document.getElementById('sourceName').value = '';
   checkExtractReady();
 }
