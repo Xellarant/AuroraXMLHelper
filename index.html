@@ -4,6 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Aurora XML Helper</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600&family=Crimson+Pro:ital,wght@0,300;0,400;0,600;1,300;1,400&display=swap" rel="stylesheet" />
 <style>
   :root {
@@ -502,6 +503,22 @@
     pointer-events: none;
   }
   .btn-pending.has-changes .pending-badge { display: block; }
+
+  /* ── Validation ── */
+  .validation-error {
+    border-color: var(--red-light) !important;
+    box-shadow: 0 0 0 3px rgba(192,57,43,0.15) !important;
+  }
+  .validation-badge {
+    display: inline-block;
+    background: var(--red-light);
+    color: #fff;
+    font-size: 0.65rem;
+    padding: 1px 6px;
+    border-radius: 8px;
+    margin-left: 6px;
+    font-family: 'Crimson Pro', serif;
+  }
   /* key indicator */
   .key-set { color: var(--success); font-size: 0.8rem; }
   .key-unset { color: var(--red-light); font-size: 0.8rem; }
@@ -549,7 +566,8 @@
       <p style="font-size:0.8rem; margin-top:6px; color:var(--muted);">Under 5 MB — full PDF sent directly &nbsp;·&nbsp; 5–30 MB — TOC read first to focus extraction &nbsp;·&nbsp; 30+ MB — page-range guidance recommended</p>
     </div>
 
-    <div id="fileInfo" class="alert alert-success hidden" style="margin-top:1rem; margin-bottom:0;">
+    <div id="fileSizeWarning" class="hidden" style="margin-top:0.75rem; margin-bottom:0;"></div>
+    <div id="fileInfo" class="alert alert-success hidden" style="margin-top:0.75rem; margin-bottom:0;">
       <span>📄</span>
       <div>
         <strong id="fileName"></strong>
@@ -563,8 +581,23 @@
   <div class="card" id="stepOptions">
     <div class="card-title">③ Extraction Options</div>
 
-    <label>Source Name (appears in XML)</label>
-    <input type="text" id="sourceName" placeholder="e.g. Modern Handbook" />
+    <div class="section-label" style="margin-top:0;">Source Details <span style="font-weight:400; text-transform:none; font-style:italic; font-size:0.8rem;">(auto-filled from PDF — override if needed)</span></div>
+    <div class="field-row">
+      <div>
+        <label>Source Name</label>
+        <input type="text" id="sourceName" placeholder="Auto-filled on upload" oninput="autoFillAbbr(this.value)" />
+      </div>
+      <div>
+        <label>Abbreviation <span style="font-weight:400;text-transform:none;font-style:italic;">(used in element IDs)</span></label>
+        <input type="text" id="sourceAbbr" placeholder="Auto-filled from name" style="text-transform:uppercase;" />
+      </div>
+    </div>
+    <div class="field-row">
+      <div>
+        <label>Author</label>
+        <input type="text" id="sourceAuthor" placeholder="Auto-detected during extraction" />
+      </div>
+    </div>
 
     <label>Element Types to Extract</label>
     <div class="type-grid" id="typeGrid">
@@ -582,6 +615,9 @@
       </label>
       <label class="type-check" id="chk-magic">
         <input type="checkbox" value="magic" onchange="updateTypeCheck(this)" checked /> Magic Items
+      </label>
+      <label class="type-check" id="chk-other" title="Attempt to extract anything not covered by the other types — races, classes, backgrounds, monsters, etc. Results will use a generic XML template.">
+        <input type="checkbox" value="other" onchange="updateTypeCheck(this)" /> Other <span style="font-size:0.75rem; color:var(--muted); font-style:italic;">(experimental)</span>
       </label>
     </div>
 
@@ -618,7 +654,14 @@
 
       <hr class="divider" />
       <div style="display:flex; gap:1rem; flex-wrap:wrap; align-items:center;">
-        <div class="btn-pending" id="downloadBtnWrap"><button class="btn btn-success" onclick="generateAndDownloadRefreshPreview()">⬇ Download XML</button><span class="pending-badge">● changes pending</span></div>
+        <div class="btn-pending" id="downloadBtnWrap">
+          <button class="btn btn-success" onclick="downloadZip()">⬇ Download ZIP</button>
+          <span class="pending-badge">● changes pending</span>
+        </div>
+        <div class="btn-pending" id="downloadSingleWrap">
+          <button class="btn btn-secondary" onclick="generateAndDownloadRefreshPreview()">⬇ Single XML</button>
+          <span class="pending-badge">● changes pending</span>
+        </div>
         <div class="btn-pending" id="previewBtnWrap"><button class="btn btn-secondary" onclick="showXmlPreview()">Preview XML</button><span class="pending-badge">● changes pending</span></div>
         <button class="btn btn-secondary" onclick="resetAll()">Start Over</button>
       </div>
@@ -637,6 +680,7 @@
 // ─────────────────────────────────────────────
 let pdfFile = null;
 let extractedData = {}; // { spell: [...], archetype: [...], item: [...], feat: [...], magic: [...] }
+let skippedItems = []; // items filtered out for being < 80% complete
 let apiKey = '';
 
 const TYPE_LABELS = {
@@ -644,7 +688,8 @@ const TYPE_LABELS = {
   archetype: 'Subclasses',
   item: 'Items / Equipment',
   feat: 'Feats',
-  magic: 'Magic Items'
+  magic: 'Magic Items',
+  other: 'Other'
 };
 
 // ─────────────────────────────────────────────
@@ -761,9 +806,15 @@ function setFile(f) {
   } else {
     warn.classList.add('hidden');
   }
-  if (!document.getElementById('sourceName').value) {
-    document.getElementById('sourceName').value = f.name.replace(/\.pdf$/i, '').replace(/[_-]/g, ' ');
-  }
+  // Always pre-fill from filename; user can override afterwards
+  const nameVal = f.name.replace(/\.pdf$/i, '').replace(/[_-]/g, ' ').trim();
+  document.getElementById('sourceName').value = nameVal;
+  // Reset user-edited flag so abbr auto-fills fresh for this file
+  const abbrEl = document.getElementById('sourceAbbr');
+  delete abbrEl.dataset.userEdited;
+  autoFillAbbr(nameVal);
+  // Clear author so it gets re-detected for this file
+  document.getElementById('sourceAuthor').value = '';
   checkExtractReady();
 }
 
@@ -771,7 +822,7 @@ function clearFile() {
   pdfFile = null;
   document.getElementById('pdfFile').value = '';
   document.getElementById('fileInfo').classList.add('hidden');
-  document.getElementById('fileSizeWarning').classList.add('hidden');
+  document.getElementById('fileSizeWarning')?.classList.add('hidden');
   document.getElementById('uploadZone').classList.remove('hidden');
   checkExtractReady();
 }
@@ -844,7 +895,14 @@ requiresAttunement (bool),
 description (complete full text including all properties, charges, and effects),
 charges (integer, 0 if none),
 recharge (text describing when charges reset, empty if not applicable).
-Include every magic item.`
+Include every magic item.`,
+
+  other: `Extract ALL elements from this PDF that do not fit into spells, subclasses, equipment, feats, or magic items. This includes things like races, classes, backgrounds, companions, vehicles, monsters, or any other custom content.
+Return a JSON array where every element has:
+name (string),
+type (string — the specific element type, e.g. "Race", "Class", "Background", "Monster"),
+description (complete full text of the element including all traits, features, and mechanics).
+Include every such element. If nothing of this kind exists in the PDF, return an empty array.`
 };
 
 
@@ -866,19 +924,18 @@ Return ONLY the JSON object. If the PDF has no table of contents, return {}.`;
 async function discoverPageRanges(base64, progressCallback) {
   progressCallback('Reading table of contents...', 0.05);
   try {
-    // TOC call does NOT use JSON mode — it's a small response and we want flexibility
     const body = {
       contents: [{ parts: [
         { inline_data: { mime_type: 'application/pdf', data: base64 } },
         { text: TOC_PROMPT }
       ]}],
-      generationConfig: { temperature: 0.1, maxOutputTokens: 512 }
+      generationConfig: { temperature: 0.1, maxOutputTokens: 1024, response_mime_type: 'application/json' }
     };
     const resp = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
       { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
     );
-    if (!resp.ok) return {};
+    if (!resp.ok) { console.warn('TOC HTTP error', resp.status); return {}; }
     const data = await resp.json();
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
     const parsed = safeParseJson(text);
@@ -886,12 +943,43 @@ async function discoverPageRanges(base64, progressCallback) {
       console.log('TOC discovered:', parsed);
       return parsed;
     }
+    console.warn('TOC returned unexpected shape:', parsed);
   } catch(e) {
     console.warn('TOC read failed, will use full PDF:', e.message);
   }
   return {};
 }
 
+
+
+async function detectSourceMeta(base64) {
+  try {
+    const resp = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents: [{ parts: [
+          { inline_data: { mime_type: 'application/pdf', data: base64 } },
+          { text: 'Read the cover page or title page of this PDF. Return ONLY a JSON object with exactly two keys: "title" (the full proper title of the supplement) and "author" (the author or creator name, comma-separated if multiple, empty string if unknown).' }
+        ]}], generationConfig: { maxOutputTokens: 120, response_mime_type: 'application/json' } }) }
+    );
+    if (!resp.ok) return;
+    const data = await resp.json();
+    const text = (data.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();
+    const meta = safeParseJson(text);
+    if (!meta || typeof meta !== 'object' || Array.isArray(meta)) return;
+    if (meta.title && meta.title.trim()) {
+      document.getElementById('sourceName').value = meta.title.trim();
+      const abbrEl = document.getElementById('sourceAbbr');
+      if (!abbrEl.dataset.userEdited) autoFillAbbr(meta.title.trim());
+    }
+    if (meta.author && meta.author.trim() && meta.author !== 'Unknown') {
+      document.getElementById('sourceAuthor').value = meta.author.trim();
+    }
+    console.log('Source meta detected:', meta);
+  } catch(e) {
+    console.warn('Source meta detection failed:', e.message);
+  }
+}
 
 // ─────────────────────────────────────────────
 // Extraction
@@ -908,6 +996,7 @@ async function startExtraction() {
 
   extractedData = {};
   discoveredPageRanges = {};
+  skippedItems = [];
   const errors = [];
   document.getElementById('extractErrors').classList.add('hidden');
   document.getElementById('extractErrors').innerHTML = '';
@@ -920,6 +1009,8 @@ async function startExtraction() {
     setProgress(3, 'Reading table of contents...');
     const base64 = await fileToBase64(pdfFile);
     discoveredPageRanges = await discoverPageRanges(base64, setProgress);
+    // Detect title and author from the PDF cover/title page
+    await detectSourceMeta(base64);
     const found = Object.keys(discoveredPageRanges);
     if (found.length > 0) {
       const rangeList = found.map(k => `${TYPE_LABELS[k] || k}: p.${discoveredPageRanges[k]}`).join(', ');
@@ -929,6 +1020,12 @@ async function startExtraction() {
       setProgress(8, 'No TOC found — will search whole PDF');
       await new Promise(r => setTimeout(r, 400));
     }
+  }
+
+  // For small PDFs that skipped the TOC pass: detect title + author from cover page
+  {
+    const base64small = await fileToBase64(pdfFile);
+    await detectSourceMeta(base64small);
   }
 
   const typeCount = types.length;
@@ -949,14 +1046,22 @@ async function startExtraction() {
     }
   }
 
+  // Filter incomplete elements and collect skipped report
+  skippedItems = filterIncomplete();
+
   setProgress(100, 'All done!');
   document.getElementById('extractSpinner').classList.add('hidden');
   document.getElementById('extractBtn').disabled = false;
 
-  if (errors.length) {
+  const bannerParts = [];
+  if (errors.length) bannerParts.push(...errors.map(e => '• ' + e));
+  if (skippedItems.length) {
+    bannerParts.push(`• ${skippedItems.length} element(s) skipped — below 80% complete (see skipped-elements.txt in ZIP)`);
+  }
+  if (bannerParts.length) {
     const errEl = document.getElementById('extractErrors');
-    errEl.className = 'alert alert-warning';
-    errEl.innerHTML = '<strong>Notes:</strong><br>' + errors.map(e => '• ' + e).join('<br>');
+    errEl.className = skippedItems.length && !errors.length ? 'alert alert-info' : 'alert alert-warning';
+    errEl.innerHTML = '<strong>Notes:</strong><br>' + bannerParts.join('<br>');
     errEl.classList.remove('hidden');
   }
 
@@ -1126,7 +1231,8 @@ function buildReviewUI() {
     const panel = document.createElement('div');
     panel.className = 'tab-panel' + (first ? ' active' : '');
     panel.id = panelId;
-    panel.innerHTML = buildPanelHTML(type, items);
+    const searchBar = `<input type="text" class="panel-search" placeholder="Search ${TYPE_LABELS[type] || type}..." oninput="filterPanel('${type}', this.value)" />`;
+    panel.innerHTML = searchBar + buildPanelHTML(type, items);
     panelsEl.appendChild(panel);
 
     first = false;
@@ -1159,6 +1265,29 @@ function buildPanelHTML(type, items) {
       </div>
     </div>`;
   }).join('');
+}
+
+
+function filterPanel(type, query) {
+  const q = query.trim().toLowerCase();
+  const panel = document.getElementById(`panel-${type}`);
+  const cards = panel.querySelectorAll('.element-card');
+  let visible = 0;
+  cards.forEach(card => {
+    const name = (card.querySelector('.element-card-header h3')?.textContent || '').toLowerCase();
+    const badge = (card.querySelector('.element-type-badge')?.textContent || '').toLowerCase();
+    const matches = !q || name.includes(q) || badge.includes(q);
+    card.classList.toggle('card-hidden-by-search', !matches);
+    if (matches) visible++;
+  });
+  let emptyEl = panel.querySelector('.search-empty');
+  if (!emptyEl) {
+    emptyEl = document.createElement('p');
+    emptyEl.className = 'search-empty';
+    panel.appendChild(emptyEl);
+  }
+  emptyEl.style.display = visible === 0 ? 'block' : 'none';
+  emptyEl.textContent = visible === 0 ? `No results for "${query}"` : '';
 }
 
 function toggleCard(type, i) {
@@ -1233,8 +1362,11 @@ function buildArchetypeFields(a, id) {
       </select>
     </div>
     <div><label>Subclass Description</label><textarea rows="3" data-field="description" data-id="${id}" onchange="updateField(this)">${escHtml(a.description||'')}</textarea></div>
-    <div class="section-label">Features</div>
-    ${(a.features||[]).map((f,fi) => `
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:0.5rem;">
+      <span class="section-label" style="margin:0; border:none; padding:0;">Features</span>
+      <button class="btn btn-secondary" style="font-size:0.7rem; padding:0.3rem 0.75rem;" onclick="addFeature('${id}')">+ Add Feature</button>
+    </div>
+    <div id="features-${id}">${(a.features||[]).map((f,fi) => `
       <div style="border:1px solid var(--border-light); border-radius:3px; padding:0.75rem; margin-bottom:0.75rem; background:var(--parchment);">
         <div class="field-row">
           <div><label>Feature Name</label><input type="text" value="${escAttr(f.name)}" data-field="features.${fi}.name" data-id="${id}" onchange="updateNestedField(this)" /></div>
@@ -1245,7 +1377,7 @@ function buildArchetypeFields(a, id) {
           <div><label>Usage (e.g. 1/Short Rest)</label><input type="text" value="${escAttr(f.usage||'')}" data-field="features.${fi}.usage" data-id="${id}" onchange="updateNestedField(this)" /></div>
         </div>
         <div><label>Description</label><textarea rows="3" data-field="features.${fi}.description" data-id="${id}" onchange="updateNestedField(this)">${escHtml(f.description||'')}</textarea></div>
-      </div>`).join('')}`;
+      </div>`).join('')}</div>`;
 }
 
 function buildItemFields(item, id) {
@@ -1285,8 +1417,11 @@ function buildFeatFields(feat, id) {
       <div><label>Prerequisite (leave blank if none)</label><input type="text" value="${escAttr(feat.prerequisite||'')}" data-field="prerequisite" data-id="${id}" onchange="updateField(this)" /></div>
     </div>
     <div><label>Description (opening sentence)</label><textarea rows="2" data-field="description" data-id="${id}" onchange="updateField(this)">${escHtml(feat.description||'')}</textarea></div>
-    <div class="section-label" style="margin-top:0.75rem;">Benefits</div>
-    ${benefitsHtml}`;
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-top:0.75rem; margin-bottom:0.5rem;">
+      <span class="section-label" style="margin:0; border:none; padding:0;">Benefits</span>
+      <button class="btn btn-secondary" style="font-size:0.7rem; padding:0.3rem 0.75rem;" onclick="addBenefit('${id}')">+ Add Benefit</button>
+    </div>
+    <div id="benefits-${id}">${benefitsHtml}</div>`;
 }
 function buildMagicFields(item, id) {
   const rarities = ['Common','Uncommon','Rare','Very Rare','Legendary','Artifact'];
@@ -1401,18 +1536,18 @@ let hasUnsavedChanges = false;
 
 function markChanged() {
   hasUnsavedChanges = true;
-  const dw = document.getElementById('downloadBtnWrap');
-  const pw = document.getElementById('previewBtnWrap');
-  if (dw) dw.classList.add('has-changes');
-  if (pw) pw.classList.add('has-changes');
+  ['downloadBtnWrap','downloadSingleWrap','previewBtnWrap'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.add('has-changes');
+  });
 }
 
 function clearChanged() {
   hasUnsavedChanges = false;
-  const dw = document.getElementById('downloadBtnWrap');
-  const pw = document.getElementById('previewBtnWrap');
-  if (dw) dw.classList.remove('has-changes');
-  if (pw) pw.classList.remove('has-changes');
+  ['downloadBtnWrap','downloadSingleWrap','previewBtnWrap'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.remove('has-changes');
+  });
 }
 
 function flashField(el) {
@@ -1421,12 +1556,470 @@ function flashField(el) {
   markChanged();
 }
 
+
+function addBenefit(id) {
+  const { type, index } = parseId(id);
+  if (!Array.isArray(extractedData[type][index].benefits)) extractedData[type][index].benefits = [];
+  const benefits = extractedData[type][index].benefits;
+  const bi = benefits.length;
+  benefits.push('');
+  // Append a new textarea to the benefits div
+  const container = document.getElementById(`benefits-${id}`);
+  if (container) {
+    const div = document.createElement('div');
+    div.style.cssText = 'display:flex; gap:8px; align-items:flex-start; margin-bottom:6px;';
+    div.innerHTML = `<span style="color:var(--gold); font-size:1.1rem; line-height:1.5; flex-shrink:0;">•</span>
+      <textarea rows="2" style="flex:1; margin-bottom:0;" data-field="benefits.${bi}" data-id="${id}" onchange="updateBenefit(this)"></textarea>`;
+    container.appendChild(div);
+    div.querySelector('textarea').focus();
+  }
+  markChanged();
+}
+
+function addFeature(id) {
+  const { type, index } = parseId(id);
+  if (!Array.isArray(extractedData[type][index].features)) extractedData[type][index].features = [];
+  const features = extractedData[type][index].features;
+  const fi = features.length;
+  features.push({ name: '', level: 1, action: '', usage: '', description: '' });
+  // Append a new feature block
+  const container = document.getElementById(`features-${id}`);
+  if (container) {
+    const div = document.createElement('div');
+    div.style.cssText = 'border:1px solid var(--border-light); border-radius:3px; padding:0.75rem; margin-bottom:0.75rem; background:var(--parchment);';
+    div.innerHTML = `
+      <div class="field-row">
+        <div><label>Feature Name</label><input type="text" value="" data-field="features.${fi}.name" data-id="${id}" onchange="updateNestedField(this)" /></div>
+        <div><label>Level</label><input type="text" value="1" data-field="features.${fi}.level" data-id="${id}" onchange="updateNestedField(this)" /></div>
+      </div>
+      <div class="field-row">
+        <div><label>Action (e.g. Bonus Action)</label><input type="text" value="" data-field="features.${fi}.action" data-id="${id}" onchange="updateNestedField(this)" /></div>
+        <div><label>Usage (e.g. 1/Short Rest)</label><input type="text" value="" data-field="features.${fi}.usage" data-id="${id}" onchange="updateNestedField(this)" /></div>
+      </div>
+      <div><label>Description</label><textarea rows="3" data-field="features.${fi}.description" data-id="${id}" onchange="updateNestedField(this)"></textarea></div>`;
+    container.appendChild(div);
+    div.querySelector('input').focus();
+  }
+  markChanged();
+}
+
 // ─────────────────────────────────────────────
 // XML Generation
 // ─────────────────────────────────────────────
+
+
+
+// ─────────────────────────────────────────────
+// Completeness checking
+// ─────────────────────────────────────────────
+
+// Returns { keep: bool, missing: string[] } for each item
+function checkCompleteness(item, type) {
+  const missing = [];
+
+  const has = (v) => v !== undefined && v !== null && String(v).trim() !== '';
+
+  if (type === 'spell') {
+    const required = [
+      ['name',        'name'],
+      ['level',       'level'],
+      ['school',      'school'],
+      ['castingTime', 'casting time'],
+      ['range',       'range'],
+      ['duration',    'duration'],
+      ['description', 'description'],
+    ];
+    for (const [field, label] of required) {
+      if (!has(item[field])) missing.push(label);
+    }
+    // level=0 is valid (cantrip) — don't flag it
+    if (item.level === 0 || item.level === '0') {
+      const idx = missing.indexOf('level');
+      if (idx !== -1) missing.splice(idx, 1);
+    }
+  }
+
+  else if (type === 'archetype') {
+    if (!has(item.name))    missing.push('name');
+    if (!has(item.class))   missing.push('class');
+    if (!has(item.supports)) missing.push('supports');
+    if (!Array.isArray(item.features) || item.features.length === 0) {
+      missing.push('features');
+    } else {
+      const hasUsableFeature = item.features.some(f => has(f.name) && has(f.description));
+      if (!hasUsableFeature) missing.push('feature descriptions');
+    }
+  }
+
+  else if (type === 'item') {
+    if (!has(item.name))        missing.push('name');
+    if (!has(item.category))    missing.push('category');
+    if (!has(item.description)) missing.push('description');
+  }
+
+  else if (type === 'feat') {
+    if (!has(item.name)) missing.push('name');
+    const hasBenefits = Array.isArray(item.benefits) && item.benefits.some(b => has(b));
+    const hasDesc = has(item.description);
+    if (!hasBenefits && !hasDesc) missing.push('description or benefits');
+  }
+
+  else if (type === 'magic') {
+    if (!has(item.name))        missing.push('name');
+    if (!has(item.type))        missing.push('type');
+    if (!has(item.rarity))      missing.push('rarity');
+    if (!has(item.description)) missing.push('description');
+  }
+
+  else {
+    // generic / other
+    if (!has(item.name))        missing.push('name');
+    if (!has(item.description)) missing.push('description');
+  }
+
+  const totalFields = missing.length + (type === 'spell' ? 7 : type === 'archetype' ? 4 : type === 'item' ? 3 : type === 'feat' ? 2 : type === 'magic' ? 4 : 2);
+  const completeness = (totalFields - missing.length) / totalFields;
+  const keep = completeness >= 0.8;
+
+  return { keep, missing, completeness };
+}
+
+// Runs completeness check over all extracted data, mutates extractedData in place,
+// returns array of skipped items for reporting
+function filterIncomplete() {
+  const skipped = [];
+
+  for (const [type, items] of Object.entries(extractedData)) {
+    const kept = [];
+    for (const item of items) {
+      if (item._error) { kept.push(item); continue; }
+      const { keep, missing, completeness } = checkCompleteness(item, type);
+      if (keep) {
+        kept.push(item);
+      } else {
+        skipped.push({
+          name: item.name || '(unnamed)',
+          type: TYPE_LABELS[type] || type,
+          missing,
+          completeness: Math.round(completeness * 100),
+        });
+      }
+    }
+    extractedData[type] = kept;
+  }
+
+  return skipped;
+}
+
+function generateSkippedReport(skipped, sourceName) {
+  if (!skipped.length) return null;
+  const lines = [];
+  lines.push(`Skipped Elements Report — ${sourceName}`);
+  lines.push(`Generated: ${new Date().toLocaleString()}`);
+  lines.push(`${'─'.repeat(60)}`);
+  lines.push(`${skipped.length} element(s) were skipped due to insufficient data (below 80% complete).`);
+  lines.push('');
+  const byType = {};
+  for (const s of skipped) {
+    if (!byType[s.type]) byType[s.type] = [];
+    byType[s.type].push(s);
+  }
+  for (const [type, items] of Object.entries(byType)) {
+    lines.push(`${type} (${items.length})`);
+    lines.push('─'.repeat(40));
+    for (const s of items) {
+      lines.push(`  • ${s.name} — ${s.completeness}% complete`);
+      lines.push(`    Missing: ${s.missing.join(', ')}`);
+    }
+    lines.push('');
+  }
+  return lines.join('\n');
+}
+
+
+// ─────────────────────────────────────────────
+// Validation
+// ─────────────────────────────────────────────
+function validateAll() {
+  const issues = [];
+  for (const [type, items] of Object.entries(extractedData)) {
+    items.forEach((item, i) => {
+      if (item._error) return;
+      const label = `${TYPE_LABELS[type] || type} #${i+1}`;
+      const name = (item.name || '').trim();
+
+      if (!name) issues.push({ type, i, field: 'name', msg: `${label}: name is blank` });
+
+      if (type === 'spell') {
+        const lvl = parseInt(item.level);
+        if (isNaN(lvl) || lvl < 0 || lvl > 9)
+          issues.push({ type, i, field: 'level', msg: `${label} (${name}): level must be 0-9` });
+        if (!item.school)
+          issues.push({ type, i, field: 'school', msg: `${label} (${name}): school is blank` });
+        if (!item.description)
+          issues.push({ type, i, field: 'description', msg: `${label} (${name}): description is blank` });
+      }
+
+      if (type === 'archetype') {
+        if (!item.class)
+          issues.push({ type, i, field: 'class', msg: `${label} (${name}): class is blank` });
+        if (!item.features || item.features.length === 0)
+          issues.push({ type, i, field: null, msg: `${label} (${name}): has no features` });
+        (item.features || []).forEach((f, fi) => {
+          if (!f.name) issues.push({ type, i, field: null, msg: `${label} (${name}): feature #${fi+1} has no name` });
+          const fl = parseInt(f.level);
+          if (isNaN(fl) || fl < 1 || fl > 20)
+            issues.push({ type, i, field: null, msg: `${label} (${name}): feature "${f.name}" has invalid level` });
+        });
+        const fnames = (item.features||[]).map(f => f.name);
+        fnames.forEach((fn, fi) => {
+          if (fn && fnames.indexOf(fn) !== fi)
+            issues.push({ type, i, field: null, msg: `${label} (${name}): duplicate feature name "${fn}"` });
+        });
+      }
+
+      if (type === 'feat') {
+        if (!item.benefits || item.benefits.length === 0)
+          issues.push({ type, i, field: null, msg: `${label} (${name}): has no benefits` });
+      }
+
+      // Duplicate name check within same type
+      const sameType = extractedData[type];
+      const firstIdx = sameType.findIndex(x => (x.name||'').trim() === name && !x._error);
+      if (firstIdx !== -1 && firstIdx < i && name)
+        issues.push({ type, i, field: 'name', msg: `${label}: duplicate name "${name}" will produce duplicate XML IDs` });
+    });
+  }
+  return issues;
+}
+
+function showValidationResult(issues) {
+  document.querySelectorAll('.validation-error').forEach(el => el.classList.remove('validation-error'));
+  document.querySelectorAll('.validation-badge').forEach(el => el.remove());
+
+  if (issues.length === 0) return true;
+
+  issues.forEach(({ type, i, field }) => {
+    const header = document.querySelector(`#card-${type}-${i} .element-card-header h3`);
+    if (header && !header.querySelector('.validation-badge')) {
+      header.insertAdjacentHTML('beforeend', '<span class="validation-badge">!</span>');
+    }
+    const body = document.getElementById(`body-${type}-${i}`);
+    if (body) body.classList.add('open');
+    if (field) {
+      const el = document.querySelector(`[data-id="${type}-${i}"][data-field="${field}"]`);
+      if (el) el.classList.add('validation-error');
+    }
+  });
+
+  const errEl = document.getElementById('extractErrors');
+  errEl.className = 'alert alert-error';
+  errEl.innerHTML = `<strong>Warning: ${issues.length} issue${issues.length > 1 ? 's' : ''} found — review before downloading:</strong><br>` +
+    issues.slice(0, 8).map(x => `• ${x.msg}`).join('<br>') +
+    (issues.length > 8 ? `<br><em>...and ${issues.length - 8} more</em>` : '');
+  errEl.classList.remove('hidden');
+  errEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+  return false;
+}
+
+// ─────────────────────────────────────────────
+// Source metadata helpers
+// ─────────────────────────────────────────────
+function getSourceMeta() {
+  const name   = document.getElementById('sourceName').value.trim() || 'Homebrew';
+  const abbr   = document.getElementById('sourceAbbr').value.trim().toUpperCase()
+                   || name.split(/\s+/).map(w => w[0]).join('').toUpperCase() || 'HB';
+  const author = document.getElementById('sourceAuthor').value.trim() || 'Homebrew';
+  const slug   = name.toLowerCase().replace(/\s+/g,'_');
+  const prefix = 'ID_' + abbr.replace(/[^A-Z0-9]/g,'_');
+  return { name, abbr, author, slug, prefix };
+}
+
+function autoFillAbbr(nameVal) {
+  const abbrEl = document.getElementById('sourceAbbr');
+  if (abbrEl && !abbrEl.dataset.userEdited) {
+    abbrEl.value = nameVal.split(/\s+/).map(w => w[0] || '').join('').toUpperCase().slice(0,6);
+  }
+}
+
+// Mark abbreviation as user-edited so auto-fill stops overwriting
+document.addEventListener('DOMContentLoaded', () => {
+  const abbrEl = document.getElementById('sourceAbbr');
+  if (abbrEl) abbrEl.addEventListener('input', () => { abbrEl.dataset.userEdited = '1'; });
+});
+
+// ─────────────────────────────────────────────
+// Generic element XML generator (fallback for unknown types)
+// ─────────────────────────────────────────────
+function genGenericXml(item, type, source, prefix) {
+  const typeName = type.charAt(0).toUpperCase() + type.slice(1);
+  const id = `${prefix}_${idify(typeName)}_${idify(item.name || 'UNNAMED')}`;
+  const lines = [];
+  lines.push(`\t<element name="${escAttrXml(item.name || '')}" type="${escAttrXml(typeName)}" source="${escAttrXml(source)}" id="${id}">`);
+  lines.push(`\t\t<description>`);
+  if (item.description) lines.push(`\t\t\t<p>${escXml(item.description)}</p>`);
+  lines.push(`\t\t</description>`);
+  lines.push(`\t\t<sheet>`);
+  lines.push(`\t\t\t<description>${escXml(item.description || '')}</description>`);
+  lines.push(`\t\t</sheet>`);
+  lines.push(`\t\t<rules />`);
+  lines.push(`\t</element>`);
+  return lines;
+}
+
+// ─────────────────────────────────────────────
+// Per-type file names and generators
+// ─────────────────────────────────────────────
+const FILE_SLUGS = {
+  spell:     'spells',
+  archetype: 'archetypes',
+  item:      'items',
+  feat:      'feats',
+  magic:     'magic-items',
+};
+
+function getFileName(type, abbr) {
+  const base = FILE_SLUGS[type]
+    || type.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  const a = (abbr || '').toLowerCase();
+  return a ? `${a}-${base}.xml` : `${base}.xml`;
+}
+
+function dispatchGen(item, type, source, prefix) {
+  if (item._error) return [];
+  if (type === 'spell')     return genSpellXml(item, source, prefix);
+  if (type === 'archetype') return genArchetypeXml(item, source, prefix);
+  if (type === 'item')      return genItemXml(item, source, prefix);
+  if (type === 'feat')      return genFeatXml(item, source, prefix);
+  if (type === 'magic')     return genMagicXml(item, source, prefix);
+  // 'other' uses the element's own type field (e.g. 'Race', 'Class') for the XML type attribute
+  const resolvedType = (type === 'other' && item.type) ? item.type : type;
+  return genGenericXml(item, resolvedType, source, prefix);
+}
+
+// ─────────────────────────────────────────────
+// Source XML generator
+// ─────────────────────────────────────────────
+function genSourceXml(meta, fileList) {
+  const today = new Date();
+  const release = `${today.getFullYear()}${String(today.getMonth()+1).padStart(2,'0')}${String(today.getDate()).padStart(2,'0')}`;
+  const lines = [];
+  lines.push(`<?xml version="1.0" encoding="utf-8" ?>`);
+  lines.push(`<elements>`);
+  lines.push(`\t<info>`);
+  lines.push(`\t\t<update version="0.1.0">`);
+  lines.push(`\t\t\t<file name="source.xml" url="" />`);
+  fileList.forEach(f => lines.push(`\t\t\t<file name="${escAttrXml(f)}" url="" />`));
+  lines.push(`\t\t</update>`);
+  lines.push(`\t</info>`);
+  lines.push('');
+  lines.push(`\t<element name="${escAttrXml(meta.name)}" type="Source" source="${escAttrXml(meta.name)}" id="${meta.prefix}_SOURCE_${idify(meta.name)}">`);
+  lines.push(`\t\t<description>`);
+  lines.push(`\t\t\t<p>Elements from ${escXml(meta.name)}.</p>`);
+  lines.push(`\t\t</description>`);
+  lines.push(`\t\t<setters>`);
+  lines.push(`\t\t\t<set name="abbreviation">${escXml(meta.abbr)}</set>`);
+  lines.push(`\t\t\t<set name="url"></set>`);
+  lines.push(`\t\t\t<set name="author" abbreviation="${escAttrXml(meta.abbr)}" url="">${escXml(meta.author)}</set>`);
+  lines.push(`\t\t\t<set name="homebrew">true</set>`);
+  lines.push(`\t\t\t<set name="release">${release}</set>`);
+  lines.push(`\t\t</setters>`);
+  lines.push(`\t</element>`);
+  lines.push('');
+  lines.push(`</elements>`);
+  return lines.join('\n');
+}
+
+// ─────────────────────────────────────────────
+// Per-type XML file generator
+// ─────────────────────────────────────────────
+function genTypeXml(type, items, meta) {
+  const { name: source, slug, prefix, abbr } = meta;
+  const fileName = getFileName(type, abbr);
+  const lines = [];
+  lines.push(`<?xml version="1.0" encoding="utf-8" ?>`);
+  lines.push(`<elements>`);
+  lines.push(`\t<info>`);
+  lines.push(`\t\t<n>${escXml(source)} — ${escXml(TYPE_LABELS[type] || type)}</n>`);
+  lines.push(`\t\t<update version="0.1.0">`);
+  lines.push(`\t\t\t<file name="${escAttrXml(fileName)}" url="" />`);
+  lines.push(`\t\t</update>`);
+  lines.push(`\t</info>`);
+  lines.push('');
+  for (const item of items) {
+    const elLines = dispatchGen(item, type, source, prefix);
+    if (elLines.length) { lines.push(...elLines); lines.push(''); }
+  }
+  lines.push(`</elements>`);
+  return lines.join('\n');
+}
+
+// ─────────────────────────────────────────────
+// ZIP download
+// ─────────────────────────────────────────────
+async function downloadZip() {
+  const meta = getSourceMeta();
+  const issues = validateAll();
+  if (!showValidationResult(issues)) {
+    if (!confirm(`There are ${issues.length} validation issue(s). Download anyway?`)) return;
+  }
+  const zip = new JSZip();
+  const folder = zip.folder(meta.slug);
+  const fileList = [];
+
+  for (const [type, items] of Object.entries(extractedData)) {
+    if (!items.length) continue;
+    if (type === 'other') {
+      // Group by the resolved type Gemini detected (e.g. 'Race', 'Background')
+      const groups = {};
+      for (const item of items) {
+        const resolvedType = (item.type || 'other').trim();
+        if (!groups[resolvedType]) groups[resolvedType] = [];
+        groups[resolvedType].push(item);
+      }
+      for (const [resolvedType, groupItems] of Object.entries(groups)) {
+        const fileName = getFileName(resolvedType, meta.abbr);
+        fileList.push(fileName);
+        folder.file(fileName, genTypeXml(resolvedType, groupItems, meta));
+      }
+    } else {
+      const fileName = getFileName(type, meta.abbr);
+      fileList.push(fileName);
+      folder.file(fileName, genTypeXml(type, items, meta));
+    }
+  }
+
+  // Include skipped elements report if any were filtered
+  const skippedReport = generateSkippedReport(skippedItems, meta.name);
+  if (skippedReport) {
+    folder.file('skipped-elements.txt', skippedReport);
+  }
+
+  // source.xml references all other files
+  folder.file('source.xml', genSourceXml(meta, fileList));
+
+  const blob = await zip.generateAsync({ type: 'blob' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${meta.slug}.zip`;
+  a.click();
+  URL.revokeObjectURL(url);
+  clearChanged();
+
+  // Refresh preview if open
+  const wrap = document.getElementById('xmlPreviewWrap');
+  if (!wrap.classList.contains('hidden')) {
+    document.getElementById('xmlPreview').textContent = generateXml();
+  }
+}
+
+
 function generateXml() {
-  const source = escXml(document.getElementById('sourceName').value || 'Homebrew');
-  const prefix = 'ID_' + source.toUpperCase().replace(/[^A-Z0-9]/g, '_');
+  // Single-file mode: all types combined in one XML
+  const meta = getSourceMeta();
+  const { name: source, prefix } = meta;
   const lines = [];
 
   lines.push(`<?xml version="1.0" encoding="utf-8" ?>`);
@@ -1434,24 +2027,22 @@ function generateXml() {
   lines.push(`\t<info>`);
   lines.push(`\t\t<n>${escXml(source)}</n>`);
   lines.push(`\t\t<description>Elements extracted from ${escXml(source)}.</description>`);
-  lines.push(`\t\t<author url="">Homebrew</author>`);
+  lines.push(`\t\t<author url="">${escXml(meta.author)}</author>`);
   lines.push(`\t\t<update version="0.1.0">`);
-  lines.push(`\t\t\t<file name="${escAttrXml(source.toLowerCase().replace(/\s+/g,'_'))}.xml" url="" />`);
+  lines.push(`\t\t\t<file name="${escAttrXml(meta.slug)}.xml" url="" />`);
   lines.push(`\t\t</update>`);
   lines.push(`\t</info>`);
   lines.push('');
 
   for (const [type, items] of Object.entries(extractedData)) {
     if (!items.length) continue;
-    lines.push(`\t<!-- ===== ${TYPE_LABELS[type].toUpperCase()} ===== -->`);
+    const sectionLabel = type === 'other'
+      ? [...new Set(items.map(i => i.type || 'Other').filter(Boolean))].join(', ').toUpperCase()
+      : (TYPE_LABELS[type] || type).toUpperCase();
+    lines.push(`\t<!-- ===== ${sectionLabel} ===== -->`);
     for (const item of items) {
-      if (item._error) continue; // skip items that failed extraction
-      if (type === 'spell') lines.push(...genSpellXml(item, source, prefix));
-      if (type === 'archetype') lines.push(...genArchetypeXml(item, source, prefix));
-      if (type === 'item') lines.push(...genItemXml(item, source, prefix));
-      if (type === 'feat') lines.push(...genFeatXml(item, source, prefix));
-      if (type === 'magic') lines.push(...genMagicXml(item, source, prefix));
-      lines.push('');
+      const elLines = dispatchGen(item, type, source, prefix);
+      if (elLines.length) { lines.push(...elLines); lines.push(''); }
     }
   }
 
@@ -1688,13 +2279,17 @@ function genMagicXml(item, source, prefix) {
 // Download & Preview
 // ─────────────────────────────────────────────
 function generateAndDownload() {
+  const meta = getSourceMeta();
+  const issues = validateAll();
+  if (!showValidationResult(issues)) {
+    if (!confirm(`There are ${issues.length} validation issue(s). Download anyway?`)) return;
+  }
   const xml = generateXml();
   const blob = new Blob([xml], { type: 'application/xml' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  const name = (document.getElementById('sourceName').value || 'homebrew').toLowerCase().replace(/\s+/g,'_');
   a.href = url;
-  a.download = `${name}.xml`;
+  a.download = `${meta.slug}.xml`;
   a.click();
   URL.revokeObjectURL(url);
   clearChanged();
@@ -1743,6 +2338,7 @@ function ordinal(n) {
 function resetAll() {
   extractedData = {};
   discoveredPageRanges = {};
+  skippedItems = [];
   pdfFile = null;
   document.getElementById('pdfFile').value = '';
   document.getElementById('fileInfo').classList.add('hidden');
@@ -1757,6 +2353,8 @@ function resetAll() {
   document.getElementById('progressBar').style.width = '0%';
   document.getElementById('xmlPreviewWrap').classList.add('hidden');
   document.getElementById('sourceName').value = '';
+  document.getElementById('sourceAbbr').value = '';
+  document.getElementById('sourceAuthor').value = '';
   document.getElementById('pageRange').value = '';
   clearChanged();
   checkExtractReady();
