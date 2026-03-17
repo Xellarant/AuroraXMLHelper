@@ -1853,18 +1853,42 @@ document.addEventListener('DOMContentLoaded', () => {
 // Generic element XML generator (fallback for unknown types)
 // ─────────────────────────────────────────────
 function genGenericXml(item, type, source, prefix) {
-  const typeName = type.charAt(0).toUpperCase() + type.slice(1);
-  const id = `${prefix}_${idify(typeName)}_${idify(item.name || 'UNNAMED')}`;
+  const typeName = type.charAt(0).toUpperCase() + type.slice(1).toLowerCase();
+  const typeSegment = idify(type); // uppercase, underscores only
+  const id = `${prefix}_${typeSegment}_${idify(item.name || 'UNNAMED')}`;
   const lines = [];
   lines.push(`\t<element name="${escAttrXml(item.name || '')}" type="${escAttrXml(typeName)}" source="${escAttrXml(source)}" id="${id}">`);
+  // Add supports for types that use it as a grouping mechanism
+  if (['Race','Background','Language','Feat','Class'].includes(typeName)) {
+    lines.push(`\t\t<supports>${escXml(typeName)}</supports>`);
+  }
   lines.push(`\t\t<description>`);
   if (item.description) lines.push(`\t\t\t<p>${escXml(item.description)}</p>`);
   lines.push(`\t\t</description>`);
   lines.push(`\t\t<sheet>`);
   lines.push(`\t\t\t<description>${escXml(item.description || '')}</description>`);
   lines.push(`\t\t</sheet>`);
-  lines.push(`\t\t<rules />`);
+  lines.push(`\t\t<rules>`);
+  // Grant any sub-features (racial traits, class features, background features, etc.)
+  (item.features || []).forEach(f => {
+    if (f.name) {
+      const fid = `${id}_${idify(f.name)}`;
+      lines.push(`\t\t\t<grant type="${escAttrXml(typeName)} Feature" id="${fid}" />`);
+    }
+  });
+  lines.push(`\t\t</rules>`);
   lines.push(`\t</element>`);
+  // Generate child feature elements
+  (item.features || []).forEach(f => {
+    if (!f.name) return;
+    const fid = `${id}_${idify(f.name)}`;
+    lines.push(`\t<element name="${escAttrXml(f.name)}" type="${escAttrXml(typeName)} Feature" source="${escAttrXml(source)}" id="${fid}">`);
+    lines.push(`\t\t<compendium display="false" />`);
+    lines.push(`\t\t<description><p>${escXml(f.description || '')}</p></description>`);
+    lines.push(`\t\t<sheet><description>${escXml(f.description || '')}</description></sheet>`);
+    lines.push(`\t\t<rules></rules>`);
+    lines.push(`\t</element>`);
+  });
   return lines;
 }
 
@@ -2106,6 +2130,7 @@ function genArchetypeXml(a, source, prefix) {
   (a.features||[]).forEach(f => {
     const fid = `${archId}_FEATURE_${idify(f.name)}`;
     lines.push(`\t<element name="${escAttrXml(f.name)}" type="Archetype Feature" source="${escAttrXml(source)}" id="${fid}">`);
+    lines.push(`\t\t<compendium display="false" />`);
     lines.push(`\t\t<description>`);
     lines.push(`\t\t\t<p><em>${f.level}${ordinal(f.level)}-level ${escXml(a.name)} feature</em></p>`);
     lines.push(`\t\t\t<p>${escXml(f.description||'')}</p>`);
@@ -2128,6 +2153,9 @@ function genItemXml(item, source, prefix) {
   const lines = [];
   lines.push(`\t<element name="${escAttrXml(item.name)}" type="Item" source="${escAttrXml(source)}" id="${id}">`);
   lines.push(`\t\t<description><p>${escXml(item.description||'')}</p></description>`);
+  lines.push(`\t\t<sheet>`);
+  lines.push(`\t\t\t<description>${escXml(item.description||'')}</description>`);
+  lines.push(`\t\t</sheet>`);
   lines.push(`\t\t<setters>`);
   lines.push(`\t\t\t<set name="category">${escXml(item.category||'Equipment')}</set>`);
   lines.push(`\t\t\t<set name="cost" currency="${escXml(item.currency||'gp')}">${escXml(item.cost||'0')}</set>`);
@@ -2236,7 +2264,10 @@ function genFeatXml(feat, source, prefix) {
   const rules = inferFeatRules(benefits, id);
   const lines = [];
   lines.push(`\t<element name="${escAttrXml(feat.name)}" type="Feat" source="${escAttrXml(source)}" id="${id}">`);
-  if (feat.prerequisite) lines.push(`\t\t<requirements><!-- Prerequisite: ${escXml(feat.prerequisite)} — add requirement IDs manually --></requirements>`);
+  if (feat.prerequisite) {
+    lines.push(`\t\t<prerequisites>${escXml(feat.prerequisite)}</prerequisites>`);
+    lines.push(`\t\t<requirements><!-- Add requirement IDs here, e.g. [strength:13] --></requirements>`);
+  }
   lines.push(`\t\t<description>`);
   if (feat.prerequisite) lines.push(`\t\t\t<p class="flavor"><em>Prerequisite: ${escXml(feat.prerequisite)}</em></p>`);
   lines.push(`\t\t\t<p>${escXml(feat.description||"")}</p>`);
@@ -2263,6 +2294,9 @@ function genMagicXml(item, source, prefix) {
   const lines = [];
   lines.push(`\t<element name="${escAttrXml(item.name)}" type="Magic Item" source="${escAttrXml(source)}" id="${id}">`);
   lines.push(`\t\t<description><p>${escXml(item.description||'')}</p></description>`);
+  lines.push(`\t\t<sheet>`);
+  lines.push(`\t\t\t<description>${escXml(item.description||'')}</description>`);
+  lines.push(`\t\t</sheet>`);
   lines.push(`\t\t<setters>`);
   lines.push(`\t\t\t<set name="category">Magic Items</set>`);
   lines.push(`\t\t\t<set name="type">${escXml(item.type||'Wondrous Item')}</set>`);
