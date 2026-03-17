@@ -480,7 +480,8 @@
   /* ── Edit confirmation flash ── */
   .field-saved {
     border-color: var(--success) !important;
-    transition: border-color 0.1s;
+    box-shadow: 0 0 0 3px rgba(45,106,79,0.18) !important;
+    transition: border-color 0.15s, box-shadow 0.15s;
   }
 
   /* ── Changes pending badge ── */
@@ -545,6 +546,7 @@
       <span class="upload-icon">📜</span>
       <p><strong>Click to browse</strong> or drag &amp; drop a PDF here</p>
       <p style="font-size:0.85rem; margin-top:4px;">Supports any D&amp;D supplement in PDF format</p>
+      <p style="font-size:0.8rem; margin-top:6px; color:var(--muted);">Under 5 MB — full PDF sent directly &nbsp;·&nbsp; 5–30 MB — TOC read first to focus extraction &nbsp;·&nbsp; 30+ MB — page-range guidance recommended</p>
     </div>
 
     <div id="fileInfo" class="alert alert-success hidden" style="margin-top:1rem; margin-bottom:0;">
@@ -583,6 +585,8 @@
       </label>
     </div>
 
+    <label style="margin-top:0.5rem;">Manual Page Range Override <span style="font-weight:400; text-transform:none; font-style:italic;">(optional — overrides TOC auto-detection, e.g. "24-32")</span></label>
+    <input type="text" id="pageRange" placeholder="Leave blank to use TOC auto-detection or whole PDF" style="max-width:420px;" />
     <button class="btn btn-primary" id="extractBtn" onclick="startExtraction()" disabled>
       <span class="spinner hidden" id="extractSpinner"></span>
       Extract from PDF
@@ -614,7 +618,7 @@
 
       <hr class="divider" />
       <div style="display:flex; gap:1rem; flex-wrap:wrap; align-items:center;">
-        <div class="btn-pending" id="downloadBtnWrap"><button class="btn btn-success" onclick="generateAndDownload()">⬇ Download XML</button><span class="pending-badge">● changes pending</span></div>
+        <div class="btn-pending" id="downloadBtnWrap"><button class="btn btn-success" onclick="generateAndDownloadRefreshPreview()">⬇ Download XML</button><span class="pending-badge">● changes pending</span></div>
         <div class="btn-pending" id="previewBtnWrap"><button class="btn btn-secondary" onclick="showXmlPreview()">Preview XML</button><span class="pending-badge">● changes pending</span></div>
         <button class="btn btn-secondary" onclick="resetAll()">Start Over</button>
       </div>
@@ -745,8 +749,18 @@ function setFile(f) {
   const info = document.getElementById('fileInfo');
   info.classList.remove('hidden');
   document.getElementById('fileName').textContent = f.name;
-  document.getElementById('fileSize').textContent = `(${(f.size / 1024 / 1024).toFixed(2)} MB)`;
-  // Auto-fill source name from filename
+  const mb = f.size / 1024 / 1024;
+  document.getElementById('fileSize').textContent = `(${mb.toFixed(2)} MB)`;
+  const warn = document.getElementById('fileSizeWarning');
+  if (mb > 30) {
+    warn.textContent = mb > 80
+      ? `Warning: very large file (${mb.toFixed(0)} MB) — extraction will use TOC-guided page ranges and may take several minutes.`
+      : `Note: large file (${mb.toFixed(0)} MB) — TOC will be read first to focus extraction on relevant pages.`;
+    warn.className = mb > 80 ? 'alert alert-warning' : 'alert alert-info';
+    warn.classList.remove('hidden');
+  } else {
+    warn.classList.add('hidden');
+  }
   if (!document.getElementById('sourceName').value) {
     document.getElementById('sourceName').value = f.name.replace(/\.pdf$/i, '').replace(/[_-]/g, ' ');
   }
@@ -757,6 +771,7 @@ function clearFile() {
   pdfFile = null;
   document.getElementById('pdfFile').value = '';
   document.getElementById('fileInfo').classList.add('hidden');
+  document.getElementById('fileSizeWarning').classList.add('hidden');
   document.getElementById('uploadZone').classList.remove('hidden');
   checkExtractReady();
 }
@@ -832,6 +847,52 @@ recharge (text describing when charges reset, empty if not applicable).
 Include every magic item.`
 };
 
+
+// ─────────────────────────────────────────────
+// TOC-guided extraction
+// ─────────────────────────────────────────────
+
+// Holds page ranges discovered from the TOC, keyed by element type
+let discoveredPageRanges = {};
+
+const TOC_PROMPT = `Read the table of contents or index of this PDF.
+Return a JSON object mapping content sections to their page ranges.
+Use these exact keys where the content exists: spell, archetype, item, feat, magic.
+For each key, provide the page range as a string like "24-38" or "45" for a single page.
+If a section does not exist in this PDF, omit its key.
+Example: {"spell":"45-62","archetype":"10-44","feat":"63-65"}
+Return ONLY the JSON object. If the PDF has no table of contents, return {}.`;
+
+async function discoverPageRanges(base64, progressCallback) {
+  progressCallback('Reading table of contents...', 0.05);
+  try {
+    // TOC call does NOT use JSON mode — it's a small response and we want flexibility
+    const body = {
+      contents: [{ parts: [
+        { inline_data: { mime_type: 'application/pdf', data: base64 } },
+        { text: TOC_PROMPT }
+      ]}],
+      generationConfig: { temperature: 0.1, maxOutputTokens: 512 }
+    };
+    const resp = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+    );
+    if (!resp.ok) return {};
+    const data = await resp.json();
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
+    const parsed = safeParseJson(text);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      console.log('TOC discovered:', parsed);
+      return parsed;
+    }
+  } catch(e) {
+    console.warn('TOC read failed, will use full PDF:', e.message);
+  }
+  return {};
+}
+
+
 // ─────────────────────────────────────────────
 // Extraction
 // ─────────────────────────────────────────────
@@ -846,14 +907,38 @@ async function startExtraction() {
   document.getElementById('extractSpinner').classList.remove('hidden');
 
   extractedData = {};
+  discoveredPageRanges = {};
   const errors = [];
   document.getElementById('extractErrors').classList.add('hidden');
   document.getElementById('extractErrors').innerHTML = '';
   document.getElementById('progressBar').style.width = '0%';
 
-  for (const type of types) {
+  // TOC pass — only run if no manual page range is set and file is > 5MB
+  const manualRange = document.getElementById('pageRange')?.value?.trim() || '';
+  const fileSizeMB = pdfFile.size / 1024 / 1024;
+  if (!manualRange && fileSizeMB > 5) {
+    setProgress(3, 'Reading table of contents...');
+    const base64 = await fileToBase64(pdfFile);
+    discoveredPageRanges = await discoverPageRanges(base64, setProgress);
+    const found = Object.keys(discoveredPageRanges);
+    if (found.length > 0) {
+      const rangeList = found.map(k => `${TYPE_LABELS[k] || k}: p.${discoveredPageRanges[k]}`).join(', ');
+      setProgress(8, `TOC read — found: ${rangeList}`);
+      await new Promise(r => setTimeout(r, 800));
+    } else {
+      setProgress(8, 'No TOC found — will search whole PDF');
+      await new Promise(r => setTimeout(r, 400));
+    }
+  }
+
+  const typeCount = types.length;
+  for (let ti = 0; ti < typeCount; ti++) {
+    const type = types[ti];
+    const baseProgress = 10 + (ti / typeCount) * 85;
     try {
-      const result = await callGemini(pdfFile, type, (msg, pct) => setProgress(pct * 100, msg));
+      const result = await callGemini(pdfFile, type, (msg, pct) => {
+        setProgress(baseProgress + pct * (85 / typeCount), msg);
+      });
       extractedData[type] = type === 'feat' ? result.map(parseFeatFullText) : result;
       const failed = result.filter(r => r._error);
       if (failed.length) errors.push(`${TYPE_LABELS[type]}: ${failed.length} item(s) need review`);
@@ -883,6 +968,7 @@ async function startExtraction() {
   }, 800);
 }
 
+
 async function geminiRaw(base64, promptText) {
   const body = {
     contents: [{ parts: [
@@ -906,9 +992,11 @@ async function geminiRaw(base64, promptText) {
   const data = await resp.json();
   if (data.promptFeedback?.blockReason) throw new Error(`Blocked: ${data.promptFeedback.blockReason}`);
   if (!data.candidates?.length) throw new Error('No candidates returned — PDF may be too large or response was filtered.');
-  const text = data.candidates[0]?.content?.parts?.[0]?.text || '';
+  const candidate = data.candidates[0];
+  const text = candidate?.content?.parts?.[0]?.text || '';
   if (!text) throw new Error('Empty response from Gemini.');
-  return text;
+  const truncated = candidate.finishReason === 'MAX_TOKENS';
+  return { text, truncated };
 }
 
 function safeParseJson(text) {
@@ -934,14 +1022,55 @@ function archetypeSupport(cls) {
   return m[cls] || cls;
 }
 
-// Single call per element type — JSON mode ensures valid output regardless of special characters
+// Extraction with TOC-guided page ranges + automatic alphabetic-split retry on truncation
 async function callGemini(file, type, progressCallback) {
   const base64 = await fileToBase64(file);
-  progressCallback(`Extracting ${TYPE_LABELS[type]}...`, 0.1);
-  const text = await geminiRaw(base64, PROMPTS[type]);
-  progressCallback(`Parsing ${TYPE_LABELS[type]}...`, 0.8);
-  const parsed = safeParseJson(text);
-  return Array.isArray(parsed) ? parsed : (Object.values(parsed).find(v => Array.isArray(v)) || []);
+
+  // Priority: manual override > TOC-discovered > whole PDF
+  const manualRange = document.getElementById('pageRange')?.value?.trim() || '';
+  const tocRange = discoveredPageRanges[type] || '';
+  const pageRange = manualRange || tocRange;
+  const pageHint = pageRange ? `\nOnly look at pages ${pageRange} of the PDF.` : '';
+  if (pageRange) {
+    progressCallback(`Extracting ${TYPE_LABELS[type]} (pages ${pageRange})...`, 0.1);
+  } else {
+    progressCallback(`Extracting ${TYPE_LABELS[type]}...`, 0.1);
+  }
+
+  const { text, truncated } = await geminiRaw(base64, PROMPTS[type] + pageHint);
+
+  if (!truncated) {
+    progressCallback(`Parsing ${TYPE_LABELS[type]}...`, 0.8);
+    const parsed = safeParseJson(text);
+    return Array.isArray(parsed) ? parsed : (Object.values(parsed).find(v => Array.isArray(v)) || []);
+  }
+
+  // Response was cut off — retry in two alphabetic halves and merge
+  console.warn(`${type} response truncated — retrying in two halves`);
+  progressCallback(`${TYPE_LABELS[type]} too large — retrying in halves (A–M)...`, 0.2);
+
+  const halfPrompts = [
+    PROMPTS[type] + pageHint + '\nOnly include elements whose name starts with letters A through M.',
+    PROMPTS[type] + pageHint + '\nOnly include elements whose name starts with letters N through Z.'
+  ];
+
+  const results = [];
+  for (let i = 0; i < halfPrompts.length; i++) {
+    progressCallback(`${TYPE_LABELS[type]}: batch ${i+1}/2...`, 0.3 + i * 0.35);
+    const { text: halfText, truncated: halfTruncated } = await geminiRaw(base64, halfPrompts[i]);
+    if (halfTruncated) {
+      console.warn(`Half ${i+1} also truncated — content may be incomplete`);
+    }
+    try {
+      const parsed = safeParseJson(halfText);
+      const arr = Array.isArray(parsed) ? parsed : (Object.values(parsed).find(v => Array.isArray(v)) || []);
+      results.push(...arr);
+    } catch(e) {
+      console.warn(`Half ${i+1} parse failed:`, e.message);
+    }
+    if (i === 0) await new Promise(r => setTimeout(r, 600));
+  }
+  return results;
 }
 
 function fileToBase64(file) {
@@ -1573,10 +1702,21 @@ function generateAndDownload() {
 
 function showXmlPreview() {
   const wrap = document.getElementById('xmlPreviewWrap');
+  const wasHidden = wrap.classList.contains('hidden');
   wrap.classList.toggle('hidden');
   if (!wrap.classList.contains('hidden')) {
+    // Always regenerate so preview reflects latest edits
     document.getElementById('xmlPreview').textContent = generateXml();
     clearChanged();
+  }
+}
+
+function generateAndDownloadRefreshPreview() {
+  // If preview is currently open, regenerate it after download
+  generateAndDownload();
+  const wrap = document.getElementById('xmlPreviewWrap');
+  if (!wrap.classList.contains('hidden')) {
+    document.getElementById('xmlPreview').textContent = generateXml();
   }
 }
 
@@ -1602,9 +1742,11 @@ function ordinal(n) {
 
 function resetAll() {
   extractedData = {};
+  discoveredPageRanges = {};
   pdfFile = null;
   document.getElementById('pdfFile').value = '';
   document.getElementById('fileInfo').classList.add('hidden');
+  document.getElementById('fileSizeWarning').classList.add('hidden');
   document.getElementById('uploadZone').classList.remove('hidden');
   document.getElementById('stepReview').classList.add('hidden');
   document.getElementById('reviewArea').classList.add('hidden');
@@ -1615,6 +1757,8 @@ function resetAll() {
   document.getElementById('progressBar').style.width = '0%';
   document.getElementById('xmlPreviewWrap').classList.add('hidden');
   document.getElementById('sourceName').value = '';
+  document.getElementById('pageRange').value = '';
+  clearChanged();
   checkExtractReady();
 }
 </script>
