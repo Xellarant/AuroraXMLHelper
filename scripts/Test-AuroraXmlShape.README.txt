@@ -1,0 +1,67 @@
+Test-AuroraXmlShape.ps1
+=======================
+
+Purpose
+-------
+Runs repeatable Aurora Builder specific XML shape checks for element source
+repositories. This is meant to catch loader-facing issues that plain XML
+well-formedness checks miss.
+
+Basic usage
+-----------
+powershell -NoProfile -ExecutionPolicy Bypass -File .\Test-AuroraXmlShape.ps1 -RootPath .
+
+Example for The Book of Xellarant
+---------------------------------
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Test-AuroraXmlShape.ps1 -RootPath . -LocalRawPrefix "https://raw.githubusercontent.com/Xellarant/the-book-of-xellarant/master/" -LocalIdPrefix "ID_EFA_" -FocusPath "Eberron Forge of the Artificer"
+
+Example for another project
+---------------------------
+powershell -NoProfile -ExecutionPolicy Bypass -File .\Test-AuroraXmlShape.ps1 -RootPath "C:\path\to\Aurora XML Helper" -LegacyPath "C:\path\to\AuroraLegacy-elements"
+
+Useful options
+--------------
+-RootPath
+The repository or folder containing Aurora .xml and .index files.
+
+-LegacyPath
+Optional path to an AuroraLegacy elements checkout. When supplied, ID references
+inside focused files are checked against IDs found in that checkout plus IDs
+defined in RootPath.
+
+-FocusPath
+Optional folder or file path to treat as the strict focus for external ID checks.
+Files outside the focus path report unresolved external IDs as warnings.
+
+-LocalIdPrefix
+Optional custom ID prefix to require local definitions for, such as ID_EFA_.
+
+-LocalRawPrefix
+Optional raw GitHub URL prefix used to verify index entries point to existing
+local files.
+
+-CheckUpdateLocalTargets
+Also applies LocalRawPrefix checks to update nodes inside individual XML files.
+This is stricter and may flag old self-update URLs in existing content.
+
+-Json
+Outputs a machine-readable JSON result.
+
+Checks included
+---------------
+- XML parsing for .xml and .index files.
+- Root shape: elements or index.
+- Required info/update metadata.
+- Required update/index file name and url attributes.
+- Required element name, type, source, and id attributes.
+- Duplicate element IDs.
+- Class elements with missing hd setters.
+- Multiclass nodes with missing id attributes.
+- Local custom ID prefix references.
+- Optional AuroraLegacy/external ID references.
+- Optional raw GitHub target checks.
+
+Exit codes
+----------
+0 means no errors.
+1 means one or more errors were found.

@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Aurora XML Helper</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600&family=Crimson+Pro:ital,wght@0,300;0,400;0,600;1,300;1,400&display=swap" rel="stylesheet" />
 <style>
   :root {
@@ -264,6 +266,27 @@
   .type-check:hover { border-color: var(--gold); background: var(--gold-pale); }
   .type-check input { accent-color: var(--gold); width: 15px; height: 15px; }
   .type-check.checked { border-color: var(--gold); background: var(--gold-pale); }
+  .type-check .type-name { min-width: 0; overflow-wrap: normal; }
+  .type-check .type-note {
+    color: var(--muted);
+    font-size: 0.72rem;
+    font-style: italic;
+    white-space: nowrap;
+  }
+  .type-check.disabled {
+    display: grid;
+    grid-template-columns: 15px minmax(0, 1fr);
+    column-gap: 8px;
+    row-gap: 2px;
+    align-items: center;
+    opacity: 0.55;
+    cursor: not-allowed;
+    background: var(--parchment-dark);
+  }
+  .type-check.disabled:hover { border-color: var(--border-light); background: var(--parchment-dark); }
+  .type-check.disabled input { grid-column: 1; grid-row: 1; }
+  .type-check.disabled .type-name { grid-column: 2; grid-row: 1; }
+  .type-check.disabled .type-note { grid-column: 2; grid-row: 2; }
 
   /* ── Tabs ── */
   .tabs {
@@ -531,27 +554,23 @@
     <div class="logo">Aurora <span>XML Helper</span></div>
     <div class="header-sub">D&amp;D Supplement → Aurora Builder XML</div>
   </div>
-  <div id="keyStatus" class="key-unset">⚠ API key not set</div>
+  <div id="keyStatus" class="key-set">Deterministic mode</div>
 </header>
 
 <main>
 
-  <!-- Step 1: API Key -->
+  <!-- Step 1: Parser mode -->
   <div class="card" id="stepKey">
-    <div class="card-title">① Gemini API Key</div>
-    <p class="text-muted" style="margin-bottom:1rem;">Your key is stored only in your browser's local storage and never sent anywhere except directly to Google's API.</p>
-    <label>Gemini API Key</label>
-    <div style="display:flex; gap:0.75rem; align-items:center; margin-bottom:0.75rem; flex-wrap:wrap;">
-      <div style="position:relative; flex:1; min-width:180px;">
-        <input type="password" id="apiKeyInput" placeholder="AIza..." style="width:100%; margin-bottom:0; padding-right:2.5rem;" />
-        <button onclick="toggleKeyVisibility()" id="keyVisBtn" title="Show/hide key"
-          style="position:absolute; right:8px; top:50%; transform:translateY(-50%); background:none; border:none; cursor:pointer; font-size:1rem; color:var(--muted); padding:0; line-height:1;">👁</button>
-      </div>
-      <button class="btn btn-primary" style="flex-shrink:0; white-space:nowrap;" onclick="saveKey()">Save Key</button>
-      <button class="btn btn-secondary" style="flex-shrink:0; white-space:nowrap;" id="testKeyBtn" onclick="testKey()">Test Key</button>
-    </div>
-    <div id="keyTestResult" class="hidden" style="margin-bottom:0.75rem;"></div>
-    <p class="text-muted" style="font-size:0.8rem;">Don't have one? Get a free key at <a href="https://aistudio.google.com" target="_blank" style="color:var(--gold);">aistudio.google.com</a></p>
+    <div class="card-title">① Deterministic Parser</div>
+    <p class="text-muted" style="margin-bottom:0.75rem;">PDF text is read locally in the browser and matched with repeatable D&amp;D layout rules. No API key, model, or network extraction step is required.</p>
+    <p class="text-muted" style="font-size:0.85rem; margin-bottom:0;">This first deterministic pass is intentionally conservative: it prefers fewer high-confidence elements over guessed content. Anything it finds still flows through the existing review, validation, XML preview, and ZIP export tools.</p>
+    <div id="geminiSection" class="hidden"></div>
+    <input type="password" id="apiKeyInput" class="hidden" />
+    <div id="keyTestResult" class="hidden"></div>
+    <input type="checkbox" id="ollamaToggle" class="hidden" />
+    <div id="ollamaSection" class="hidden"></div>
+    <input type="text" id="ollamaModelInput" class="hidden" />
+    <div id="ollamaTestResult" class="hidden"></div>
   </div>
 
   <!-- Step 2: Upload -->
@@ -562,8 +581,8 @@
       <input type="file" id="pdfFile" accept=".pdf" onchange="handleFileSelect(event)" />
       <span class="upload-icon">📜</span>
       <p><strong>Click to browse</strong> or drag &amp; drop a PDF here</p>
-      <p style="font-size:0.85rem; margin-top:4px;">Supports any D&amp;D supplement in PDF format</p>
-      <p style="font-size:0.8rem; margin-top:6px; color:var(--muted);">Under 5 MB — full PDF sent directly &nbsp;·&nbsp; 5–30 MB — TOC read first to focus extraction &nbsp;·&nbsp; 30+ MB — page-range guidance recommended</p>
+      <p style="font-size:0.85rem; margin-top:4px;">Reads selectable PDF text locally</p>
+      <p style="font-size:0.8rem; margin-top:6px; color:var(--muted);">Best results come from text-based PDFs with standard D&amp;D headings, spell blocks, feat blocks, item rarity lines, and equipment rows.</p>
     </div>
 
     <div id="fileSizeWarning" class="hidden" style="margin-top:0.75rem; margin-bottom:0;"></div>
@@ -601,34 +620,43 @@
 
     <label>Element Types to Extract</label>
     <div class="type-grid" id="typeGrid">
-      <label class="type-check" id="chk-spell">
+      <label class="type-check checked" id="chk-spell">
         <input type="checkbox" value="spell" onchange="updateTypeCheck(this)" checked /> Spells
       </label>
       <label class="type-check checked" id="chk-archetype">
         <input type="checkbox" value="archetype" onchange="updateTypeCheck(this)" checked /> Subclasses
       </label>
-      <label class="type-check" id="chk-item">
+      <label class="type-check checked" id="chk-item">
         <input type="checkbox" value="item" onchange="updateTypeCheck(this)" checked /> Items / Equipment
       </label>
-      <label class="type-check" id="chk-feat">
+      <label class="type-check checked" id="chk-feat">
         <input type="checkbox" value="feat" onchange="updateTypeCheck(this)" checked /> Feats
       </label>
-      <label class="type-check" id="chk-magic">
+      <label class="type-check checked" id="chk-magic">
         <input type="checkbox" value="magic" onchange="updateTypeCheck(this)" checked /> Magic Items
       </label>
-      <label class="type-check" id="chk-other" title="Attempt to extract anything not covered by the other types — races, classes, backgrounds, monsters, etc. Results will use a generic XML template.">
-        <input type="checkbox" value="other" onchange="updateTypeCheck(this)" /> Other <span style="font-size:0.75rem; color:var(--muted); font-style:italic;">(experimental)</span>
+      <label class="type-check checked" id="chk-race">
+        <input type="checkbox" value="race" onchange="updateTypeCheck(this)" checked /> Races
+      </label>
+      <label class="type-check checked" id="chk-background">
+        <input type="checkbox" value="background" onchange="updateTypeCheck(this)" checked /> Backgrounds
+      </label>
+      <label class="type-check checked" id="chk-class">
+        <input type="checkbox" value="class" onchange="updateTypeCheck(this)" checked /> Classes
+      </label>
+      <label class="type-check disabled" id="chk-other" title="Generic deterministic extraction is planned but not implemented yet.">
+        <input type="checkbox" value="other" onchange="updateTypeCheck(this)" disabled /> <span class="type-name">Other</span> <span class="type-note">(planned)</span>
       </label>
     </div>
 
-    <label style="margin-top:0.5rem;">Manual Page Range Override <span style="font-weight:400; text-transform:none; font-style:italic;">(optional — overrides TOC auto-detection, e.g. "24-32")</span></label>
-    <input type="text" id="pageRange" placeholder="Leave blank to use TOC auto-detection or whole PDF" style="max-width:420px;" />
+    <label style="margin-top:0.5rem;">Manual Page Range <span style="font-weight:400; text-transform:none; font-style:italic;">(optional, e.g. "24-32")</span></label>
+    <input type="text" id="pageRange" placeholder="Leave blank to scan the whole PDF" style="max-width:420px;" />
     <button class="btn btn-primary" id="extractBtn" onclick="startExtraction()" disabled>
       <span class="spinner hidden" id="extractSpinner"></span>
-      Extract from PDF
+      Parse PDF
     </button>
     <p class="text-muted" id="extractHint" style="margin-top:0.5rem; font-size:0.82rem;">
-      Button is enabled when a valid API key is saved, a PDF is uploaded, and at least one element type is selected.
+      Button is enabled when a PDF is uploaded and at least one element type is selected.
     </p>
   </div>
 
@@ -639,7 +667,7 @@
     <div id="extractProgress" class="hidden">
       <div class="alert alert-info" id="progressAlert">
         <span class="spinner" id="progressSpinner"></span>
-        <span id="progressMsg">Sending to Gemini...</span>
+        <span id="progressMsg">Reading PDF text...</span>
       </div>
       <div class="progress-wrap"><div class="progress-bar" id="progressBar" style="width:0%"></div></div>
     </div>
@@ -682,6 +710,8 @@ let pdfFile = null;
 let extractedData = {}; // { spell: [...], archetype: [...], item: [...], feat: [...], magic: [...] }
 let skippedItems = []; // items filtered out for being < 80% complete
 let apiKey = '';
+let useOllama = false;
+let ollamaModel = 'qwen3:8b';
 
 const TYPE_LABELS = {
   spell: 'Spells',
@@ -689,6 +719,9 @@ const TYPE_LABELS = {
   item: 'Items / Equipment',
   feat: 'Feats',
   magic: 'Magic Items',
+  race: 'Races',
+  background: 'Backgrounds',
+  class: 'Classes',
   other: 'Other'
 };
 
@@ -696,12 +729,9 @@ const TYPE_LABELS = {
 // Init
 // ─────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', () => {
-  const saved = localStorage.getItem('gemini_api_key');
-  if (saved) {
-    apiKey = saved;
-    document.getElementById('apiKeyInput').value = saved;
-    setKeyStatus(true);
-  }
+  apiKey = '';
+  useOllama = false;
+  setKeyStatus(true);
   updateTypeCheck();
   checkExtractReady();
   // Mark initially checked boxes
@@ -709,6 +739,128 @@ window.addEventListener('DOMContentLoaded', () => {
     cb.closest('.type-check').classList.add('checked');
   });
 });
+
+
+// ─────────────────────────────────────────────
+// Ollama provider
+// ─────────────────────────────────────────────
+
+function toggleOllama(on) {
+  useOllama = on;
+  localStorage.setItem('use_ollama', on ? 'true' : 'false');
+  document.getElementById('ollamaSection').classList.toggle('hidden', !on);
+  document.getElementById('geminiSection').style.opacity = on ? '0.4' : '1';
+  document.getElementById('keyStatus').textContent = on ? '✓ Using Ollama' : (apiKey ? '✓ API key saved' : '⚠ API key not set');
+  document.getElementById('keyStatus').className = on ? 'key-set' : (apiKey ? 'key-set' : 'key-unset');
+  checkExtractReady();
+}
+
+function saveOllamaPrefs() {
+  const model = document.getElementById('ollamaModelInput').value.trim();
+  if (model) {
+    ollamaModel = model;
+    localStorage.setItem('ollama_model', model);
+  }
+}
+
+async function testOllama() {
+  const btn = document.querySelector('#ollamaSection .btn-secondary');
+  const resultEl = document.getElementById('ollamaTestResult');
+  btn.disabled = true;
+  btn.textContent = 'Testing...';
+  resultEl.className = 'hidden';
+  try {
+    saveOllamaPrefs();
+    const resp = await fetch('http://localhost:11434/api/tags');
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    const models = (data.models || []).map(m => m.name);
+    const found = models.some(m => m.startsWith(ollamaModel.split(':')[0]));
+    resultEl.className = 'alert alert-success';
+    resultEl.textContent = found
+      ? `✓ Connected. Model "${ollamaModel}" found.`
+      : `✓ Connected. Note: "${ollamaModel}" not found. Available: ${models.slice(0,5).join(', ')}${models.length > 5 ? '...' : ''}`;
+    resultEl.classList.remove('hidden');
+  } catch(e) {
+    resultEl.className = 'alert alert-error';
+    resultEl.textContent = `✗ Could not reach Ollama at localhost:11434 — ${e.message}`;
+    resultEl.classList.remove('hidden');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Test Connection';
+  }
+}
+
+// ─────────────────────────────────────────────
+// PDF text extraction via PDF.js (for Ollama mode)
+// ─────────────────────────────────────────────
+const MAX_WORDS = 12000;
+
+async function extractTextFromChunk(uint8Array) {
+  try {
+    // PDF.js 3.x UMD global is pdfjsLib
+    const pdfjsLib = window.pdfjsLib || window['pdfjs-dist/build/pdf'];
+    if (!pdfjsLib) throw new Error('PDF.js not loaded');
+    // Use fake worker to avoid cross-origin issues in single-file app
+    pdfjsLib.GlobalWorkerOptions.workerSrc = '';
+    const loadingTask = pdfjsLib.getDocument({ data: uint8Array, disableWorker: true });
+    const pdf = await loadingTask.promise;
+    const pageTexts = [];
+    for (let p = 1; p <= pdf.numPages; p++) {
+      const page = await pdf.getPage(p);
+      const content = await page.getTextContent();
+      pageTexts.push(content.items.map(i => i.str).join(' '));
+    }
+    let full = pageTexts.join('\n');
+    // Truncate to MAX_WORDS
+    const words = full.split(/\s+/);
+    if (words.length > MAX_WORDS) full = words.slice(0, MAX_WORDS).join(' ') + '\n[...truncated]';
+    return full;
+  } catch(e) {
+    console.warn('PDF.js extraction failed:', e.message);
+    return ''; // caller will handle empty text
+  }
+}
+
+// ─────────────────────────────────────────────
+// Ollama raw call — mirrors geminiRaw shape
+// ─────────────────────────────────────────────
+async function ollamaRaw(textContent, promptText) {
+  const body = {
+    model: ollamaModel,
+    format: 'json',
+    stream: false,
+    messages: [{ role: 'user', content: textContent + '\n\n' + promptText }]
+  };
+
+  let lastErr;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    if (attempt > 0) {
+      const waitSec = [10, 20, 40][attempt - 1];
+      setProgress(null, `Ollama busy — retrying in ${waitSec}s (${attempt}/3)...`);
+      await new Promise(r => setTimeout(r, waitSec * 1000));
+    }
+    try {
+      const resp = await fetch('http://localhost:11434/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        const text = data.message?.content || '';
+        if (!text) throw new Error('Empty response from Ollama');
+        return { text, truncated: false };
+      }
+      lastErr = new Error(`HTTP ${resp.status}`);
+      if (resp.status < 500) break;
+    } catch(e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr || new Error('Ollama request failed');
+}
+
 
 // ─────────────────────────────────────────────
 // API Key
@@ -734,8 +886,8 @@ function saveKey() {
 
 function setKeyStatus(ok) {
   const el = document.getElementById('keyStatus');
-  el.textContent = ok ? '✓ API key saved' : '⚠ API key not set';
-  el.className = ok ? 'key-set' : 'key-unset';
+  el.textContent = 'Deterministic mode';
+  el.className = 'key-set';
 }
 
 async function testKey() {
@@ -799,8 +951,8 @@ function setFile(f) {
   const warn = document.getElementById('fileSizeWarning');
   if (mb > 30) {
     warn.textContent = mb > 80
-      ? `Warning: very large file (${mb.toFixed(0)} MB) — extraction will use TOC-guided page ranges and may take several minutes.`
-      : `Note: large file (${mb.toFixed(0)} MB) — TOC will be read first to focus extraction on relevant pages.`;
+      ? `Warning: very large file (${mb.toFixed(0)} MB) — local text parsing may take several minutes. A manual page range is recommended.`
+      : `Note: large file (${mb.toFixed(0)} MB) — local text parsing will scan the full PDF unless you provide a page range.`;
     warn.className = mb > 80 ? 'alert alert-warning' : 'alert alert-info';
     warn.classList.remove('hidden');
   } else {
@@ -840,7 +992,7 @@ function getSelectedTypes() {
 }
 
 function checkExtractReady() {
-  const ready = apiKey && pdfFile && getSelectedTypes().length > 0;
+  const ready = pdfFile && getSelectedTypes().length > 0;
   document.getElementById('extractBtn').disabled = !ready;
 }
 
@@ -897,6 +1049,40 @@ charges (integer, 0 if none),
 recharge (text describing when charges reset, empty if not applicable).
 Include every magic item.`,
 
+  race: `Extract ALL races and species from this PDF.
+Return a JSON array where every element has:
+name (string), description (string — flavour text only),
+size (string — e.g. "Medium"), speed (integer — base walking speed),
+abilityScores (object — e.g. {"strength":2,"dexterity":1}, omit if none),
+languages (array of strings),
+traits (array of objects with: name (string), description (string — complete mechanical text)),
+subraces (array of objects with: name (string), description (string)) — empty if none.
+Include every race. Do not truncate trait descriptions.`,
+
+  background: `Extract ALL backgrounds from this PDF.
+Return a JSON array where every element has:
+name (string), description (string — flavour text only),
+skillProficiencies (array of skill name strings e.g. ["Arcana","History"]),
+toolProficiencies (array of strings, empty if none),
+languages (array of strings, use "Any" if player chooses),
+equipment (string — starting equipment list),
+features (array of objects with: name (string), description (string — complete text)).`,
+
+  class: `Extract ALL classes from this PDF.
+Return a JSON array where every element has:
+name (string), description (string — flavour text only),
+hitDie (integer — e.g. 8 for d8),
+savingThrows (array of ability name strings e.g. ["Wisdom","Charisma"]),
+armorProficiencies (array — e.g. ["Light Armor","Shields"]),
+weaponProficiencies (array — e.g. ["Simple Weapons"]),
+skillChoices (object with: count (integer), from (array of skill names)),
+startingEquipment (string),
+archetypeLevel (integer — level at which archetype is chosen, e.g. 3),
+archetypeLabel (string — e.g. "Primal Path"),
+archetypeSupports (string — the supports tag value for archetype selection),
+features (array of objects with: name (string), level (integer), action (string), usage (string), description (string — COMPLETE mechanical text)).
+Include every class and all its features. Do not truncate.`,
+
   other: `Extract ALL elements from this PDF that do not fit into spells, subclasses, equipment, feats, or magic items. This includes things like races, classes, backgrounds, companions, vehicles, monsters, or any other custom content.
 Return a JSON array where every element has:
 name (string),
@@ -904,6 +1090,55 @@ type (string — the specific element type, e.g. "Race", "Class", "Background", 
 description (complete full text of the element including all traits, features, and mechanics).
 Include every such element. If nothing of this kind exists in the PDF, return an empty array.`
 };
+
+
+
+
+// ─────────────────────────────────────────────
+// PDF chunking via pdf-lib
+// ─────────────────────────────────────────────
+const PAGES_PER_CHUNK = 50;   // ~13K tokens/chunk, safely under 1M context limit
+const INLINE_LIMIT_MB = 19;   // still used for TOC/meta calls on small files
+
+// Split a File into an array of Uint8Array chunks, each PAGES_PER_CHUNK pages
+async function splitPdfIntoChunks(file, progressCallback) {
+  progressCallback('Loading PDF for chunking...', 0.02);
+  const arrayBuf = await file.arrayBuffer();
+  let srcDoc;
+  try {
+    srcDoc = await PDFLib.PDFDocument.load(arrayBuf, { ignoreEncryption: true, throwOnInvalidObject: false });
+  } catch(e) {
+    console.error('pdf-lib load failed:', e);
+    throw new Error(`pdf-lib could not parse this PDF: ${e.message}`);
+  }
+  const totalPages = srcDoc.getPageCount();
+  if (totalPages === 0) throw new Error('PDF reports 0 pages');
+  progressCallback(`PDF has ${totalPages} pages — splitting into chunks of ${PAGES_PER_CHUNK}...`, 0.04);
+
+  const chunks = [];
+  for (let start = 0; start < totalPages; start += PAGES_PER_CHUNK) {
+    const end = Math.min(start + PAGES_PER_CHUNK, totalPages);
+    const indices = Array.from({ length: end - start }, (_, i) => start + i);
+    const chunkDoc = await PDFLib.PDFDocument.create();
+    const pages = await chunkDoc.copyPages(srcDoc, indices);
+    pages.forEach(p => chunkDoc.addPage(p));
+    const bytes = await chunkDoc.save();
+    chunks.push({ bytes, startPage: start + 1, endPage: end, totalPages });
+    progressCallback(`Chunking pages ${start+1}–${end} of ${totalPages}...`, 0.04 + (end / totalPages) * 0.04);
+  }
+
+  progressCallback(`Split into ${chunks.length} chunk(s).`, 0.08);
+  return chunks;
+}
+
+// Convert Uint8Array to base64
+function uint8ToBase64(uint8) {
+  let binary = '';
+  const len = uint8.byteLength;
+  for (let i = 0; i < len; i++) binary += String.fromCharCode(uint8[i]);
+  return btoa(binary);
+}
+
 
 
 // ─────────────────────────────────────────────
@@ -915,29 +1150,37 @@ let discoveredPageRanges = {};
 
 const TOC_PROMPT = `Read the table of contents or index of this PDF.
 Return a JSON object mapping content sections to their page ranges.
-Use these exact keys where the content exists: spell, archetype, item, feat, magic.
+Use these exact keys where the content exists: spell, archetype, item, feat, magic, race, background, class.
 For each key, provide the page range as a string like "24-38" or "45" for a single page.
 If a section does not exist in this PDF, omit its key.
-Example: {"spell":"45-62","archetype":"10-44","feat":"63-65"}
+Example: {"spell":"45-62","archetype":"10-44","race":"65-120","class":"121-200"}
 Return ONLY the JSON object. If the PDF has no table of contents, return {}.`;
 
-async function discoverPageRanges(base64, progressCallback) {
+async function discoverPageRanges(base64, isUri, progressCallback) {
   progressCallback('Reading table of contents...', 0.05);
   try {
-    const body = {
-      contents: [{ parts: [
-        { inline_data: { mime_type: 'application/pdf', data: base64 } },
-        { text: TOC_PROMPT }
-      ]}],
-      generationConfig: { temperature: 0.1, maxOutputTokens: 1024, response_mime_type: 'application/json' }
-    };
-    const resp = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
-    );
-    if (!resp.ok) { console.warn('TOC HTTP error', resp.status); return {}; }
-    const data = await resp.json();
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
+    let text;
+    if (useOllama) {
+      const extracted = await extractTextFromChunk(Uint8Array.from(atob(base64), c => c.charCodeAt(0)));
+      if (!extracted) return {};
+      const result = await ollamaRaw(extracted, TOC_PROMPT);
+      text = result.text;
+    } else {
+      const body = {
+        contents: [{ parts: [
+          { inline_data: { mime_type: 'application/pdf', data: base64 } },
+          { text: TOC_PROMPT }
+        ]}],
+        generationConfig: { temperature: 0.1, maxOutputTokens: 1024, response_mime_type: 'application/json' }
+      };
+      const resp = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+      );
+      if (!resp.ok) { console.warn('TOC HTTP error', resp.status); return {}; }
+      const data = await resp.json();
+      text = data.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
+    }
     const parsed = safeParseJson(text);
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
       console.log('TOC discovered:', parsed);
@@ -952,19 +1195,28 @@ async function discoverPageRanges(base64, progressCallback) {
 
 
 
-async function detectSourceMeta(base64) {
+async function detectSourceMeta(base64, isUri) {
+  const metaPrompt = 'What is the title and author of this supplement? Reply with only this exact JSON structure and nothing else: {"title":"TITLE_HERE","author":"AUTHOR_HERE"}';
   try {
-    const resp = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-      { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contents: [{ parts: [
-          { inline_data: { mime_type: 'application/pdf', data: base64 } },
-          { text: 'Read the cover page or title page of this PDF. Return ONLY a JSON object with exactly two keys: "title" (the full proper title of the supplement) and "author" (the author or creator name, comma-separated if multiple, empty string if unknown).' }
-        ]}], generationConfig: { maxOutputTokens: 120, response_mime_type: 'application/json' } }) }
-    );
-    if (!resp.ok) return;
-    const data = await resp.json();
-    const text = (data.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();
+    let text;
+    if (useOllama) {
+      const extracted = await extractTextFromChunk(Uint8Array.from(atob(base64), c => c.charCodeAt(0)));
+      if (!extracted) return;
+      const result = await ollamaRaw(extracted, metaPrompt);
+      text = result.text.trim();
+    } else {
+      const resp = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contents: [{ parts: [
+            { inline_data: { mime_type: 'application/pdf', data: base64 } },
+            { text: metaPrompt }
+          ]}], generationConfig: { maxOutputTokens: 300, response_mime_type: 'application/json' } }) }
+      );
+      if (!resp.ok) return;
+      const data = await resp.json();
+      text = (data.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();
+    }
     const meta = safeParseJson(text);
     if (!meta || typeof meta !== 'object' || Array.isArray(meta)) return;
     if (meta.title && meta.title.trim()) {
@@ -982,11 +1234,967 @@ async function detectSourceMeta(base64) {
 }
 
 // ─────────────────────────────────────────────
+// Deterministic PDF parsing
+// ─────────────────────────────────────────────
+const DETERMINISTIC_PARSERS = {
+  spell: parseSpellsFromText,
+  archetype: parseArchetypesFromText,
+  feat: parseFeatsFromText,
+  magic: parseMagicItemsFromText,
+  item: parseItemsFromText,
+  race: parseRacesFromText,
+  background: parseBackgroundsFromText,
+  class: parseClassesFromText,
+};
+
+async function deterministicExtract(file, types, progressCallback) {
+  progressCallback(5, 'Reading PDF text locally...');
+  const pages = await extractPdfPages(file);
+  const selectedPages = selectPages(pages, document.getElementById('pageRange')?.value?.trim() || '');
+  const text = selectedPages.map(p => p.text).join('\n\n');
+  if (!text.trim()) throw new Error('No selectable text was found in this PDF. Scanned/image-only PDFs need OCR before deterministic parsing can work.');
+
+  detectSourceMetaFromText(selectedPages);
+
+  const out = {};
+  for (let i = 0; i < types.length; i++) {
+    const type = types[i];
+    const parser = DETERMINISTIC_PARSERS[type];
+    progressCallback(10 + Math.round((i / Math.max(types.length, 1)) * 80), `Parsing ${TYPE_LABELS[type] || type}...`);
+    out[type] = parser ? parser(text) : [];
+  }
+  progressCallback(95, 'Normalizing parsed elements...');
+  return out;
+}
+
+async function extractPdfPages(file) {
+  const pdfjsLib = window.pdfjsLib || window['pdfjs-dist/build/pdf'];
+  if (!pdfjsLib) throw new Error('PDF.js is not loaded.');
+  pdfjsLib.GlobalWorkerOptions.workerSrc = '';
+  const data = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data, disableWorker: true }).promise;
+  const pages = [];
+  for (let p = 1; p <= pdf.numPages; p++) {
+    const page = await pdf.getPage(p);
+    const content = await page.getTextContent();
+    const lines = textItemsToLines(content.items);
+    pages.push({ page: p, text: lines.join('\n') });
+  }
+  return pages;
+}
+
+function textItemsToLines(items) {
+  const rows = [];
+  for (const item of items) {
+    const y = Math.round((item.transform?.[5] || 0) * 2) / 2;
+    let row = rows.find(r => Math.abs(r.y - y) < 2);
+    if (!row) {
+      row = { y, items: [] };
+      rows.push(row);
+    }
+    row.items.push({ x: item.transform?.[4] || 0, str: item.str || '' });
+  }
+  return rows
+    .sort((a, b) => b.y - a.y)
+    .map(row => row.items.sort((a, b) => a.x - b.x).map(i => i.str).join(' ').replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+}
+
+function selectPages(pages, rangeText) {
+  if (!rangeText) return pages;
+  const wanted = new Set();
+  for (const part of rangeText.split(',')) {
+    const m = part.trim().match(/^(\d+)(?:\s*-\s*(\d+))?$/);
+    if (!m) continue;
+    const start = parseInt(m[1], 10);
+    const end = parseInt(m[2] || m[1], 10);
+    for (let p = Math.min(start, end); p <= Math.max(start, end); p++) wanted.add(p);
+  }
+  const filtered = pages.filter(p => wanted.has(p.page));
+  return filtered.length ? filtered : pages;
+}
+
+function detectSourceMetaFromText(pages) {
+  const firstLines = (pages[0]?.text || '').split('\n').map(s => s.trim()).filter(Boolean);
+  const title = firstLines.find(line => /^[A-Z0-9][A-Za-z0-9:'’\-\s]{8,70}$/.test(line) && !/^(chapter|contents|table of contents)$/i.test(line));
+  if (title && !document.getElementById('sourceName').value.trim()) {
+    document.getElementById('sourceName').value = title;
+    autoFillAbbr(title);
+  }
+  const byline = firstLines.find(line => /^by\s+/i.test(line));
+  if (byline && !document.getElementById('sourceAuthor').value.trim()) {
+    document.getElementById('sourceAuthor').value = byline.replace(/^by\s+/i, '').trim();
+  }
+}
+
+function normalizeTextLines(text) {
+  return text
+    .replace(/\u00a0/g, ' ')
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .split(/\r?\n/)
+    .map(s => s.replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+}
+
+function parseSpellsFromText(text) {
+  const lines = normalizeTextLines(text);
+  const spells = [];
+  for (let i = 0; i < lines.length - 5; i++) {
+    const kind = parseSpellKind(lines[i + 1]);
+    if (!kind || !looksLikeTitle(lines[i])) continue;
+    const fields = {};
+    let j = i + 2;
+    for (; j < Math.min(lines.length, i + 14); j++) {
+      const m = lines[j].match(/^(Casting Time|Range|Components|Duration):\s*(.+)$/i);
+      if (m) fields[m[1].toLowerCase()] = m[2].trim();
+      if (fields['casting time'] && fields.range && fields.components && fields.duration) break;
+    }
+    if (!fields['casting time'] || !fields.range || !fields.components || !fields.duration) continue;
+    const descStart = j + 1;
+    let descEnd = descStart;
+    while (descEnd < lines.length && !isElementStart(lines, descEnd) && !isSectionHeading(lines[descEnd])) descEnd++;
+    const body = lines.slice(descStart, descEnd).join('\n');
+    const higher = body.match(/(?:At Higher Levels?\.?|At Higher Levels:)\s*(.+)$/is);
+    const description = higher ? body.slice(0, higher.index).trim() : body.trim();
+    const components = parseComponents(fields.components);
+    spells.push({
+      name: lines[i],
+      school: kind.school,
+      level: kind.level,
+      castingTime: fields['casting time'],
+      range: fields.range,
+      hasVerbal: components.hasVerbal,
+      hasSomatic: components.hasSomatic,
+      hasMaterial: components.hasMaterial,
+      material: components.material,
+      duration: fields.duration,
+      isConcentration: /^concentration/i.test(fields.duration),
+      isRitual: /\britual\b/i.test(lines[i + 1]),
+      isTechnomagic: false,
+      classes: inferClasses(body),
+      description,
+      higherLevels: higher ? higher[1].trim() : ''
+    });
+    i = Math.max(i, descEnd - 1);
+  }
+  return uniqueByName(spells);
+}
+
+function parseSpellKind(line) {
+  const cantrip = line.match(/^([A-Za-z]+)\s+cantrip(?:\s*\((ritual)\))?$/i);
+  if (cantrip) return { level: 0, school: titleCase(cantrip[1]) };
+  const leveled = line.match(/^(\d+)(?:st|nd|rd|th)-level\s+([A-Za-z]+)(?:\s*\((ritual)\))?$/i);
+  if (leveled) return { level: parseInt(leveled[1], 10), school: titleCase(leveled[2]) };
+  return null;
+}
+
+function parseComponents(text) {
+  const material = (text.match(/M\s*\((.+)\)/i) || [])[1] || '';
+  return {
+    hasVerbal: /\bV\b/i.test(text),
+    hasSomatic: /\bS\b/i.test(text),
+    hasMaterial: /\bM\b/i.test(text),
+    material
+  };
+}
+
+function inferClasses(text) {
+  const m = text.match(/Spell Lists?\.\s*([A-Za-z,\s]+)/i);
+  if (!m) return [];
+  const allowed = new Set(['Bard','Cleric','Druid','Paladin','Ranger','Sorcerer','Warlock','Wizard','Artificer']);
+  return m[1].split(',').map(s => titleCase(s.trim())).filter(s => allowed.has(s));
+}
+
+function parseFeatsFromText(text) {
+  const lines = normalizeTextLines(text);
+  const feats = [];
+  for (let i = 0; i < lines.length; i++) {
+    const start = featStartInfo(lines, i);
+    if (!start) continue;
+    let bodyStart = start.bodyStart;
+    while (bodyStart < lines.length && isFeatMetaLine(lines[bodyStart])) bodyStart++;
+    let j = bodyStart;
+    while (j < lines.length && !isElementStart(lines, j) && !isSectionHeading(lines[j])) j++;
+    const fullText = lines.slice(bodyStart, j).filter(line => !isFeatMetaLine(line)).join('\n');
+    const parsed = parseFeatFullText({ name: start.name, prerequisite: start.prerequisite, fullText });
+    if (parsed.description || parsed.benefits?.length) feats.push(parsed);
+    i = Math.max(i, j - 1);
+  }
+  return uniqueByName(feats);
+}
+
+function featStartInfo(lines, i) {
+  const line = lines[i] || '';
+  const next = lines[i + 1] || '';
+  if (isLeveledFeatureHeading(line)) return null;
+  const prefixed = line.match(/^Feat:\s*(.+)$/i);
+  if (prefixed) {
+    const name = normalizeExtractedName(prefixed[1]);
+    if (isRejectedFeatTitle(name)) return null;
+    const lookahead = lines.slice(i + 1, i + 6).join('\n');
+    if (/^(Ability Scores?|Skill Proficiencies|Tool Proficienc(?:y|ies)|Equipment):/im.test(lookahead)) return null;
+    const prerequisite = /^Prerequisite:/i.test(next) ? next.replace(/^Prerequisite:\s*/i, '').trim() : '';
+    return { name, prerequisite, bodyStart: i + 1 + (prerequisite ? 1 : 0) };
+  }
+  if (!looksLikeTitle(line) || isRejectedFeatTitle(line) || /:/.test(line)) return null;
+  const featKind = next.match(/^(?:(?:General|Origin|Epic Boon|Fighting Style)\s+)?Feat(?:\s*\(([^)]*)\)|\s*$)/i);
+  if (featKind) {
+    const prerequisite = (featKind[1]?.match(/Prerequisite:\s*(.+)$/i) || [])[1]?.trim() || '';
+    return { name: normalizeExtractedName(line), prerequisite, bodyStart: i + 2 };
+  }
+  if (/^Prerequisite:|^You gain|^You have|^Increase your/i.test(next)) {
+    const prerequisite = /^Prerequisite:/i.test(next) ? next.replace(/^Prerequisite:\s*/i, '').trim() : '';
+    return { name: normalizeExtractedName(line), prerequisite, bodyStart: i + 1 + (prerequisite ? 1 : 0) };
+  }
+  return null;
+}
+
+function isRejectedFeatTitle(title) {
+  const text = cleanExtractedTitle(title);
+  return !text
+    || /^ARTIST:/i.test(text)
+    || /^Level\s+\d+\b/i.test(text)
+    || /^(General|Origin|Epic Boon|Fighting Style)\s+Feats?$/i.test(text)
+    || /\(see\b/i.test(text);
+}
+
+function isFeatMetaLine(line) {
+  return /^ARTIST:/i.test(line)
+    || /^['’]?TIS\b/i.test(line)
+    || /^(?:(?:General|Origin|Epic Boon|Fighting Style)\s+)?Feat\b/i.test(line);
+}
+
+function parseMagicItemsFromText(text) {
+  const lines = normalizeTextLines(text);
+  const items = [];
+  const rarityWords = 'common|uncommon|rare|very rare|legendary|artifact|varies';
+  for (let i = 0; i < lines.length - 1; i++) {
+    if (!looksLikeTitle(lines[i])) continue;
+    const detail = lines[i + 1].match(new RegExp(`^(.+?),\\s*(${rarityWords})(?:\\s*\\((requires attunement.*?)\\))?$`, 'i'));
+    if (!detail) continue;
+    let j = i + 2;
+    while (j < lines.length && !isElementStart(lines, j) && !isSectionHeading(lines[j])) j++;
+    const description = lines.slice(i + 2, j).join('\n').trim();
+    items.push({
+      name: lines[i],
+      type: titleCase(detail[1].trim()),
+      rarity: titleCase(detail[2].trim()),
+      requiresAttunement: !!detail[3],
+      description,
+      charges: parseCharges(description),
+      recharge: parseRecharge(description)
+    });
+    i = Math.max(i, j - 1);
+  }
+  return uniqueByName(items);
+}
+
+function parseItemsFromText(text) {
+  const lines = normalizeTextLines(text);
+  const items = [];
+  const row = /^(.+?)\s+(\d+(?:\.\d+)?)\s*(cp|sp|gp|pp)\s+(\d+(?:\.\d+)?)\s*lb\.?(?:\s+(.+))?$/i;
+  for (const line of lines) {
+    const m = line.match(row);
+    if (!m || !looksLikeTitle(m[1])) continue;
+    items.push({
+      name: m[1].trim(),
+      category: 'Gear',
+      cost: m[2],
+      currency: m[3].toLowerCase(),
+      weight: m[4],
+      description: m[5] || '',
+      damage: '',
+      damageType: '',
+      properties: ''
+    });
+  }
+  return uniqueByName(items);
+}
+
+function parseBackgroundsFromText(text) {
+  const lines = normalizeTextLines(text);
+  const backgrounds = [];
+  for (let i = 0; i < lines.length; i++) {
+    const name = backgroundStartName(lines, i);
+    if (!name) continue;
+    const end = findElementEnd(lines, i + 1);
+    const block = lines.slice(i + 1, end);
+    const parsed = parseBackgroundBlock(name, block);
+    if (parsed.features.length || parsed.skillProficiencies.length) backgrounds.push(parsed);
+    i = Math.max(i, end - 1);
+  }
+  return uniqueByName(backgrounds);
+}
+
+function parseRacesFromText(text) {
+  const lines = normalizeTextLines(text);
+  const races = [];
+  for (let i = 0; i < lines.length; i++) {
+    const name = raceStartName(lines, i);
+    if (!name) continue;
+    const end = findElementEnd(lines, i + 1);
+    const block = lines.slice(i + 1, end);
+    const parsed = parseRaceBlock(name, block);
+    if (parsed.traits.length || parsed.speed || parsed.size) races.push(parsed);
+    i = Math.max(i, end - 1);
+  }
+  return uniqueByName(races);
+}
+
+function parseArchetypesFromText(text) {
+  const lines = normalizeTextLines(text);
+  const archetypes = [];
+  let subclassSectionClass = '';
+  for (let i = 0; i < lines.length; i++) {
+    const sectionClass = subclassSectionHeadingClass(lines[i]);
+    if (sectionClass) {
+      subclassSectionClass = sectionClass;
+      continue;
+    }
+    if (/^Chapter\s+\d+|^(Backgrounds|Species|Magic Items|Monsters|Appendix)\b/i.test(lines[i])) {
+      subclassSectionClass = '';
+    }
+    const start = archetypeStartInfo(lines, i, subclassSectionClass);
+    if (!start) continue;
+    const end = findArchetypeEnd(lines, i + 1, subclassSectionClass);
+    const block = lines.slice(i + 1, end);
+    const parentClass = start.class || inferClassFromBlock(block);
+    const features = parseLeveledFeatureBlocks(block, parentClass ? `${parentClass} feature` : 'feature');
+    const firstFeature = block.findIndex((line, idx) => !!featureStartInfo(block, idx, parentClass ? `${parentClass} feature` : 'feature'));
+    const description = block
+      .slice(0, firstFeature === -1 ? block.length : firstFeature)
+      .filter(line => !isArchetypeMetaLine(line) && !isFeatureMarkerLine(line))
+      .slice(0, 3)
+      .join(' ');
+    archetypes.push({
+      name: start.name,
+      class: parentClass || '',
+      supports: archetypeSupport(parentClass || ''),
+      description,
+      features
+    });
+    i = Math.max(i, end - 1);
+  }
+  return uniqueByName(archetypes);
+}
+
+function parseClassesFromText(text) {
+  const lines = normalizeTextLines(text);
+  const classes = [];
+  for (let i = 0; i < lines.length; i++) {
+    const name = classStartName(lines, i);
+    if (!name) continue;
+    const end = findElementEnd(lines, i + 1);
+    const block = lines.slice(i + 1, end);
+    const parsed = parseClassBlock(name, block);
+    if (parsed.hitDie || parsed.features.length) classes.push(parsed);
+    i = Math.max(i, end - 1);
+  }
+  return uniqueByName(classes);
+}
+
+function parseBackgroundBlock(name, block) {
+  const background = {
+    name,
+    description: '',
+    skillProficiencies: [],
+    toolProficiencies: [],
+    languages: [],
+    languageChoices: 0,
+    equipment: '',
+    features: []
+  };
+  let firstField = block.length;
+  for (let i = 0; i < block.length; i++) {
+    const line = block[i];
+    if (/^Skill Proficiencies:/i.test(line)) {
+      background.skillProficiencies = parseSkillsFromText(line);
+      firstField = Math.min(firstField, i);
+    } else if (/^Tool Proficiencies:/i.test(line)) {
+      background.toolProficiencies = splitListValue(afterColon(line));
+      firstField = Math.min(firstField, i);
+    } else if (/^Languages:/i.test(line)) {
+      const languageInfo = parseLanguageInfo(afterColon(line));
+      background.languages = languageInfo.languages;
+      background.languageChoices = languageInfo.choices;
+      firstField = Math.min(firstField, i);
+    } else if (/^(Equipment|Starting Equipment):/i.test(line)) {
+      background.equipment = afterColon(line);
+      firstField = Math.min(firstField, i);
+    }
+  }
+  background.description = block.slice(0, firstField).filter(line => !isBackgroundMetaLine(line)).join(' ');
+  for (let i = 0; i < block.length; i++) {
+    const feature = block[i].match(/^(?:Background\s+)?Feature:\s*(.+)$/i);
+    if (!feature) continue;
+    const next = findNextIndex(block, i + 1, line => /^(?:Background\s+)?Feature:/i.test(line));
+    background.features.push({
+      name: feature[1].trim(),
+      description: block.slice(i + 1, next).filter(line => !isBackgroundMetaLine(line)).join('\n').trim()
+    });
+    i = next - 1;
+  }
+  if (!background.features.length) {
+    const featureStart = block.findIndex((line, i) => looksLikeTitle(line) && i > firstField && !isBackgroundMetaLine(line));
+    if (featureStart !== -1) {
+      background.features.push({
+        name: block[featureStart],
+        description: block.slice(featureStart + 1).filter(line => !isBackgroundMetaLine(line)).join('\n').trim()
+      });
+    }
+  }
+  return background;
+}
+
+function parseRaceBlock(name, block) {
+  const race = {
+    name,
+    description: '',
+    size: '',
+    speed: 0,
+    abilityScores: {},
+    languages: [],
+    languageChoices: 0,
+    traits: [],
+    subraces: []
+  };
+  let firstField = block.length;
+  for (let i = 0; i < block.length; i++) {
+    const line = block[i];
+    if (/^Size:/i.test(line)) {
+      race.size = parseSize(line);
+      firstField = Math.min(firstField, i);
+    } else if (/^Speed:/i.test(line)) {
+      race.speed = parseSpeed(line);
+      firstField = Math.min(firstField, i);
+    } else if (/^Languages:/i.test(line)) {
+      const languageInfo = parseLanguageInfo(afterColon(line));
+      race.languages = languageInfo.languages;
+      race.languageChoices = languageInfo.choices;
+      firstField = Math.min(firstField, i);
+    }
+  }
+  race.abilityScores = parseAbilityScoresFromText(block.join(' '));
+  race.description = block.slice(0, firstField).filter(line => !isRaceMetaLine(line)).join(' ');
+  const traitBlocks = parseNamedBlocks(block, line => looksLikeTitle(line) && !isRaceMetaLine(line) && !isGenericRaceHeading(line));
+  race.traits = traitBlocks
+    .map(t => ({ name: t.name, description: t.lines.filter(line => !isRaceMetaLine(line)).join('\n').trim() }))
+    .filter(t => t.description);
+  if (!race.traits.length) {
+    const fallback = block.filter(line => !isRaceMetaLine(line)).slice(firstField).join('\n').trim();
+    if (fallback) race.traits.push({ name: `${name} Traits`, description: fallback });
+  }
+  return race;
+}
+
+function parseClassBlock(name, block) {
+  const cls = {
+    name,
+    description: '',
+    hitDie: 0,
+    savingThrows: [],
+    armorProficiencies: [],
+    weaponProficiencies: [],
+    skillChoices: { count: 0, from: [] },
+    startingEquipment: '',
+    archetypeLevel: 0,
+    archetypeLabel: archetypeSupport(name),
+    archetypeSupports: archetypeSupport(name),
+    spellcastingAbility: '',
+    spellcastingList: '',
+    spellcastingPrepare: '',
+    ritualCasting: false,
+    features: []
+  };
+  let firstField = block.length;
+  for (let i = 0; i < block.length; i++) {
+    const line = block[i];
+    if (/^Hit Dice?:/i.test(line) || /^Hit Point Die\b/i.test(line) || /^Hit Points/i.test(line)) {
+      cls.hitDie = parseHitDie(line);
+      firstField = Math.min(firstField, i);
+    } else if (/^Saving Throw(?:s| Proficiencies)?/i.test(line)) {
+      cls.savingThrows = parseAbilitiesFromText(stripLeadingFieldLabel(line, /^Saving Throw(?:s| Proficiencies)?/i));
+      firstField = Math.min(firstField, i);
+    } else if (/^Armor\b/i.test(line)) {
+      cls.armorProficiencies = splitListValue(stripLeadingFieldLabel(line, /^Armor(?:\s+Tr\s*ing|\s+Training)?/i));
+      firstField = Math.min(firstField, i);
+    } else if (/^Weapon(?:s| Proficiencies)?/i.test(line)) {
+      cls.weaponProficiencies = splitListValue(stripLeadingFieldLabel(line, /^Weapon(?:s| Proficiencies)?/i));
+      firstField = Math.min(firstField, i);
+    } else if (/^Skill(?:s| Proficiencies)?/i.test(line)) {
+      cls.skillChoices = parseSkillChoice(line);
+      firstField = Math.min(firstField, i);
+    } else if (/^(Equipment|Starting Equipment)\b:?/i.test(line)) {
+      cls.startingEquipment = stripLeadingFieldLabel(line, /^(Equipment|Starting Equipment)/i);
+      firstField = Math.min(firstField, i);
+    } else if (/^Spellcasting Ability:/i.test(line)) {
+      cls.spellcastingAbility = titleCase(afterColon(line));
+      firstField = Math.min(firstField, i);
+    }
+  }
+  const blockText = block.join(' ');
+  const spellcasting = blockText.match(/\b(Strength|Dexterity|Constitution|Intelligence|Wisdom|Charisma)\b\s+is your spellcasting ability\b/i);
+  if (spellcasting && !cls.spellcastingAbility) cls.spellcastingAbility = titleCase(spellcasting[1]);
+  const hasSpellcastingHeading = block.some(line => /^Spellcasting$/i.test(line) || /^Spellcasting Ability:/i.test(line));
+  if (cls.spellcastingAbility || hasSpellcastingHeading) cls.spellcastingList = name;
+  if (/\b(prepare|preparing)\b.{0,80}\bspells?\b/i.test(blockText)) cls.spellcastingPrepare = true;
+  else if (/\bspells?\s+known\b|\byou know\b.{0,40}\bspells?\b/i.test(blockText)) cls.spellcastingPrepare = false;
+  cls.ritualCasting = /\britual casting\b/i.test(blockText);
+
+  const archetype = blockText.match(/(?:choose|gain|select).{0,100}?(?:subclass|archetype|path|college|domain|circle|oath|patron|tradition).{0,60}?(?:at|when you reach)\s+(\d+)(?:st|nd|rd|th)\s+level/i)
+    || blockText.match(/(?:at|when you reach)\s+(\d+)(?:st|nd|rd|th)\s+level.{0,100}?(?:choose|gain|select).{0,100}?(?:subclass|archetype|path|college|domain|circle|oath|patron|tradition)/i);
+  if (archetype) cls.archetypeLevel = parseInt(archetype[1], 10);
+  cls.description = block.slice(0, firstField).filter(line => !isClassMetaLine(line)).join(' ');
+  cls.features = parseLeveledFeatureBlocks(block, `${name} feature`);
+  const archetypeFeature = cls.features.find(f => /\b(subclass|archetype|path|college|domain|circle|oath|patron|tradition)\b/i.test(f.name || ''))
+    || cls.features.find(f => /\b(subclass|archetype|path|college|domain|circle|oath|patron|tradition)\b/i.test(`${f.name} ${f.description}`));
+  if (archetypeFeature) cls.archetypeLevel = parseInt(archetypeFeature.level, 10) || cls.archetypeLevel;
+  return cls;
+}
+
+function backgroundStartName(lines, i) {
+  if (isKnownFieldLine(lines[i])) return '';
+  const prefixed = lines[i].match(/^Background:\s*(.+)$/i);
+  if (prefixed) return prefixed[1].trim();
+  if (looksLikeTitle(lines[i]) && lines.slice(i + 1, i + 8).some(line => /^Skill Proficiencies:/i.test(line))) return lines[i];
+  return '';
+}
+
+function raceStartName(lines, i) {
+  if (isKnownFieldLine(lines[i])) return '';
+  if (backgroundStartName(lines, i) || classStartName(lines, i)) return '';
+  const prefixed = lines[i].match(/^(?:Race|Species):\s*(.+)$/i);
+  if (prefixed) return prefixed[1].trim();
+  const next = lines.slice(i + 1, i + 10).join('\n');
+  const markers = [/^Size:/im, /^Speed:/im, /^Languages:/im, /^Creature Type:/im].filter(re => re.test(next)).length;
+  if (looksLikeTitle(lines[i]) && markers >= 2) return lines[i];
+  return '';
+}
+
+function archetypeStartInfo(lines, i, subclassSectionClass = '') {
+  if (isKnownFieldLine(lines[i])) return null;
+  if (isLeveledFeatureHeading(lines[i])) return null;
+  if (isGenericArchetypeHeading(lines[i])) return null;
+  if (backgroundStartName(lines, i) || raceStartName(lines, i) || classStartName(lines, i)) return null;
+  const prefixed = lines[i].match(/^(?:Subclass|Archetype):\s*(.+)$/i);
+  if (prefixed) return { name: normalizeExtractedName(prefixed[1]), class: inferClassFromBlock(lines.slice(i + 1, i + 6)) };
+  const support = lines[i].match(/^(Primal Path|Bard College|Divine Domain|Druid Circle|Martial Archetype|Monastic Tradition|Sacred Oath|Ranger Archetype|Roguish Archetype|Sorcerous Origin|Otherworldly Patron|Arcane Tradition):\s*(.+)$/i);
+  if (support) return { name: normalizeExtractedName(support[2]), class: classFromArchetypeSupport(titleCase(support[1])) };
+  if (subclassSectionClass && looksLikeSubclassHeading(lines, i)) {
+    return { name: normalizeExtractedName(lines[i]), class: subclassSectionClass };
+  }
+  const next = lines[i + 1] || '';
+  const cls = inferClassFromBlock([next]);
+  if (looksLikeTitle(lines[i]) && cls && /\b(subclass|archetype)\b/i.test(next)) {
+    return { name: normalizeExtractedName(lines[i]), class: cls };
+  }
+  return null;
+}
+
+function subclassSectionHeadingClass(line) {
+  const m = cleanExtractedTitle(line).match(/\b([A-Za-z]+)\s+Subclasses\b/i);
+  return m ? titleCase(m[1]) : '';
+}
+
+function looksLikeSubclassHeading(lines, i) {
+  const line = cleanExtractedTitle(lines[i] || '');
+  if (!looksLikeTitle(line) || isGenericArchetypeHeading(line)) return false;
+  if (/^(artist|art|table|spell|level|features?|chapter|appendix)\b/i.test(line)) return false;
+  if (/[\d,.;:]/.test(line)) return false;
+  if (line.split(/\s+/).length > 4) return false;
+  const previous = cleanExtractedTitle(lines[i - 1] || '');
+  if (looksLikeTitle(previous) && !isGenericArchetypeHeading(previous)) return false;
+  const introWindow = lines.slice(i + 1, i + 7).join('\n');
+  const featureWindow = lines.slice(i + 1, i + 24);
+  return /ARTIST:|Craft|Expert|Specialist|specialization|expert|modifies|creates|builds/i.test(introWindow)
+    && (/\bSUBCLASS\b/i.test(featureWindow.join('\n')) || featureWindow.some(isLeveledFeatureHeading));
+}
+
+function isGenericArchetypeHeading(line) {
+  return /\bsubclasses?\b/i.test(String(line || ''))
+    || /\bspells?\b/i.test(String(line || ''))
+    || /^(features?|spells?|spell list|artist|chapter|appendix|traits|table of contents)$/i.test(cleanExtractedTitle(line));
+}
+
+function classStartName(lines, i) {
+  if (isKnownFieldLine(lines[i])) return '';
+  const coreTraits = (lines[i] || '').match(/^Core\s+(.+?)\s+Traits$/i);
+  if (coreTraits) return titleCase(coreTraits[1]);
+  const prefixed = lines[i].match(/^Class:\s*(.+)$/i);
+  if (prefixed) {
+    const classWindow = lines.slice(i + 1, i + 4).join('\n');
+    return (/^Hit Dice?:/im.test(classWindow) || /^Hit Points/im.test(classWindow)) ? prefixed[1].trim() : '';
+  }
+  if (/:/.test(lines[i] || '') || /^\d/.test(lines[i] || '')) return '';
+  const hitWindow = lines.slice(i + 1, i + 4).join('\n');
+  const saveWindow = lines.slice(i + 1, i + 10).join('\n');
+  if (looksLikeTitle(lines[i]) && (/^Hit Dice?:/im.test(hitWindow) || /^Hit Points/im.test(hitWindow)) && /^Saving Throws?:/im.test(saveWindow)) return lines[i];
+  return '';
+}
+
+function findElementEnd(lines, start) {
+  let i = start;
+  while (i < lines.length && !isElementStart(lines, i) && !isSectionHeading(lines[i])) i++;
+  return i;
+}
+
+function findArchetypeEnd(lines, start, subclassSectionClass = '') {
+  let i = start;
+  while (i < lines.length) {
+    if (isSectionHeading(lines[i])) break;
+    if ((archetypeStartInfo(lines, i, subclassSectionClass) || isElementStart(lines, i)) && !/^Class:/i.test(lines[i])) break;
+    i++;
+  }
+  return i;
+}
+
+function findNextIndex(lines, start, predicate) {
+  for (let i = start; i < lines.length; i++) {
+    if (predicate(lines[i], i)) return i;
+  }
+  return lines.length;
+}
+
+function afterColon(line) {
+  return String(line || '').replace(/^[^:]+:\s*/, '').trim();
+}
+
+function stripLeadingFieldLabel(line, labelPattern) {
+  return String(line || '')
+    .replace(labelPattern, '')
+    .replace(/^[:.\s]+/, '')
+    .trim();
+}
+
+function splitListValue(text) {
+  return String(text || '')
+    .replace(/\s+and\s+/gi, ', ')
+    .split(/[,;]|\bor\b/gi)
+    .map(s => s.trim().replace(/\.$/, ''))
+    .filter(Boolean);
+}
+
+const SKILL_NAMES = [
+  'Acrobatics','Animal Handling','Arcana','Athletics','Deception','History','Insight','Intimidation',
+  'Investigation','Medicine','Nature','Perception','Performance','Persuasion','Religion','Sleight of Hand',
+  'Stealth','Survival'
+];
+
+const ABILITY_NAMES = ['Strength','Dexterity','Constitution','Intelligence','Wisdom','Charisma'];
+
+function parseSkillsFromText(text) {
+  const lower = String(text || '').toLowerCase();
+  return SKILL_NAMES.filter(skill => lower.includes(skill.toLowerCase()));
+}
+
+function parseAbilitiesFromText(text) {
+  const lower = String(text || '').toLowerCase();
+  return ABILITY_NAMES.filter(ability => lower.includes(ability.toLowerCase()));
+}
+
+function parseLanguagesFromText(text) {
+  return parseLanguageInfo(text).languages;
+}
+
+const KNOWN_LANGUAGE_NAMES = [
+  'Common','Dwarvish','Elvish','Giant','Gnomish','Goblin','Halfling','Orc',
+  'Abyssal','Celestial','Draconic','Deep Speech','Infernal','Primordial','Sylvan','Undercommon',
+  "Thieves' Cant", 'Druidic'
+];
+
+const NUMBER_WORDS = {
+  one: 1, two: 2, three: 3, four: 4, five: 5,
+  six: 6, seven: 7, eight: 8, nine: 9, ten: 10
+};
+
+function parseLanguageInfo(text) {
+  const src = String(text || '').trim();
+  if (!src || /^none$/i.test(src)) return { languages: [], choices: 0 };
+  const lower = src.toLowerCase();
+  const languages = KNOWN_LANGUAGE_NAMES.filter(lang => {
+    const escaped = lang.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/'/g, "['’]");
+    return new RegExp(`\\b${escaped}\\b`, 'i').test(src);
+  });
+  let choices = 0;
+  if (/\b(choice|choose|your choice|any|other language)\b/i.test(src)) {
+    const countMatch = lower.match(/\b(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\b(?=.{0,40}\b(?:language|languages|of your choice|other)\b)/i);
+    choices = countMatch ? parseCountWord(countMatch[1]) : 1;
+  }
+  if (!languages.length && !choices && !/\bchoice|choose|any\b/i.test(src)) {
+    languages.push(...splitListValue(src).filter(v => !/^(and|or)$/i.test(v)));
+  }
+  return { languages: uniqueStrings(languages), choices };
+}
+
+function parseCountWord(value) {
+  if (/^\d+$/.test(String(value))) return parseInt(value, 10);
+  return NUMBER_WORDS[String(value || '').toLowerCase()] || 0;
+}
+
+function parseAbilityScoresFromText(text) {
+  const scores = {};
+  const abilityMap = {
+    strength: 'strength',
+    dexterity: 'dexterity',
+    constitution: 'constitution',
+    intelligence: 'intelligence',
+    wisdom: 'wisdom',
+    charisma: 'charisma'
+  };
+  const re = /\b(Strength|Dexterity|Constitution|Intelligence|Wisdom|Charisma)\b(?: score)?\s+increases?\s+by\s+(\d+)/gi;
+  let match;
+  while ((match = re.exec(text)) !== null) {
+    scores[abilityMap[match[1].toLowerCase()]] = parseInt(match[2], 10);
+  }
+  return scores;
+}
+
+function parseSize(text) {
+  const m = String(text || '').match(/\b(Tiny|Small|Medium|Large|Huge|Gargantuan)\b/i);
+  return m ? titleCase(m[1]) : '';
+}
+
+function parseSpeed(text) {
+  const m = String(text || '').match(/(\d+)\s*feet/i);
+  return m ? parseInt(m[1], 10) : 0;
+}
+
+function parseHitDie(text) {
+  const m = String(text || '').match(/\bd(\d+)\b|1d(\d+)/i);
+  return m ? parseInt(m[1] || m[2], 10) : 0;
+}
+
+function parseSkillChoice(line) {
+  const count = (line.match(/choose\s+(\d+)/i) || [])[1];
+  return {
+    count: count ? parseInt(count, 10) : 0,
+    from: parseSkillsFromText(line)
+  };
+}
+
+function parseNamedBlocks(lines, isStart) {
+  const blocks = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (!isStart(lines[i], i)) continue;
+    const next = findNextIndex(lines, i + 1, (line, idx) => isStart(line, idx) || isClassMetaLine(line) || isRaceMetaLine(line) || isBackgroundMetaLine(line));
+    blocks.push({ name: lines[i], lines: lines.slice(i + 1, next) });
+    i = next - 1;
+  }
+  return blocks;
+}
+
+function parseLeveledFeatureBlocks(lines, fallbackKind) {
+  const features = [];
+  for (let i = 0; i < lines.length; i++) {
+    const start = featureStartInfo(lines, i, fallbackKind);
+    if (!start) continue;
+    const next = findNextIndex(lines, start.descriptionStart, (line, idx) => !!featureStartInfo(lines, idx, fallbackKind) || isElementStart(lines, idx));
+    const description = lines.slice(start.descriptionStart, next)
+      .filter(line => !isClassMetaLine(line) && !isArchetypeMetaLine(line))
+      .join('\n')
+      .trim();
+    if (start.name && description) {
+      features.push({ name: start.name, level: start.level, action: inferAction(description), usage: inferUsage(description), description });
+    }
+    i = Math.max(i, next - 1);
+  }
+  return uniqueByName(features);
+}
+
+function featureStartInfo(lines, i, fallbackKind) {
+  const line = lines[i] || '';
+  const next = lines[i + 1] || '';
+  const leveled = parseLeveledFeatureHeading(line);
+  if (leveled) return { name: leveled.name, level: leveled.level, descriptionStart: i + 1 };
+  if (looksLikeTitle(line)) {
+    const marker = next.match(/^(\d+)(?:st|nd|rd|th)-level\b.*(?:feature|features?)\b/i);
+    if (marker) return { name: line, level: parseInt(marker[1], 10), descriptionStart: i + 2 };
+  }
+  const direct = line.match(/^(\d+)(?:st|nd|rd|th)(?:-|\s+)level:?\s+(.+)$/i);
+  if (direct) return { name: direct[2].replace(/\bfeatures?\b/i, '').trim(), level: parseInt(direct[1], 10), descriptionStart: i + 1 };
+  const named = line.match(/^(.+?)\s+\((\d+)(?:st|nd|rd|th)(?:-|\s+)level(?:\s+.+?)?\)$/i);
+  if (named) return { name: named[1].trim(), level: parseInt(named[2], 10), descriptionStart: i + 1 };
+  if (looksLikeTitle(line) && /\bfeature\b/i.test(fallbackKind || '') && /^\d+(?:st|nd|rd|th)-level\b/i.test(next)) {
+    const level = parseInt(next.match(/^(\d+)/)[1], 10);
+    return { name: line, level, descriptionStart: i + 2 };
+  }
+  return null;
+}
+
+function isFeatureMarkerLine(line) {
+  return isLeveledFeatureHeading(line)
+    || /^(\d+)(?:st|nd|rd|th)-level\b.*(?:feature|features?)\b/i.test(line)
+    || /^(\d+)(?:st|nd|rd|th)(?:-|\s+)level:/i.test(line);
+}
+
+function parseLeveledFeatureHeading(line) {
+  const text = String(line || '').trim();
+  const match = text.match(/^Leve\w*\.?\s*(\d+)\s*[:;.]\s*(.+)$/i)
+    || text.match(/^Level\s*(\d+)\s*[:;.]\s*(.+)$/i);
+  if (!match) return null;
+  const name = cleanExtractedTitle(match[2]);
+  if (!name || isGenericFeatureHeading(name)) return null;
+  return { level: parseInt(match[1], 10), name };
+}
+
+function isLeveledFeatureHeading(line) {
+  return !!parseLeveledFeatureHeading(line);
+}
+
+function cleanExtractedTitle(text) {
+  return String(text || '')
+    .replace(/\s+/g, ' ')
+    .replace(/[†]+$/i, '')
+    .trim();
+}
+
+function normalizeExtractedName(text) {
+  let value = cleanExtractedTitle(text);
+  const corrections = [
+    [/^Bare Smit$/i, 'Battle Smith'],
+    [/^ApTILLeRIsT$/i, 'Artillerist'],
+    [/\bGrearer\b/gi, 'Greater'],
+    [/\bHosprtauity\b/gi, 'Hospitality'],
+    [/\bSiperYs\b/gi, 'Siberys'],
+    [/\bSeribing\b/gi, 'Scribing']
+  ];
+  corrections.forEach(([pattern, replacement]) => {
+    value = value.replace(pattern, replacement);
+  });
+  return titleCase(value);
+}
+
+function isGenericFeatureHeading(text) {
+  return /^(features?|spells?|spell list|table)$/i.test(String(text || '').trim());
+}
+
+function inferAction(text) {
+  const m = String(text || '').match(/\b(?:as|use|take)\s+(?:a|an|your)\s+(action|bonus action|reaction)\b/i);
+  return m ? titleCase(m[1]) : '';
+}
+
+function inferUsage(text) {
+  if (/short or long rest/i.test(text)) return '1/Short Rest';
+  if (/long rest/i.test(text)) return '1/Long Rest';
+  const m = String(text || '').match(/(\d+)\s+times?(?: per| each)?\s+(short rest|long rest|day)/i);
+  if (!m) return '';
+  const unit = /short/i.test(m[2]) ? 'Short Rest' : /long/i.test(m[2]) ? 'Long Rest' : 'Day';
+  return `${m[1]}/${unit}`;
+}
+
+function isBackgroundMetaLine(line) {
+  return /^(Skill Proficiencies|Tool Proficiencies|Languages|Equipment|Starting Equipment):/i.test(line);
+}
+
+function isRaceMetaLine(line) {
+  return /^(Ability Score Increase|Age|Alignment|Size|Speed|Languages|Creature Type):/i.test(line);
+}
+
+function isClassMetaLine(line) {
+  return /^(Hit Dice?|Hit Point Die|Hit Points|Proficiencies|Armor|Weapons?|Tools?|Saving Throw(?:s| Proficiencies)?|Skill(?:s| Proficiencies)?|Equipment|Starting Equipment|Spellcasting Ability)\b/i.test(line);
+}
+
+function isArchetypeMetaLine(line) {
+  return /^(Class|Subclass|Archetype):/i.test(line) || isFeatureMarkerLine(line);
+}
+
+function isKnownFieldLine(line) {
+  return isBackgroundMetaLine(line) || isRaceMetaLine(line) || isClassMetaLine(line) || /^(Feature|Background Feature):/i.test(line);
+}
+
+function isGenericRaceHeading(line) {
+  return /^(Racial Traits|Species Traits|Traits)$/i.test(line);
+}
+
+function inferClassFromBlock(lines) {
+  const text = lines.join(' ');
+  const match = text.match(/\b(Barbarian|Bard|Cleric|Druid|Fighter|Monk|Paladin|Ranger|Rogue|Sorcerer|Warlock|Wizard|Artificer)\b/i);
+  return match ? titleCase(match[1]) : '';
+}
+
+function classFromArchetypeSupport(support) {
+  const map = {
+    'Primal Path': 'Barbarian',
+    'Bard College': 'Bard',
+    'Divine Domain': 'Cleric',
+    'Druid Circle': 'Druid',
+    'Martial Archetype': 'Fighter',
+    'Monastic Tradition': 'Monk',
+    'Sacred Oath': 'Paladin',
+    'Ranger Archetype': 'Ranger',
+    'Roguish Archetype': 'Rogue',
+    'Sorcerous Origin': 'Sorcerer',
+    'Otherworldly Patron': 'Warlock',
+    'Arcane Tradition': 'Wizard'
+  };
+  return map[support] || '';
+}
+
+function looksLikeTitle(line) {
+  if (!line || line.length < 3 || line.length > 80) return false;
+  if (/[.!?]$/.test(line)) return false;
+  if (/^(chapter|part|appendix|table|page|\d+)$/i.test(line)) return false;
+  return /^[A-Z0-9][A-Za-z0-9:'(),&’\-\s]+$/.test(line);
+}
+
+function isSectionHeading(line) {
+  return /^(chapter|appendix|contents|table of contents|spells|feats|magic items|equipment|races|backgrounds|classes|bastions?|bastion facilities|companions?|vehicles?|monsters?)$/i.test(line);
+}
+
+function isElementStart(lines, i) {
+  const line = lines[i] || '';
+  const next = lines[i + 1] || '';
+  if (isLeveledFeatureHeading(line)) return false;
+  return parseSpellKind(next)
+    || !!featStartInfo(lines, i)
+    || (looksLikeTitle(line) && /^(.+?),\s*(common|uncommon|rare|very rare|legendary|artifact|varies)(?:\s*\(|$)/i.test(next))
+    || backgroundStartName(lines, i)
+    || raceStartName(lines, i)
+    || archetypeStartInfo(lines, i)
+    || classStartName(lines, i);
+}
+
+function uniqueByName(items) {
+  const seen = new Set();
+  return items.filter(item => {
+    const key = (item.name || '').trim().toLowerCase();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function uniqueStrings(items) {
+  const seen = new Set();
+  return (items || []).filter(item => {
+    const key = String(item || '').trim().toLowerCase();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function titleCase(text) {
+  return String(text || '').toLowerCase().replace(/\b[a-z]/g, c => c.toUpperCase()).replace(/\bOf\b/g, 'of');
+}
+
+function parseCharges(text) {
+  const m = String(text || '').match(/\b(\d+)\s+charges?\b/i);
+  return m ? parseInt(m[1], 10) : 0;
+}
+
+function parseRecharge(text) {
+  const m = String(text || '').match(/regains?[^.]+(?:dawn|dusk|sunrise|sunset|daily|long rest)[^.]*\./i);
+  return m ? m[0] : '';
+}
+
+// ─────────────────────────────────────────────
 // Extraction
 // ─────────────────────────────────────────────
 async function startExtraction() {
   const types = getSelectedTypes();
-  if (!types.length || !pdfFile || !apiKey) return;
+  if (!types.length || !pdfFile) return;
 
   document.getElementById('stepReview').classList.remove('hidden');
   document.getElementById('extractProgress').classList.remove('hidden');
@@ -1002,30 +2210,106 @@ async function startExtraction() {
   document.getElementById('extractErrors').innerHTML = '';
   document.getElementById('progressBar').style.width = '0%';
 
-  // TOC pass — only run if no manual page range is set and file is > 5MB
+  try {
+    extractedData = await deterministicExtract(pdfFile, types, (pct, msg) => setProgress(pct, msg));
+  } catch (err) {
+    extractedData = {};
+    errors.push(err.message);
+    console.error('Deterministic extraction failed:', err);
+  }
+
+  skippedItems = filterIncomplete();
+
+  setProgress(100, 'Parsing complete.');
+  document.getElementById('extractSpinner').classList.add('hidden');
+  document.getElementById('extractBtn').disabled = false;
+
+  const deterministicBannerParts = [];
+  if (errors.length) deterministicBannerParts.push(...errors.map(e => '• ' + e));
+  if (skippedItems.length) {
+    deterministicBannerParts.push(`• ${skippedItems.length} element(s) skipped — below 80% complete (see skipped-elements.txt in ZIP)`);
+  }
+  const unsupportedTypes = types.filter(t => !DETERMINISTIC_PARSERS[t]);
+  if (unsupportedTypes.length) {
+    deterministicBannerParts.push(`• Rule parsers are not implemented yet for: ${unsupportedTypes.map(t => TYPE_LABELS[t] || t).join(', ')}`);
+  }
+  if (deterministicBannerParts.length) {
+    const errEl = document.getElementById('extractErrors');
+    errEl.className = errors.length ? 'alert alert-warning' : 'alert alert-info';
+    errEl.innerHTML = '<strong>Notes:</strong><br>' + deterministicBannerParts.join('<br>');
+    errEl.classList.remove('hidden');
+  }
+
+  setTimeout(() => {
+    document.getElementById('extractProgress').classList.add('hidden');
+    buildReviewUI();
+    document.getElementById('reviewArea').classList.remove('hidden');
+    markChanged();
+  }, 400);
+  return;
+
+  // Split large PDFs into manageable chunks using pdf-lib, inline base64 for all
   const manualRange = document.getElementById('pageRange')?.value?.trim() || '';
   const fileSizeMB = pdfFile.size / 1024 / 1024;
+  let pdfChunks = null;   // array of {bytes, startPage, endPage, totalPages} or null for small files
+  let smallBase64 = null; // for files that fit in one chunk
+
+  if (fileSizeMB > INLINE_LIMIT_MB) {
+    try {
+      pdfChunks = await splitPdfIntoChunks(pdfFile, setProgress);
+      setProgress(8, `Split into ${pdfChunks.length} chunk(s) of ${PAGES_PER_CHUNK} pages.`);
+      await new Promise(r => setTimeout(r, 400));
+    } catch(e) {
+      // pdf-lib couldn't parse this PDF — fall back to sending it inline as one piece.
+      // This may hit token limits on very large files but is better than hard-failing.
+      console.warn('PDF splitting failed, falling back to single inline chunk:', e.message);
+      setProgress(8, `PDF splitting unavailable (${e.message.slice(0,60)}) — sending as single file.`);
+      await new Promise(r => setTimeout(r, 600));
+      pdfChunks = null;
+      try {
+        smallBase64 = await fileToBase64(pdfFile);
+      } catch(e2) {
+        errors.push(`Could not read PDF: ${e2.message}`);
+        setProgress(100, 'Failed to read PDF.');
+        document.getElementById('extractSpinner').classList.add('hidden');
+        document.getElementById('extractBtn').disabled = false;
+        const errEl = document.getElementById('extractErrors');
+        errEl.className = 'alert alert-error';
+        errEl.innerHTML = '<strong>Error:</strong><br>' + errors.map(e => '• ' + e).join('<br>');
+        errEl.classList.remove('hidden');
+        return;
+      }
+    }
+  } else {
+    smallBase64 = await fileToBase64(pdfFile);
+  }
+
+  // Helper: get base64 for a specific chunk (or the whole small file)
+  const getChunkBase64 = (chunkIdx) => {
+    if (!pdfChunks) return smallBase64;
+    return uint8ToBase64(pdfChunks[chunkIdx].bytes);
+  };
+  const firstChunkBase64 = getChunkBase64(0);
+
+  // TOC pass — use first chunk (always contains cover/TOC) if no manual range and file > 5MB
   if (!manualRange && fileSizeMB > 5) {
-    setProgress(3, 'Reading table of contents...');
-    const base64 = await fileToBase64(pdfFile);
-    discoveredPageRanges = await discoverPageRanges(base64, setProgress);
-    // Detect title and author from the PDF cover/title page
-    await detectSourceMeta(base64);
+    setProgress(9, 'Reading table of contents...');
+    discoveredPageRanges = await discoverPageRanges(firstChunkBase64, false, setProgress);
+    await detectSourceMeta(firstChunkBase64, false);
     const found = Object.keys(discoveredPageRanges);
     if (found.length > 0) {
       const rangeList = found.map(k => `${TYPE_LABELS[k] || k}: p.${discoveredPageRanges[k]}`).join(', ');
-      setProgress(8, `TOC read — found: ${rangeList}`);
+      setProgress(13, `TOC read — found: ${rangeList}`);
       await new Promise(r => setTimeout(r, 800));
     } else {
-      setProgress(8, 'No TOC found — will search whole PDF');
+      setProgress(13, 'No TOC found — will search all chunks');
       await new Promise(r => setTimeout(r, 400));
     }
   }
 
   // For small PDFs that skipped the TOC pass: detect title + author from cover page
-  {
-    const base64small = await fileToBase64(pdfFile);
-    await detectSourceMeta(base64small);
+  if (fileSizeMB <= 5) {
+    await detectSourceMeta(firstChunkBase64, false);
   }
 
   const typeCount = types.length;
@@ -1033,7 +2317,7 @@ async function startExtraction() {
     const type = types[ti];
     const baseProgress = 10 + (ti / typeCount) * 85;
     try {
-      const result = await callGemini(pdfFile, type, (msg, pct) => {
+      const result = await callModel(pdfChunks, smallBase64, type, (msg, pct) => {
         setProgress(baseProgress + pct * (85 / typeCount), msg);
       });
       extractedData[type] = type === 'feat' ? result.map(parseFeatFullText) : result;
@@ -1044,6 +2328,8 @@ async function startExtraction() {
       errors.push(`${TYPE_LABELS[type]}: ${err.message}`);
       console.error(`Error extracting ${type}:`, err);
     }
+    // Small pause between types to reduce rate limit risk
+    if (ti < typeCount - 1) await new Promise(r => setTimeout(r, 1500));
   }
 
   // Filter incomplete elements and collect skipped report
@@ -1074,7 +2360,7 @@ async function startExtraction() {
 }
 
 
-async function geminiRaw(base64, promptText) {
+async function geminiRaw(base64, isUri, promptText) {
   const body = {
     contents: [{ parts: [
       { inline_data: { mime_type: 'application/pdf', data: base64 } },
@@ -1086,22 +2372,34 @@ async function geminiRaw(base64, promptText) {
       response_mime_type: 'application/json'
     }
   };
-  const resp = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
-  );
-  if (!resp.ok) {
-    const err = await resp.json().catch(() => ({}));
-    throw new Error(err.error?.message || `HTTP ${resp.status}`);
+
+  // Retry with backoff on rate limit (429) or transient server errors (500/503)
+  let lastErr;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    if (attempt > 0) {
+      const waitSec = [15, 30, 60][attempt - 1];
+      setProgress(null, `Rate limit hit — waiting ${waitSec}s before retry ${attempt}/3...`);
+      await new Promise(r => setTimeout(r, waitSec * 1000));
+    }
+    const resp = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+    );
+    if (resp.ok) {
+      const data = await resp.json();
+      if (data.promptFeedback?.blockReason) throw new Error(`Blocked: ${data.promptFeedback.blockReason}`);
+      if (!data.candidates?.length) throw new Error('No candidates returned — PDF may be too large or response was filtered.');
+      const candidate = data.candidates[0];
+      const text = candidate?.content?.parts?.[0]?.text || '';
+      if (!text) throw new Error('Empty response from Gemini.');
+      const truncated = candidate.finishReason === 'MAX_TOKENS';
+      return { text, truncated };
+    }
+    const errBody = await resp.json().catch(() => ({}));
+    lastErr = new Error(errBody.error?.message || `HTTP ${resp.status}`);
+    if (resp.status !== 429 && resp.status < 500) break; // don't retry client errors
   }
-  const data = await resp.json();
-  if (data.promptFeedback?.blockReason) throw new Error(`Blocked: ${data.promptFeedback.blockReason}`);
-  if (!data.candidates?.length) throw new Error('No candidates returned — PDF may be too large or response was filtered.');
-  const candidate = data.candidates[0];
-  const text = candidate?.content?.parts?.[0]?.text || '';
-  if (!text) throw new Error('Empty response from Gemini.');
-  const truncated = candidate.finishReason === 'MAX_TOKENS';
-  return { text, truncated };
+  throw lastErr;
 }
 
 function safeParseJson(text) {
@@ -1128,54 +2426,92 @@ function archetypeSupport(cls) {
 }
 
 // Extraction with TOC-guided page ranges + automatic alphabetic-split retry on truncation
-async function callGemini(file, type, progressCallback) {
-  const base64 = await fileToBase64(file);
-
-  // Priority: manual override > TOC-discovered > whole PDF
+async function callModel(pdfChunks, smallBase64, type, progressCallback) {
   const manualRange = document.getElementById('pageRange')?.value?.trim() || '';
   const tocRange = discoveredPageRanges[type] || '';
   const pageRange = manualRange || tocRange;
   const pageHint = pageRange ? `\nOnly look at pages ${pageRange} of the PDF.` : '';
-  if (pageRange) {
-    progressCallback(`Extracting ${TYPE_LABELS[type]} (pages ${pageRange})...`, 0.1);
-  } else {
-    progressCallback(`Extracting ${TYPE_LABELS[type]}...`, 0.1);
+
+  // Determine which chunks to process
+  // If TOC gave us a page range and we have chunks, filter to relevant chunks only
+  let chunksToProcess = pdfChunks ? pdfChunks.map((c, i) => i) : [0];
+  if (pdfChunks && pageRange) {
+    const [rangeStart, rangeEnd] = pageRange.split('-').map(Number);
+    const end = rangeEnd || rangeStart;
+    chunksToProcess = pdfChunks
+      .map((c, i) => ({ i, c }))
+      .filter(({ c }) => c.startPage <= end && c.endPage >= rangeStart)
+      .map(({ i }) => i);
+    if (chunksToProcess.length === 0) chunksToProcess = [0]; // fallback
   }
 
-  const { text, truncated } = await geminiRaw(base64, PROMPTS[type] + pageHint);
+  const label = TYPE_LABELS[type] || type;
+  const allResults = [];
 
-  if (!truncated) {
-    progressCallback(`Parsing ${TYPE_LABELS[type]}...`, 0.8);
-    const parsed = safeParseJson(text);
-    return Array.isArray(parsed) ? parsed : (Object.values(parsed).find(v => Array.isArray(v)) || []);
-  }
+  for (let ci = 0; ci < chunksToProcess.length; ci++) {
+    const chunkIdx = chunksToProcess[ci];
+    const base64 = pdfChunks ? uint8ToBase64(pdfChunks[chunkIdx].bytes) : smallBase64;
+    const chunkInfo = pdfChunks
+      ? ` (pages ${pdfChunks[chunkIdx].startPage}–${pdfChunks[chunkIdx].endPage} of ${pdfChunks[chunkIdx].totalPages})`
+      : '';
+    const pct = 0.1 + (ci / chunksToProcess.length) * 0.7;
 
-  // Response was cut off — retry in two alphabetic halves and merge
-  console.warn(`${type} response truncated — retrying in two halves`);
-  progressCallback(`${TYPE_LABELS[type]} too large — retrying in halves (A–M)...`, 0.2);
+    progressCallback(`Extracting ${label}${chunkInfo}...`, pct);
 
-  const halfPrompts = [
-    PROMPTS[type] + pageHint + '\nOnly include elements whose name starts with letters A through M.',
-    PROMPTS[type] + pageHint + '\nOnly include elements whose name starts with letters N through Z.'
-  ];
-
-  const results = [];
-  for (let i = 0; i < halfPrompts.length; i++) {
-    progressCallback(`${TYPE_LABELS[type]}: batch ${i+1}/2...`, 0.3 + i * 0.35);
-    const { text: halfText, truncated: halfTruncated } = await geminiRaw(base64, halfPrompts[i]);
-    if (halfTruncated) {
-      console.warn(`Half ${i+1} also truncated — content may be incomplete`);
+    const prompt = PROMPTS[type] + pageHint;
+    let text, truncated;
+    if (useOllama) {
+      const chunkBytes = pdfChunks ? pdfChunks[chunkIdx].bytes : null;
+      const extracted = chunkBytes
+        ? await extractTextFromChunk(chunkBytes)
+        : await extractTextFromChunk(Uint8Array.from(atob(base64), c => c.charCodeAt(0)));
+      if (!extracted) { text = '[]'; truncated = false; }
+      else { ({ text, truncated } = await ollamaRaw(extracted, prompt)); }
+    } else {
+      ({ text, truncated } = await geminiRaw(base64, false, prompt));
     }
-    try {
-      const parsed = safeParseJson(halfText);
-      const arr = Array.isArray(parsed) ? parsed : (Object.values(parsed).find(v => Array.isArray(v)) || []);
-      results.push(...arr);
-    } catch(e) {
-      console.warn(`Half ${i+1} parse failed:`, e.message);
+
+    if (truncated) {
+      console.warn(`Chunk ${chunkIdx} truncated for ${type} — splitting alphabetically`);
+      progressCallback(`${label} chunk too large — retrying in halves...`, pct + 0.05);
+      const halves = [
+        prompt + '\nOnly include elements whose name starts with A through M.',
+        prompt + '\nOnly include elements whose name starts with N through Z.'
+      ];
+      for (let hi = 0; hi < halves.length; hi++) {
+        let ht;
+        if (useOllama) {
+          const chunkBytes = pdfChunks ? pdfChunks[chunkIdx].bytes : null;
+          const extracted = chunkBytes
+            ? await extractTextFromChunk(chunkBytes)
+            : await extractTextFromChunk(Uint8Array.from(atob(base64), c => c.charCodeAt(0)));
+          ({ text: ht } = extracted ? await ollamaRaw(extracted, halves[hi]) : { text: '[]' });
+        } else {
+          ({ text: ht } = await geminiRaw(base64, false, halves[hi]));
+        }
+        try {
+          const p = safeParseJson(ht);
+          const a = Array.isArray(p) ? p : (Object.values(p).find(v => Array.isArray(v)) || []);
+          allResults.push(...a);
+        } catch(e) { console.warn(`Half ${hi+1} parse failed:`, e.message); }
+        if (hi === 0) await new Promise(r => setTimeout(r, 600));
+      }
+    } else {
+      try {
+        const parsed = safeParseJson(text);
+        const arr = Array.isArray(parsed) ? parsed : (Object.values(parsed).find(v => Array.isArray(v)) || []);
+        allResults.push(...arr);
+      } catch(e) {
+        console.warn(`Chunk ${chunkIdx} parse failed:`, e.message);
+      }
     }
-    if (i === 0) await new Promise(r => setTimeout(r, 600));
+
+    // Pause between chunks to avoid rate limits
+    if (ci < chunksToProcess.length - 1) await new Promise(r => setTimeout(r, 1500));
   }
-  return results;
+
+  progressCallback(`Parsing ${label}...`, 0.9);
+  return allResults;
 }
 
 function fileToBase64(file) {
@@ -1188,8 +2524,8 @@ function fileToBase64(file) {
 }
 
 function setProgress(pct, msg) {
-  document.getElementById('progressBar').style.width = pct + '%';
-  document.getElementById('progressMsg').textContent = msg;
+  if (pct !== null) document.getElementById('progressBar').style.width = pct + '%';
+  if (msg) document.getElementById('progressMsg').textContent = msg;
 }
 
 // ─────────────────────────────────────────────
@@ -1200,7 +2536,7 @@ function buildReviewUI() {
   const summaryEl = document.getElementById('reviewSummary');
   if (total === 0) {
     summaryEl.className = 'alert alert-warning';
-    summaryEl.innerHTML = '<strong>No elements were extracted.</strong> This usually means the API key is invalid, the PDF could not be read, or Gemini returned an error. Check the error messages above, use Test Key to verify your key, and try again.';
+    summaryEl.innerHTML = '<strong>No elements were parsed.</strong> This usually means the PDF has scanned/image-only pages, the selected page range does not contain supported layouts, or the content type does not have a deterministic parser yet.';
   } else {
     const breakdown = Object.entries(extractedData)
       .filter(([,arr]) => arr.length > 0)
@@ -1253,6 +2589,9 @@ function buildPanelHTML(type, items) {
                   type === 'archetype' ? item.class :
                   type === 'feat' ? 'Feat' :
                   type === 'magic' ? item.rarity :
+                  type === 'race' ? (item.size || 'Race') :
+                  type === 'background' ? 'Background' :
+                  type === 'class' ? `d${item.hitDie || '?'}` :
                   item.category || 'Item';
     return `
     <div class="element-card" id="card-${type}-${i}">
@@ -1305,6 +2644,9 @@ function buildFieldsHTML(type, item, i) {
   if (type === 'item') return buildItemFields(item, id);
   if (type === 'feat') return buildFeatFields(item, id);
   if (type === 'magic') return buildMagicFields(item, id);
+  if (type === 'race') return buildRaceFields(item, id);
+  if (type === 'background') return buildBackgroundFields(item, id);
+  if (type === 'class') return buildClassFields(item, id);
   return '';
 }
 
@@ -1446,6 +2788,104 @@ function buildMagicFields(item, id) {
     <div><label>Description</label><textarea rows="4" data-field="description" data-id="${id}" onchange="updateField(this)">${escHtml(item.description||'')}</textarea></div>`;
 }
 
+function buildRaceFields(race, id) {
+  return `
+    <div class="field-row">
+      <div><label>Name</label><input type="text" value="${escAttr(race.name)}" data-field="name" data-id="${id}" onchange="updateField(this)" /></div>
+      <div><label>Size</label><input type="text" value="${escAttr(race.size||'')}" data-field="size" data-id="${id}" onchange="updateField(this)" /></div>
+    </div>
+    <div class="field-row-3">
+      <div><label>Speed</label><input type="text" value="${escAttr(race.speed||'')}" data-field="speed" data-id="${id}" onchange="updateField(this)" /></div>
+      <div><label>Languages (comma-separated)</label><input type="text" value="${escAttr((race.languages||[]).join(', '))}" data-field="languages" data-id="${id}" onchange="updateFieldArr(this)" /></div>
+      <div><label>Language Choices</label><input type="text" value="${escAttr(race.languageChoices||'')}" data-field="languageChoices" data-id="${id}" onchange="updateField(this)" /></div>
+    </div>
+    <div><label>Ability Scores (e.g. strength:2, dexterity:1)</label><input type="text" value="${escAttr(formatAbilityScores(race.abilityScores))}" data-id="${id}" onchange="updateAbilityScores(this)" /></div>
+    <div><label>Description</label><textarea rows="3" data-field="description" data-id="${id}" onchange="updateField(this)">${escHtml(race.description||'')}</textarea></div>
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-top:0.75rem; margin-bottom:0.5rem;">
+      <span class="section-label" style="margin:0; border:none; padding:0;">Traits</span>
+      <button class="btn btn-secondary" style="font-size:0.7rem; padding:0.3rem 0.75rem;" onclick="addTrait('${id}')">+ Add Trait</button>
+    </div>
+    <div id="traits-${id}">${buildNestedTextBlocks(id, 'traits', race.traits || [], 'Trait Name')}</div>`;
+}
+
+function buildBackgroundFields(bg, id) {
+  return `
+    <div class="field-row">
+      <div><label>Name</label><input type="text" value="${escAttr(bg.name)}" data-field="name" data-id="${id}" onchange="updateField(this)" /></div>
+      <div><label>Skill Proficiencies</label><input type="text" value="${escAttr((bg.skillProficiencies||[]).join(', '))}" data-field="skillProficiencies" data-id="${id}" onchange="updateFieldArr(this)" /></div>
+    </div>
+    <div class="field-row-3">
+      <div><label>Tool Proficiencies</label><input type="text" value="${escAttr((bg.toolProficiencies||[]).join(', '))}" data-field="toolProficiencies" data-id="${id}" onchange="updateFieldArr(this)" /></div>
+      <div><label>Languages</label><input type="text" value="${escAttr((bg.languages||[]).join(', '))}" data-field="languages" data-id="${id}" onchange="updateFieldArr(this)" /></div>
+      <div><label>Language Choices</label><input type="text" value="${escAttr(bg.languageChoices||'')}" data-field="languageChoices" data-id="${id}" onchange="updateField(this)" /></div>
+    </div>
+    <div><label>Equipment</label><textarea rows="2" data-field="equipment" data-id="${id}" onchange="updateField(this)">${escHtml(bg.equipment||'')}</textarea></div>
+    <div><label>Description</label><textarea rows="3" data-field="description" data-id="${id}" onchange="updateField(this)">${escHtml(bg.description||'')}</textarea></div>
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-top:0.75rem; margin-bottom:0.5rem;">
+      <span class="section-label" style="margin:0; border:none; padding:0;">Features</span>
+      <button class="btn btn-secondary" style="font-size:0.7rem; padding:0.3rem 0.75rem;" onclick="addSimpleFeature('${id}')">+ Add Feature</button>
+    </div>
+    <div id="features-${id}">${buildNestedTextBlocks(id, 'features', bg.features || [], 'Feature Name')}</div>`;
+}
+
+function buildClassFields(cls, id) {
+  return `
+    <div class="field-row">
+      <div><label>Name</label><input type="text" value="${escAttr(cls.name)}" data-field="name" data-id="${id}" onchange="updateField(this)" /></div>
+      <div><label>Hit Die</label><input type="text" value="${escAttr(cls.hitDie||'')}" data-field="hitDie" data-id="${id}" onchange="updateField(this)" /></div>
+    </div>
+    <div class="field-row">
+      <div><label>Saving Throws</label><input type="text" value="${escAttr((cls.savingThrows||[]).join(', '))}" data-field="savingThrows" data-id="${id}" onchange="updateFieldArr(this)" /></div>
+      <div><label>Skill Choices</label><input type="text" value="${escAttr((cls.skillChoices?.from||[]).join(', '))}" data-field="skillChoices.from" data-id="${id}" onchange="updateNestedArrayField(this)" /></div>
+    </div>
+    <div class="field-row">
+      <div><label>Skill Choice Count</label><input type="text" value="${escAttr(cls.skillChoices?.count||'')}" data-field="skillChoices.count" data-id="${id}" onchange="updateNestedField(this)" /></div>
+      <div><label>Archetype Level</label><input type="text" value="${escAttr(cls.archetypeLevel||'')}" data-field="archetypeLevel" data-id="${id}" onchange="updateField(this)" /></div>
+    </div>
+    <div class="field-row">
+      <div><label>Armor Proficiencies</label><input type="text" value="${escAttr((cls.armorProficiencies||[]).join(', '))}" data-field="armorProficiencies" data-id="${id}" onchange="updateFieldArr(this)" /></div>
+      <div><label>Weapon Proficiencies</label><input type="text" value="${escAttr((cls.weaponProficiencies||[]).join(', '))}" data-field="weaponProficiencies" data-id="${id}" onchange="updateFieldArr(this)" /></div>
+    </div>
+    <div class="field-row">
+      <div><label>Archetype Label</label><input type="text" value="${escAttr(cls.archetypeLabel||'')}" data-field="archetypeLabel" data-id="${id}" onchange="updateField(this)" /></div>
+      <div><label>Archetype Supports</label><input type="text" value="${escAttr(cls.archetypeSupports||'')}" data-field="archetypeSupports" data-id="${id}" onchange="updateField(this)" /></div>
+    </div>
+    <div class="field-row">
+      <div><label>Spellcasting Ability</label><input type="text" value="${escAttr(cls.spellcastingAbility||'')}" data-field="spellcastingAbility" data-id="${id}" onchange="updateField(this)" /></div>
+      <div><label>Spellcasting List</label><input type="text" value="${escAttr(cls.spellcastingList||'')}" data-field="spellcastingList" data-id="${id}" onchange="updateField(this)" /></div>
+    </div>
+    <div><label>Starting Equipment</label><textarea rows="2" data-field="startingEquipment" data-id="${id}" onchange="updateField(this)">${escHtml(cls.startingEquipment||'')}</textarea></div>
+    <div><label>Description</label><textarea rows="3" data-field="description" data-id="${id}" onchange="updateField(this)">${escHtml(cls.description||'')}</textarea></div>
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-top:0.75rem; margin-bottom:0.5rem;">
+      <span class="section-label" style="margin:0; border:none; padding:0;">Features</span>
+      <button class="btn btn-secondary" style="font-size:0.7rem; padding:0.3rem 0.75rem;" onclick="addFeature('${id}')">+ Add Feature</button>
+    </div>
+    <div id="features-${id}">${(cls.features||[]).map((f,fi) => buildFeatureBlock(id, f, fi)).join('')}</div>`;
+}
+
+function buildNestedTextBlocks(id, field, items, label) {
+  return items.map((item, i) => `
+    <div style="border:1px solid var(--border-light); border-radius:3px; padding:0.75rem; margin-bottom:0.75rem; background:var(--parchment);">
+      <div><label>${label}</label><input type="text" value="${escAttr(item.name||'')}" data-field="${field}.${i}.name" data-id="${id}" onchange="updateNestedField(this)" /></div>
+      <div><label>Description</label><textarea rows="3" data-field="${field}.${i}.description" data-id="${id}" onchange="updateNestedField(this)">${escHtml(item.description||'')}</textarea></div>
+    </div>`).join('');
+}
+
+function buildFeatureBlock(id, f, fi) {
+  return `
+    <div style="border:1px solid var(--border-light); border-radius:3px; padding:0.75rem; margin-bottom:0.75rem; background:var(--parchment);">
+      <div class="field-row">
+        <div><label>Feature Name</label><input type="text" value="${escAttr(f.name)}" data-field="features.${fi}.name" data-id="${id}" onchange="updateNestedField(this)" /></div>
+        <div><label>Level</label><input type="text" value="${f.level}" data-field="features.${fi}.level" data-id="${id}" onchange="updateNestedField(this)" /></div>
+      </div>
+      <div class="field-row">
+        <div><label>Action</label><input type="text" value="${escAttr(f.action||'')}" data-field="features.${fi}.action" data-id="${id}" onchange="updateNestedField(this)" /></div>
+        <div><label>Usage</label><input type="text" value="${escAttr(f.usage||'')}" data-field="features.${fi}.usage" data-id="${id}" onchange="updateNestedField(this)" /></div>
+      </div>
+      <div><label>Description</label><textarea rows="3" data-field="features.${fi}.description" data-id="${id}" onchange="updateNestedField(this)">${escHtml(f.description||'')}</textarea></div>
+    </div>`;
+}
+
 function chk(field, label, val, id) {
   return `<label class="checkbox-inline">
     <input type="checkbox" ${val?'checked':''} data-field="${field}" data-id="${id}" onchange="updateFieldBool(this)" /> ${label}
@@ -1478,6 +2918,40 @@ function updateFieldArr(el) {
   flashField(el);
 }
 
+function updateNestedArrayField(el) {
+  const { type, index } = parseId(el.dataset.id);
+  const parts = el.dataset.field.split('.');
+  let obj = extractedData[type][index];
+  for (let i = 0; i < parts.length - 1; i++) {
+    if (!obj[parts[i]]) obj[parts[i]] = {};
+    obj = obj[parts[i]];
+  }
+  obj[parts[parts.length - 1]] = el.value.split(',').map(s => s.trim()).filter(Boolean);
+  flashField(el);
+}
+
+function updateAbilityScores(el) {
+  const { type, index } = parseId(el.dataset.id);
+  extractedData[type][index].abilityScores = parseAbilityScoreInput(el.value);
+  flashField(el);
+}
+
+function formatAbilityScores(scores) {
+  if (!scores || typeof scores !== 'object') return '';
+  return Object.entries(scores).map(([k, v]) => `${k}:${v}`).join(', ');
+}
+
+function parseAbilityScoreInput(text) {
+  const out = {};
+  String(text || '').split(',').forEach(part => {
+    const m = part.trim().match(/^([a-zA-Z]+)\s*[:=]\s*(-?\d+)$/);
+    if (!m) return;
+    const key = m[1].toLowerCase();
+    if (['strength','dexterity','constitution','intelligence','wisdom','charisma'].includes(key)) out[key] = parseInt(m[2], 10);
+  });
+  return out;
+}
+
 function parseFeatFullText(feat) {
   let raw = feat.fullText || feat.description || '';
   if (!raw) return { ...feat, description: '', benefits: [] };
@@ -1494,6 +2968,26 @@ function parseFeatFullText(feat) {
   const bulletRe = /(?:^|\n)\s*(?:[•\-\*]|\d+[.)])\s+/m;
 
   if (!bulletRe.test(raw)) {
+    const lines = raw.split(/\n+/).map(s => s.trim()).filter(Boolean);
+    const genericBenefits = lines.findIndex(line => /^["']?\s*You gain the following benefits\.?$/i.test(line));
+    if (genericBenefits !== -1) {
+      return {
+        ...feat,
+        prerequisite: prereq,
+        description: lines.slice(0, genericBenefits).join(' '),
+        benefits: groupFeatBenefitLines(lines.slice(genericBenefits + 1))
+      };
+    }
+    const benefitStartRe = /^(?:Increase your|You gain|You have|You learn|You can|Choose|When you|Whenever you|If you|Once per|Your)\b/i;
+    const firstBenefit = lines.findIndex(line => benefitStartRe.test(line));
+    if (firstBenefit !== -1) {
+      return {
+        ...feat,
+        prerequisite: prereq,
+        description: lines.slice(0, firstBenefit).join(' '),
+        benefits: groupFeatBenefitLines(lines.slice(firstBenefit))
+      };
+    }
     return { ...feat, prerequisite: prereq, description: raw.trim(), benefits: [] };
   }
 
@@ -1507,6 +3001,21 @@ function parseFeatFullText(feat) {
     .filter(Boolean);
 
   return { ...feat, prerequisite: prereq, description: intro, benefits: bullets };
+}
+
+function groupFeatBenefitLines(lines) {
+  const benefits = [];
+  const startsBenefit = line =>
+    /^[A-Z][A-Za-z' -]{2,55}\.\s+\S/.test(line)
+    || /^(?:Increase your|You gain|You have|You learn|You can|Choose|When you|Whenever you|If you|Once per|Your)\b/i.test(line);
+
+  for (const rawLine of lines) {
+    const line = String(rawLine || '').trim();
+    if (!line || isFeatMetaLine(line) || /^https?:\/\//i.test(line) || /^\d{1,2}\/\d{1,2}\/\d{2,4}\b/.test(line)) continue;
+    if (!benefits.length || startsBenefit(line)) benefits.push(line);
+    else benefits[benefits.length - 1] += ` ${line}`;
+  }
+  return benefits;
 }
 function updateBenefit(el) {
   const { type, index } = parseId(el.dataset.id);
@@ -1522,10 +3031,13 @@ function updateNestedField(el) {
   // e.g. features.0.name
   let obj = extractedData[type][index];
   for (let i = 0; i < parts.length - 1; i++) {
+    if (!obj[parts[i]]) obj[parts[i]] = /^\d+$/.test(parts[i + 1]) ? [] : {};
     obj = obj[parts[i]];
   }
   const finalKey = parts[parts.length - 1];
-  obj[finalKey] = finalKey === 'level' ? (parseInt(el.value) || 0) : el.value;
+  const numericKeys = new Set(['level', 'count', 'hitDie', 'speed', 'archetypeLevel', 'charges']);
+  obj[finalKey] = numericKeys.has(finalKey) ? (parseInt(el.value) || 0) : el.value;
+  flashField(el);
 }
 
 
@@ -1603,6 +3115,44 @@ function addFeature(id) {
   markChanged();
 }
 
+function addSimpleFeature(id) {
+  const { type, index } = parseId(id);
+  if (!Array.isArray(extractedData[type][index].features)) extractedData[type][index].features = [];
+  const features = extractedData[type][index].features;
+  const fi = features.length;
+  features.push({ name: '', description: '' });
+  const container = document.getElementById(`features-${id}`);
+  if (container) {
+    const div = document.createElement('div');
+    div.style.cssText = 'border:1px solid var(--border-light); border-radius:3px; padding:0.75rem; margin-bottom:0.75rem; background:var(--parchment);';
+    div.innerHTML = `
+      <div><label>Feature Name</label><input type="text" value="" data-field="features.${fi}.name" data-id="${id}" onchange="updateNestedField(this)" /></div>
+      <div><label>Description</label><textarea rows="3" data-field="features.${fi}.description" data-id="${id}" onchange="updateNestedField(this)"></textarea></div>`;
+    container.appendChild(div);
+    div.querySelector('input').focus();
+  }
+  markChanged();
+}
+
+function addTrait(id) {
+  const { type, index } = parseId(id);
+  if (!Array.isArray(extractedData[type][index].traits)) extractedData[type][index].traits = [];
+  const traits = extractedData[type][index].traits;
+  const ti = traits.length;
+  traits.push({ name: '', description: '' });
+  const container = document.getElementById(`traits-${id}`);
+  if (container) {
+    const div = document.createElement('div');
+    div.style.cssText = 'border:1px solid var(--border-light); border-radius:3px; padding:0.75rem; margin-bottom:0.75rem; background:var(--parchment);';
+    div.innerHTML = `
+      <div><label>Trait Name</label><input type="text" value="" data-field="traits.${ti}.name" data-id="${id}" onchange="updateNestedField(this)" /></div>
+      <div><label>Description</label><textarea rows="3" data-field="traits.${ti}.description" data-id="${id}" onchange="updateNestedField(this)"></textarea></div>`;
+    container.appendChild(div);
+    div.querySelector('input').focus();
+  }
+  markChanged();
+}
+
 // ─────────────────────────────────────────────
 // XML Generation
 // ─────────────────────────────────────────────
@@ -1654,14 +3204,12 @@ function checkCompleteness(item, type) {
   else if (type === 'item') {
     if (!has(item.name))        missing.push('name');
     if (!has(item.category))    missing.push('category');
-    if (!has(item.description)) missing.push('description');
   }
 
   else if (type === 'feat') {
     if (!has(item.name)) missing.push('name');
     const hasBenefits = Array.isArray(item.benefits) && item.benefits.some(b => has(b));
-    const hasDesc = has(item.description);
-    if (!hasBenefits && !hasDesc) missing.push('description or benefits');
+    if (!hasBenefits) missing.push('benefits');
   }
 
   else if (type === 'magic') {
@@ -1671,7 +3219,26 @@ function checkCompleteness(item, type) {
     if (!has(item.description)) missing.push('description');
   }
 
-  else {
+  else if (type === 'race') {
+    if (!has(item.name))        missing.push('name');
+    if (!has(item.description)) missing.push('description');
+    if (!item.traits || item.traits.length === 0) missing.push('traits');
+  }
+
+  else if (type === 'background') {
+    if (!has(item.name))        missing.push('name');
+    if (!item.skillProficiencies || item.skillProficiencies.length === 0) missing.push('skill proficiencies');
+    if (!item.features || item.features.length === 0) missing.push('features');
+  }
+
+  else if (type === 'class') {
+    if (!has(item.name))        missing.push('name');
+    if (!has(item.hitDie))      missing.push('hit die');
+    if (!item.features || item.features.length === 0) missing.push('features');
+    if (!item.savingThrows || item.savingThrows.length === 0) missing.push('saving throws');
+  }
+
+    else {
     // generic / other
     if (!has(item.name))        missing.push('name');
     if (!has(item.description)) missing.push('description');
@@ -1783,6 +3350,25 @@ function validateAll() {
           issues.push({ type, i, field: null, msg: `${label} (${name}): has no benefits` });
       }
 
+      if (type === 'race') {
+        if (!item.traits || item.traits.length === 0)
+          issues.push({ type, i, field: null, msg: `${label} (${name}): has no racial traits` });
+      }
+
+      if (type === 'background') {
+        if (!item.skillProficiencies || item.skillProficiencies.length === 0)
+          issues.push({ type, i, field: null, msg: `${label} (${name}): has no skill proficiencies` });
+        if (!item.features || item.features.length === 0)
+          issues.push({ type, i, field: null, msg: `${label} (${name}): has no background features` });
+      }
+
+      if (type === 'class') {
+        if (!item.hitDie)
+          issues.push({ type, i, field: null, msg: `${label} (${name}): hit die is missing` });
+        if (!item.features || item.features.length === 0)
+          issues.push({ type, i, field: null, msg: `${label} (${name}): has no class features` });
+      }
+
       // Duplicate name check within same type
       const sameType = extractedData[type];
       const firstIdx = sameType.findIndex(x => (x.name||'').trim() === name && !x._error);
@@ -1790,14 +3376,129 @@ function validateAll() {
         issues.push({ type, i, field: 'name', msg: `${label}: duplicate name "${name}" will produce duplicate XML IDs` });
     });
   }
+  issues.push(...validateGeneratedXmlShape());
+  return issues;
+}
+
+function validateGeneratedXmlShape() {
+  if (!Object.values(extractedData).some(items => Array.isArray(items) && items.length)) return [];
+  const meta = getSourceMeta();
+  const singleDocs = [{ fileName: `${meta.slug}.xml`, xml: generateXml() }];
+  const zipDocs = buildZipXmlDocuments(meta);
+  return [
+    ...validateAuroraXmlDocuments(singleDocs, 'Single XML'),
+    ...validateAuroraXmlDocuments(zipDocs, 'ZIP')
+  ];
+}
+
+function buildZipXmlDocuments(meta) {
+  const docs = [];
+  const fileList = [];
+  for (const [type, items] of Object.entries(extractedData)) {
+    if (!items.length) continue;
+    if (type === 'other') {
+      const groups = {};
+      for (const item of items) {
+        const resolvedType = (item.type || 'other').trim();
+        if (!groups[resolvedType]) groups[resolvedType] = [];
+        groups[resolvedType].push(item);
+      }
+      for (const [resolvedType, groupItems] of Object.entries(groups)) {
+        const fileName = getFileName(resolvedType, meta.abbr);
+        fileList.push(fileName);
+        docs.push({ fileName, xml: genTypeXml(resolvedType, groupItems, meta) });
+      }
+    } else {
+      const fileName = getFileName(type, meta.abbr);
+      fileList.push(fileName);
+      docs.push({ fileName, xml: genTypeXml(type, items, meta) });
+    }
+  }
+  docs.push({ fileName: 'source.xml', xml: genSourceXml(meta, fileList) });
+  return docs;
+}
+
+function validateAuroraXmlDocuments(docs, scopeLabel) {
+  const issues = [];
+  const parser = new DOMParser();
+  const idLocations = new Map();
+  const addIssue = (fileName, check, message) => {
+    issues.push({ type: 'xml', i: 0, field: null, msg: `${scopeLabel} ${fileName}: ${check} - ${message}` });
+  };
+
+  docs.forEach(({ fileName, xml }) => {
+    const doc = parser.parseFromString(xml, 'application/xml');
+    const parseError = doc.querySelector('parsererror');
+    if (parseError) {
+      addIssue(fileName, 'XmlParse', parseError.textContent.trim().slice(0, 180));
+      return;
+    }
+    const root = doc.documentElement;
+    if (!root || root.tagName !== 'elements') {
+      addIssue(fileName, 'RootShape', `Unexpected root '${root?.tagName || '(none)'}'; expected 'elements'.`);
+      return;
+    }
+    const info = root.querySelector('info');
+    if (!info) {
+      addIssue(fileName, 'ElementsInfo', 'Missing /elements/info node.');
+    } else {
+      if (info.querySelector('n')) addIssue(fileName, 'ElementsInfo', 'Uses /elements/info/n; Aurora metadata should use /elements/info/name.');
+      const update = info.querySelector('update');
+      if (!update) {
+        addIssue(fileName, 'ElementsUpdate', 'Missing /elements/info/update node.');
+      } else {
+        if (!update.getAttribute('version')?.trim()) addIssue(fileName, 'ElementsUpdate', 'Update node is missing a non-empty version attribute.');
+        Array.from(update.querySelectorAll('file')).forEach(fileNode => {
+          const name = fileNode.getAttribute('name') || '';
+          const url = fileNode.getAttribute('url') || '';
+          if (!name.trim()) addIssue(fileName, 'ElementsUpdate', 'File node is missing a non-empty name attribute.');
+          if (!url.trim()) addIssue(fileName, 'ElementsUpdate', `File node '${name}' is missing a non-empty url attribute.`);
+        });
+      }
+    }
+
+    Array.from(root.children).filter(node => node.tagName === 'element').forEach(element => {
+      ['name', 'type', 'source', 'id'].forEach(attr => {
+        if (!element.getAttribute(attr)?.trim()) {
+          addIssue(fileName, 'ElementAttributes', `Element '${element.getAttribute('name') || ''}' is missing a non-empty '${attr}' attribute.`);
+        }
+      });
+      const id = element.getAttribute('id');
+      if (id) {
+        if (!idLocations.has(id)) idLocations.set(id, new Set());
+        idLocations.get(id).add(fileName);
+      }
+      if (element.getAttribute('type') === 'Class') {
+        const hd = element.querySelector('setters > set[name="hd"]');
+        if (!hd || !hd.textContent.trim()) addIssue(fileName, 'ClassShape', `Class '${id}' is missing a non-empty hd setter.`);
+        Array.from(element.querySelectorAll('multiclass')).forEach(multiclass => {
+          if (!multiclass.getAttribute('id')?.trim()) addIssue(fileName, 'ClassShape', `Class '${id}' has a multiclass node without an id attribute.`);
+        });
+      }
+    });
+  });
+
+  idLocations.forEach((files, id) => {
+    if (files.size > 1) {
+      issues.push({ type: 'xml', i: 0, field: null, msg: `${scopeLabel}: DuplicateElementIds - duplicate element id '${id}' in ${Array.from(files).join(', ')}` });
+    }
+  });
   return issues;
 }
 
 function showValidationResult(issues) {
   document.querySelectorAll('.validation-error').forEach(el => el.classList.remove('validation-error'));
   document.querySelectorAll('.validation-badge').forEach(el => el.remove());
+  const errEl = document.getElementById('extractErrors');
 
-  if (issues.length === 0) return true;
+  if (issues.length === 0) {
+    if (errEl?.dataset.validationMessage === '1') {
+      errEl.classList.add('hidden');
+      errEl.innerHTML = '';
+      delete errEl.dataset.validationMessage;
+    }
+    return true;
+  }
 
   issues.forEach(({ type, i, field }) => {
     const header = document.querySelector(`#card-${type}-${i} .element-card-header h3`);
@@ -1812,8 +3513,8 @@ function showValidationResult(issues) {
     }
   });
 
-  const errEl = document.getElementById('extractErrors');
   errEl.className = 'alert alert-error';
+  errEl.dataset.validationMessage = '1';
   errEl.innerHTML = `<strong>Warning: ${issues.length} issue${issues.length > 1 ? 's' : ''} found — review before downloading:</strong><br>` +
     issues.slice(0, 8).map(x => `• ${x.msg}`).join('<br>') +
     (issues.length > 8 ? `<br><em>...and ${issues.length - 8} more</em>` : '');
@@ -1831,7 +3532,7 @@ function getSourceMeta() {
   const abbr   = document.getElementById('sourceAbbr').value.trim().toUpperCase()
                    || name.split(/\s+/).map(w => w[0]).join('').toUpperCase() || 'HB';
   const author = document.getElementById('sourceAuthor').value.trim() || 'Homebrew';
-  const slug   = name.toLowerCase().replace(/\s+/g,'_');
+  const slug   = name.toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g, '') || 'homebrew';
   const prefix = 'ID_' + abbr.replace(/[^A-Z0-9]/g,'_');
   return { name, abbr, author, slug, prefix };
 }
@@ -1839,7 +3540,7 @@ function getSourceMeta() {
 function autoFillAbbr(nameVal) {
   const abbrEl = document.getElementById('sourceAbbr');
   if (abbrEl && !abbrEl.dataset.userEdited) {
-    abbrEl.value = nameVal.split(/\s+/).map(w => w[0] || '').join('').toUpperCase().slice(0,6);
+    abbrEl.value = nameVal.split(/\s+/).map(w => (w.match(/[A-Za-z0-9]/) || [''])[0]).join('').toUpperCase().slice(0,6);
   }
 }
 
@@ -1901,6 +3602,9 @@ const FILE_SLUGS = {
   item:      'items',
   feat:      'feats',
   magic:     'magic-items',
+  race:      'races',
+  background:'backgrounds',
+  class:     'classes',
 };
 
 function getFileName(type, abbr) {
@@ -1917,6 +3621,9 @@ function dispatchGen(item, type, source, prefix) {
   if (type === 'item')      return genItemXml(item, source, prefix);
   if (type === 'feat')      return genFeatXml(item, source, prefix);
   if (type === 'magic')     return genMagicXml(item, source, prefix);
+  if (type === 'race')       return genRaceXml(item, source, prefix);
+  if (type === 'background') return genBackgroundXml(item, source, prefix);
+  if (type === 'class')      return genClassXml(item, source, prefix);
   // 'other' uses the element's own type field (e.g. 'Race', 'Class') for the XML type attribute
   const resolvedType = (type === 'other' && item.type) ? item.type : type;
   return genGenericXml(item, resolvedType, source, prefix);
@@ -1932,9 +3639,11 @@ function genSourceXml(meta, fileList) {
   lines.push(`<?xml version="1.0" encoding="utf-8" ?>`);
   lines.push(`<elements>`);
   lines.push(`\t<info>`);
+  lines.push(`\t\t<name>${escXml(meta.name)}</name>`);
+  lines.push(`\t\t<description>Elements from ${escXml(meta.name)}.</description>`);
   lines.push(`\t\t<update version="0.1.0">`);
-  lines.push(`\t\t\t<file name="source.xml" url="" />`);
-  fileList.forEach(f => lines.push(`\t\t\t<file name="${escAttrXml(f)}" url="" />`));
+  lines.push(`\t\t\t<file name="source.xml" url="source.xml" />`);
+  fileList.forEach(f => lines.push(`\t\t\t<file name="${escAttrXml(f)}" url="${escAttrXml(f)}" />`));
   lines.push(`\t\t</update>`);
   lines.push(`\t</info>`);
   lines.push('');
@@ -1965,9 +3674,9 @@ function genTypeXml(type, items, meta) {
   lines.push(`<?xml version="1.0" encoding="utf-8" ?>`);
   lines.push(`<elements>`);
   lines.push(`\t<info>`);
-  lines.push(`\t\t<n>${escXml(source)} — ${escXml(TYPE_LABELS[type] || type)}</n>`);
+  lines.push(`\t\t<name>${escXml(source)} - ${escXml(TYPE_LABELS[type] || type)}</name>`);
   lines.push(`\t\t<update version="0.1.0">`);
-  lines.push(`\t\t\t<file name="${escAttrXml(fileName)}" url="" />`);
+  lines.push(`\t\t\t<file name="${escAttrXml(fileName)}" url="${escAttrXml(fileName)}" />`);
   lines.push(`\t\t</update>`);
   lines.push(`\t</info>`);
   lines.push('');
@@ -1990,38 +3699,13 @@ async function downloadZip() {
   }
   const zip = new JSZip();
   const folder = zip.folder(meta.slug);
-  const fileList = [];
-
-  for (const [type, items] of Object.entries(extractedData)) {
-    if (!items.length) continue;
-    if (type === 'other') {
-      // Group by the resolved type Gemini detected (e.g. 'Race', 'Background')
-      const groups = {};
-      for (const item of items) {
-        const resolvedType = (item.type || 'other').trim();
-        if (!groups[resolvedType]) groups[resolvedType] = [];
-        groups[resolvedType].push(item);
-      }
-      for (const [resolvedType, groupItems] of Object.entries(groups)) {
-        const fileName = getFileName(resolvedType, meta.abbr);
-        fileList.push(fileName);
-        folder.file(fileName, genTypeXml(resolvedType, groupItems, meta));
-      }
-    } else {
-      const fileName = getFileName(type, meta.abbr);
-      fileList.push(fileName);
-      folder.file(fileName, genTypeXml(type, items, meta));
-    }
-  }
+  buildZipXmlDocuments(meta).forEach(doc => folder.file(doc.fileName, doc.xml));
 
   // Include skipped elements report if any were filtered
   const skippedReport = generateSkippedReport(skippedItems, meta.name);
   if (skippedReport) {
     folder.file('skipped-elements.txt', skippedReport);
   }
-
-  // source.xml references all other files
-  folder.file('source.xml', genSourceXml(meta, fileList));
 
   const blob = await zip.generateAsync({ type: 'blob' });
   const url = URL.createObjectURL(blob);
@@ -2049,11 +3733,11 @@ function generateXml() {
   lines.push(`<?xml version="1.0" encoding="utf-8" ?>`);
   lines.push(`<elements>`);
   lines.push(`\t<info>`);
-  lines.push(`\t\t<n>${escXml(source)}</n>`);
+  lines.push(`\t\t<name>${escXml(source)}</name>`);
   lines.push(`\t\t<description>Elements extracted from ${escXml(source)}.</description>`);
   lines.push(`\t\t<author url="">${escXml(meta.author)}</author>`);
   lines.push(`\t\t<update version="0.1.0">`);
-  lines.push(`\t\t\t<file name="${escAttrXml(meta.slug)}.xml" url="" />`);
+  lines.push(`\t\t\t<file name="${escAttrXml(meta.slug)}.xml" url="${escAttrXml(meta.slug)}.xml" />`);
   lines.push(`\t\t</update>`);
   lines.push(`\t</info>`);
   lines.push('');
@@ -2262,11 +3946,12 @@ function genFeatXml(feat, source, prefix) {
   const id = `${prefix}_FEAT_${idify(feat.name)}`;
   const benefits = Array.isArray(feat.benefits) ? feat.benefits : [];
   const rules = inferFeatRules(benefits, id);
+  const requirement = requirementFromPrerequisite(feat.prerequisite);
   const lines = [];
   lines.push(`\t<element name="${escAttrXml(feat.name)}" type="Feat" source="${escAttrXml(source)}" id="${id}">`);
   if (feat.prerequisite) {
-    lines.push(`\t\t<prerequisites>${escXml(feat.prerequisite)}</prerequisites>`);
-    lines.push(`\t\t<requirements><!-- Add requirement IDs here, e.g. [strength:13] --></requirements>`);
+    lines.push(`\t\t<prerequisite>${escXml(feat.prerequisite)}</prerequisite>`);
+    if (requirement) lines.push(`\t\t<requirements>${escXml(requirement)}</requirements>`);
   }
   lines.push(`\t\t<description>`);
   if (feat.prerequisite) lines.push(`\t\t\t<p class="flavor"><em>Prerequisite: ${escXml(feat.prerequisite)}</em></p>`);
@@ -2289,6 +3974,333 @@ function genFeatXml(feat, source, prefix) {
   return lines;
 }
 
+function requirementFromPrerequisite(text) {
+  const src = String(text || '');
+  const abilityMap = {
+    strength: 'str', str: 'str',
+    dexterity: 'dex', dex: 'dex',
+    constitution: 'con', con: 'con',
+    intelligence: 'int', int: 'int',
+    wisdom: 'wis', wis: 'wis',
+    charisma: 'cha', cha: 'cha',
+  };
+  const parts = [];
+  const re = /\b(str(?:ength)?|dex(?:terity)?|con(?:stitution)?|int(?:elligence)?|wis(?:dom)?|cha(?:risma)?)\b(?:\s+score)?\s*(?:of\s*)?(\d{1,2})/gi;
+  let match;
+  while ((match = re.exec(src)) !== null) {
+    const stat = abilityMap[match[1].toLowerCase()];
+    if (stat) parts.push(`[${stat}:${parseInt(match[2], 10)}]`);
+  }
+  if (!parts.length) return '';
+  return parts.length === 1 ? parts[0] : `(${parts.join(',')})`;
+}
+
+function isChoiceLanguage(value) {
+  return /^(any|choice|choose|one|two|three|\d+)\b/i.test(String(value || '').trim());
+}
+
+function choiceCountFromValues(values) {
+  let count = 0;
+  (values || []).forEach(value => {
+    if (!isChoiceLanguage(value)) return;
+    const m = String(value).match(/\b(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\b/i);
+    count += m ? parseCountWord(m[1]) : 1;
+  });
+  return count;
+}
+
+function languageChoiceSelect(ownerName, count) {
+  const n = parseInt(count, 10) || 0;
+  if (!n) return '';
+  const numberAttr = n > 1 ? ` number="${n}"` : '';
+  return `\t\t\t<select type="Language" name="Language (${escAttrXml(ownerName)})"${numberAttr} supports="Standard||Exotic" />`;
+}
+
+function backgroundShort(bg) {
+  const parts = [];
+  if (bg.skillProficiencies?.length) parts.push(bg.skillProficiencies.join(', '));
+  if (bg.toolProficiencies?.length) parts.push(bg.toolProficiencies.join(', '));
+  const languageChoices = (parseInt(bg.languageChoices, 10) || 0) + choiceCountFromValues(bg.languages);
+  if (languageChoices) parts.push(`${languageChoices} ${languageChoices === 1 ? 'Language' : 'Languages'}`);
+  const fixedLanguages = (bg.languages || []).filter(lang => !isChoiceLanguage(lang));
+  if (fixedLanguages.length) parts.push(fixedLanguages.join(', '));
+  return parts.join(', ');
+}
+
+function magicCategoryFromType(type) {
+  const t = String(type || '').toLowerCase();
+  if (t.includes('wondrous')) return 'Wondrous Items';
+  if (t.includes('weapon')) return 'Weapons';
+  if (t.includes('armor') || t.includes('shield')) return 'Armor';
+  if (t.includes('potion')) return 'Potions';
+  if (t.includes('ring')) return 'Rings';
+  if (t.includes('rod')) return 'Rods';
+  if (t.includes('scroll')) return 'Scrolls';
+  if (t.includes('staff')) return 'Staffs';
+  if (t.includes('wand')) return 'Wands';
+  return 'Magic Items';
+}
+
+function genRaceXml(race, source, prefix) {
+  const raceId = `${prefix}_RACE_${idify(race.name)}`;
+  const lines = [];
+  lines.push(`\t<element name="${escAttrXml(race.name)}" type="Race" source="${escAttrXml(source)}" id="${raceId}">`);
+  lines.push(`\t\t<description>`);
+  lines.push(`\t\t\t<p>${escXml(race.description||'')}</p>`);
+  (race.traits||[]).forEach(t => {
+    const tid = `${raceId}_TRAIT_${idify(t.name)}`;
+    lines.push(`\t\t\t<div element="${tid}" />`);
+  });
+  lines.push(`\t\t</description>`);
+  lines.push(`\t\t<sheet display="false" />`);
+  lines.push(`\t\t<rules>`);
+  // Core racial stat bonuses
+  if (race.abilityScores) {
+    const abilityMap = { strength:'strength', dexterity:'dexterity', constitution:'constitution',
+      intelligence:'intelligence', wisdom:'wisdom', charisma:'charisma' };
+    for (const [k, v] of Object.entries(race.abilityScores)) {
+      const stat = abilityMap[k.toLowerCase()];
+      if (stat && v) lines.push(`\t\t\t<stat name="${stat}" value="${v}" />`);
+    }
+  }
+  if (race.speed)  lines.push(`\t\t\t<stat name="innate speed" value="${race.speed}" bonus="base" />`);
+  if (race.size)   lines.push(`\t\t\t<grant type="Size" id="ID_SIZE_${idify(race.size)}" />`);
+  if (race.languages) {
+    race.languages.filter(lang => !isChoiceLanguage(lang)).forEach(lang => {
+      lines.push(`\t\t\t<grant type="Language" id="ID_LANGUAGE_${idify(lang)}" />`);
+    });
+  }
+  const raceLanguageChoices = (parseInt(race.languageChoices, 10) || 0) + choiceCountFromValues(race.languages);
+  const raceLanguageSelect = languageChoiceSelect(race.name, raceLanguageChoices);
+  if (raceLanguageSelect) lines.push(raceLanguageSelect);
+  (race.traits||[]).forEach(t => {
+    const tid = `${raceId}_TRAIT_${idify(t.name)}`;
+    lines.push(`\t\t\t<grant type="Racial Trait" id="${tid}" />`);
+  });
+  if (race.subraces && race.subraces.length > 0) {
+    lines.push(`\t\t\t<select type="Sub Race" name="Subrace (${escAttrXml(race.name)})" supports="${escAttrXml(race.name)}" />`);
+  }
+  lines.push(`\t\t</rules>`);
+  lines.push(`\t</element>`);
+
+  // Racial Trait child elements
+  (race.traits||[]).forEach(t => {
+    const tid = `${raceId}_TRAIT_${idify(t.name)}`;
+    lines.push(`\t<element name="${escAttrXml(t.name)}" type="Racial Trait" source="${escAttrXml(source)}" id="${tid}">`);
+    lines.push(`\t\t<compendium display="false" />`);
+    lines.push(`\t\t<description><p>${escXml(t.description||'')}</p></description>`);
+    lines.push(`\t\t<sheet><description>${escXml(t.description||'')}</description></sheet>`);
+    lines.push(`\t\t<rules></rules>`);
+    lines.push(`\t</element>`);
+  });
+
+  return lines;
+}
+
+function genBackgroundXml(bg, source, prefix) {
+  const bgId = `${prefix}_BACKGROUND_${idify(bg.name)}`;
+  const lines = [];
+  lines.push(`\t<element name="${escAttrXml(bg.name)}" type="Background" source="${escAttrXml(source)}" id="${bgId}">`);
+  lines.push(`\t\t<description>`);
+  lines.push(`\t\t\t<p>${escXml(bg.description||'')}</p>`);
+  (bg.features||[]).forEach(f => {
+    const fid = `${bgId}_FEATURE_${idify(f.name)}`;
+    lines.push(`\t\t\t<div element="${fid}" />`);
+  });
+  lines.push(`\t\t</description>`);
+  const short = backgroundShort(bg);
+  if (short) {
+    lines.push(`\t\t<setters>`);
+    lines.push(`\t\t\t<set name="short">${escXml(short)}</set>`);
+    lines.push(`\t\t</setters>`);
+  }
+  lines.push(`\t\t<sheet display="false" />`);
+  lines.push(`\t\t<rules>`);
+  // Skill proficiencies
+  const skillIdMap = {
+    'acrobatics':'ID_PROFICIENCY_SKILL_ACROBATICS','animal handling':'ID_PROFICIENCY_SKILL_ANIMALHANDLING',
+    'arcana':'ID_PROFICIENCY_SKILL_ARCANA','athletics':'ID_PROFICIENCY_SKILL_ATHLETICS',
+    'deception':'ID_PROFICIENCY_SKILL_DECEPTION','history':'ID_PROFICIENCY_SKILL_HISTORY',
+    'insight':'ID_PROFICIENCY_SKILL_INSIGHT','intimidation':'ID_PROFICIENCY_SKILL_INTIMIDATION',
+    'investigation':'ID_PROFICIENCY_SKILL_INVESTIGATION','medicine':'ID_PROFICIENCY_SKILL_MEDICINE',
+    'nature':'ID_PROFICIENCY_SKILL_NATURE','perception':'ID_PROFICIENCY_SKILL_PERCEPTION',
+    'performance':'ID_PROFICIENCY_SKILL_PERFORMANCE','persuasion':'ID_PROFICIENCY_SKILL_PERSUASION',
+    'religion':'ID_PROFICIENCY_SKILL_RELIGION','sleight of hand':'ID_PROFICIENCY_SKILL_SLEIGHTOFHAND',
+    'stealth':'ID_PROFICIENCY_SKILL_STEALTH','survival':'ID_PROFICIENCY_SKILL_SURVIVAL',
+  };
+  (bg.skillProficiencies||[]).forEach(skill => {
+    const sid = skillIdMap[skill.toLowerCase()];
+    if (sid) lines.push(`\t\t\t<grant type="Proficiency" id="${sid}" />`);
+  });
+  (bg.toolProficiencies||[]).forEach(tool => {
+    lines.push(`\t\t\t<!-- Tool proficiency: ${escXml(tool)} — add ID manually -->`);
+  });
+  (bg.languages||[]).filter(lang => !isChoiceLanguage(lang)).forEach(lang => {
+      lines.push(`\t\t\t<grant type="Language" id="ID_LANGUAGE_${idify(lang)}" />`);
+  });
+  const backgroundLanguageChoices = (parseInt(bg.languageChoices, 10) || 0) + choiceCountFromValues(bg.languages);
+  const backgroundLanguageSelect = languageChoiceSelect(bg.name, backgroundLanguageChoices);
+  if (backgroundLanguageSelect) lines.push(backgroundLanguageSelect);
+  (bg.features||[]).forEach(f => {
+    const fid = `${bgId}_FEATURE_${idify(f.name)}`;
+    lines.push(`\t\t\t<grant type="Background Feature" id="${fid}" />`);
+  });
+  lines.push(`\t\t</rules>`);
+  lines.push(`\t</element>`);
+
+  // Background Feature child elements
+  (bg.features||[]).forEach(f => {
+    const fid = `${bgId}_FEATURE_${idify(f.name)}`;
+    lines.push(`\t<element name="${escAttrXml(f.name)}" type="Background Feature" source="${escAttrXml(source)}" id="${fid}">`);
+    lines.push(`\t\t<compendium display="false" />`);
+    lines.push(`\t\t<supports>${escXml(bg.name)}</supports>`);
+    lines.push(`\t\t<description><p>${escXml(f.description||'')}</p></description>`);
+    lines.push(`\t\t<sheet><description>${escXml(f.description||'')}</description></sheet>`);
+    lines.push(`\t\t<rules></rules>`);
+    lines.push(`\t</element>`);
+  });
+
+  return lines;
+}
+
+function hasClassSpellcasting(cls) {
+  return !!(cls.spellcastingAbility || cls.spellcastingList);
+}
+
+function spellcastingPrepareAttribute(cls) {
+  if (cls.spellcastingPrepare === true || cls.spellcastingPrepare === 'true') return ' prepare="true"';
+  if (cls.spellcastingPrepare === false || cls.spellcastingPrepare === 'false') return ' prepare="false"';
+  return '';
+}
+
+function isArchetypeSelectionFeature(feature, cls) {
+  if (!feature || !cls?.archetypeLevel) return false;
+  const name = String(feature.name || '').toLowerCase();
+  const label = String(cls.archetypeLabel || '').toLowerCase();
+  const sameLevel = parseInt(feature.level, 10) === parseInt(cls.archetypeLevel, 10);
+  return sameLevel && (
+    (label && name.includes(label)) ||
+    /\b(archetype|subclass|path|college|domain|circle|oath|patron|tradition)\b/i.test(name)
+  );
+}
+
+function genClassXml(cls, source, prefix) {
+  const classId = `${prefix}_CLASS_${idify(cls.name)}`;
+  const classHasSpellcasting = hasClassSpellcasting(cls);
+  const hasArchetypeFeature = (cls.features || []).some(f => isArchetypeSelectionFeature(f, cls));
+  const lines = [];
+
+  // Primary class element
+  lines.push(`\t<element name="${escAttrXml(cls.name)}" type="Class" source="${escAttrXml(source)}" id="${classId}">`);
+  lines.push(`\t\t<description>`);
+  lines.push(`\t\t\t<p>${escXml(cls.description||'')}</p>`);
+  (cls.features||[]).forEach(f => {
+    const fid = `${classId}_FEATURE_${idify(f.name)}`;
+    lines.push(`\t\t\t<div element="${fid}" />`);
+  });
+  lines.push(`\t\t</description>`);
+  lines.push(`\t\t<sheet>`);
+  lines.push(`\t\t\t<description>${escXml(cls.description||'')}</description>`);
+  lines.push(`\t\t</sheet>`);
+  lines.push(`\t\t<setters>`);
+  lines.push(`\t\t\t<set name="hd">d${cls.hitDie||8}</set>`);
+  if (cls.description) lines.push(`\t\t\t<set name="short">${escXml(cls.description).slice(0,120)}</set>`);
+  if (cls.startingEquipment) lines.push(`\t\t\t<set name="equipment">${escXml(cls.startingEquipment)}</set>`);
+  lines.push(`\t\t</setters>`);
+  if (classHasSpellcasting) {
+    const list = cls.spellcastingList || cls.name;
+    const ability = cls.spellcastingAbility ? ` ability="${escAttrXml(cls.spellcastingAbility)}"` : '';
+    const prepare = spellcastingPrepareAttribute(cls);
+    lines.push(`\t\t<spellcasting name="${escAttrXml(cls.name)}"${ability}${prepare}>`);
+    lines.push(`\t\t\t<list>${escXml(list)}</list>`);
+    lines.push(`\t\t</spellcasting>`);
+  }
+  lines.push(`\t\t<rules>`);
+  if (classHasSpellcasting) {
+    lines.push(`\t\t\t<grant type="Grants" id="ID_INTERNAL_GRANTS_SPELLCASTING_FEATURE" />`);
+    if (cls.ritualCasting) lines.push(`\t\t\t<grant type="Grants" id="ID_INTERNAL_RITUAL_CASTING" />`);
+  }
+  // Saving throw proficiencies
+  const savingThrowMap = {
+    strength:'ID_PROFICIENCY_SAVINGTHROW_STRENGTH', dexterity:'ID_PROFICIENCY_SAVINGTHROW_DEXTERITY',
+    constitution:'ID_PROFICIENCY_SAVINGTHROW_CONSTITUTION', intelligence:'ID_PROFICIENCY_SAVINGTHROW_INTELLIGENCE',
+    wisdom:'ID_PROFICIENCY_SAVINGTHROW_WISDOM', charisma:'ID_PROFICIENCY_SAVINGTHROW_CHARISMA',
+  };
+  (cls.savingThrows||[]).forEach(st => {
+    const sid = savingThrowMap[st.toLowerCase()];
+    if (sid) lines.push(`\t\t\t<grant type="Proficiency" id="${sid}" />`);
+  });
+  // Armor & weapon proficiencies
+  (cls.armorProficiencies||[]).forEach(a => {
+    const armorMap = {'light':'ID_PROFICIENCY_ARMOR_PROFICIENCY_LIGHT_ARMOR','light armor':'ID_PROFICIENCY_ARMOR_PROFICIENCY_LIGHT_ARMOR','medium':'ID_PROFICIENCY_ARMOR_PROFICIENCY_MEDIUM_ARMOR','medium armor':'ID_PROFICIENCY_ARMOR_PROFICIENCY_MEDIUM_ARMOR','heavy':'ID_PROFICIENCY_ARMOR_PROFICIENCY_HEAVY_ARMOR','heavy armor':'ID_PROFICIENCY_ARMOR_PROFICIENCY_HEAVY_ARMOR','shields':'ID_PROFICIENCY_ARMOR_PROFICIENCY_SHIELDS'};
+    const aid = armorMap[a.toLowerCase()];
+    if (aid) lines.push(`\t\t\t<grant type="Proficiency" id="${aid}" />`);
+  });
+  (cls.weaponProficiencies||[]).forEach(w => {
+    const weapMap = {'simple weapons':'ID_PROFICIENCY_WEAPON_PROFICIENCY_SIMPLE_WEAPONS','martial weapons':'ID_PROFICIENCY_WEAPON_PROFICIENCY_MARTIAL_WEAPONS'};
+    const wid = weapMap[w.toLowerCase()];
+    if (wid) lines.push(`\t\t\t<grant type="Proficiency" id="${wid}" />`);
+  });
+  // Skill choices
+  if (cls.skillChoices && cls.skillChoices.count) {
+    lines.push(`\t\t\t<select type="Proficiency" name="Skill Proficiency (${escAttrXml(cls.name)})" number="${cls.skillChoices.count}" supports="Skill,${escAttrXml((cls.skillChoices.from||[]).join(','))}" />`);
+  }
+  // Class features granted per level
+  (cls.features||[]).forEach(f => {
+    const fid = `${classId}_FEATURE_${idify(f.name)}`;
+    lines.push(`\t\t\t<grant type="Class Feature" id="${fid}" level="${f.level||1}" />`);
+  });
+  // Archetype selection
+  if (cls.archetypeLevel && !hasArchetypeFeature) {
+    lines.push(`\t\t\t<select type="Archetype" name="${escAttrXml(cls.archetypeLabel||'Archetype')} (${escAttrXml(cls.name)})" supports="${escAttrXml(cls.archetypeSupports||cls.name)}" level="${cls.archetypeLevel}" />`);
+  }
+  lines.push(`\t\t</rules>`);
+  if (cls.multiclassPrerequisite || cls.multiclassRequirements || cls.multiclassProficiencies) {
+    lines.push(`\t\t<multiclass id="${classId}_MULTICLASS">`);
+    if (cls.multiclassPrerequisite) lines.push(`\t\t\t<prerequisite>${escXml(cls.multiclassPrerequisite)}</prerequisite>`);
+    if (cls.multiclassRequirements) lines.push(`\t\t\t<requirements>${escXml(cls.multiclassRequirements)}</requirements>`);
+    if (cls.multiclassProficiencies) {
+      lines.push(`\t\t\t<setters>`);
+      lines.push(`\t\t\t\t<set name="multiclass proficiencies">${escXml(cls.multiclassProficiencies)}</set>`);
+      lines.push(`\t\t\t</setters>`);
+    }
+    lines.push(`\t\t\t<rules>`);
+    lines.push(`\t\t\t\t<grant type="Grants" id="ID_INTERNAL_GRANT_MULTICLASS" />`);
+    lines.push(`\t\t\t</rules>`);
+    lines.push(`\t\t</multiclass>`);
+  }
+  lines.push(`\t</element>`);
+
+  // Class Feature child elements
+  (cls.features||[]).forEach(f => {
+    const fid = `${classId}_FEATURE_${idify(f.name)}`;
+    lines.push(`\t<element name="${escAttrXml(f.name)}" type="Class Feature" source="${escAttrXml(source)}" id="${fid}">`);
+    lines.push(`\t\t<compendium display="false" />`);
+    lines.push(`\t\t<description>`);
+    lines.push(`\t\t\t<p><em>${f.level||1}${ordinal(f.level||1)}-level ${escXml(cls.name)} feature</em></p>`);
+    lines.push(`\t\t\t<p>${escXml(f.description||'')}</p>`);
+    lines.push(`\t\t</description>`);
+    const sheetAttrs = [
+      f.action ? `action="${escAttrXml(f.action)}"` : '',
+      f.usage  ? `usage="${escAttrXml(f.usage)}"` : '',
+    ].filter(Boolean).join(' ');
+    lines.push(`\t\t<sheet${sheetAttrs ? ' '+sheetAttrs : ''}>`);
+    lines.push(`\t\t\t<description>${escXml(f.description||'')}</description>`);
+    lines.push(`\t\t</sheet>`);
+    const archetypeSelect = isArchetypeSelectionFeature(f, cls);
+    if (archetypeSelect) {
+      lines.push(`\t\t<rules>`);
+      lines.push(`\t\t\t<select type="Archetype" name="${escAttrXml(cls.archetypeLabel||'Archetype')}" supports="${escAttrXml(cls.archetypeSupports||cls.name)}" level="${cls.archetypeLevel}" />`);
+      lines.push(`\t\t</rules>`);
+    } else {
+      lines.push(`\t\t<rules></rules>`);
+    }
+    lines.push(`\t</element>`);
+  });
+
+  return lines;
+}
+
 function genMagicXml(item, source, prefix) {
   const id = `${prefix}_MAGIC_ITEM_${idify(item.name)}`;
   const lines = [];
@@ -2298,7 +4310,12 @@ function genMagicXml(item, source, prefix) {
   lines.push(`\t\t\t<description>${escXml(item.description||'')}</description>`);
   lines.push(`\t\t</sheet>`);
   lines.push(`\t\t<setters>`);
-  lines.push(`\t\t\t<set name="category">Magic Items</set>`);
+  const currency = item.currency || 'gp';
+  const cost = item.cost || '0';
+  const weight = item.weight || '0';
+  lines.push(`\t\t\t<set name="category">${escXml(item.category || magicCategoryFromType(item.type))}</set>`);
+  lines.push(`\t\t\t<set name="cost" currency="${escAttrXml(currency)}">${escXml(cost)}</set>`);
+  lines.push(`\t\t\t<set name="weight" lb="${escAttrXml(weight)}">${escXml(weight)} lb.</set>`);
   lines.push(`\t\t\t<set name="type">${escXml(item.type||'Wondrous Item')}</set>`);
   lines.push(`\t\t\t<set name="rarity">${escXml(item.rarity||'Uncommon')}</set>`);
   lines.push(`\t\t\t<set name="attunement">${!!item.requiresAttunement}</set>`);
@@ -2334,6 +4351,7 @@ function showXmlPreview() {
   const wasHidden = wrap.classList.contains('hidden');
   wrap.classList.toggle('hidden');
   if (!wrap.classList.contains('hidden')) {
+    showValidationResult(validateAll());
     // Always regenerate so preview reflects latest edits
     document.getElementById('xmlPreview').textContent = generateXml();
     clearChanged();

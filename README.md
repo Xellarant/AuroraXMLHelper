@@ -1,6 +1,12 @@
 # Aurora XML Helper
 
-A browser-based tool for converting D&D supplement PDFs into Aurora Builder-compatible XML files. No installation required — just a Google Gemini API key and a PDF.
+A browser-based tool for converting text/OCR D&D supplement PDFs into
+Aurora Builder-compatible XML files.
+
+The helper now uses deterministic, local parsing rules instead of sending the
+PDF to an AI model. It reads selectable PDF text in the browser, extracts
+high-confidence D&D element blocks, lets you review/edit the results, and then
+exports Aurora XML.
 
 **Live app:** https://xellarant.github.io/AuroraXMLHelper/
 
@@ -8,100 +14,112 @@ A browser-based tool for converting D&D supplement PDFs into Aurora Builder-comp
 
 ## Prerequisites
 
-- A free Google Gemini API key from [aistudio.google.com](https://aistudio.google.com)
-- A PDF of the supplement you want to convert (OCR copies work best — scanned image-only PDFs may yield poor results)
+- A text-based or OCR-processed PDF.
+- A modern browser.
+
+No API key is required for the deterministic parser.
+
+---
+
+## Supported deterministic element types
+
+| Type | Notes |
+|------|-------|
+| Spells | Full spell blocks with school/level, casting time, range, components, duration, and description |
+| Subclasses | Generates parent `Archetype` elements plus `Archetype Feature` children |
+| Items / Equipment | Equipment rows with cost and weight |
+| Feats | DDB-style and bullet/list style feat blocks, including prerequisites and benefits |
+| Magic Items | Rarity lines, attunement, charges, recharge, and descriptions |
+| Races | Core race fields, traits, language grants, and language choices |
+| Backgrounds | Skill/tool/language/equipment fields and background features |
+| Classes | Class traits, hit die, proficiencies, class features, spellcasting metadata, and subclass selection |
+
+The generic "Other" parser is disabled for now. Each supported type has its own
+deterministic parser and Aurora XML generator.
 
 ---
 
 ## How to use it
 
-### Step 1 — API key
+### 1. Upload your PDF
 
-Enter your Gemini key at the top of the page and click **Save Key**. The key is stored in your browser's `localStorage` and never sent anywhere other than Google's API directly. Use **Test Key** to verify it's working before you start.
+Drag and drop or browse for a supplement PDF. The app reads selectable text
+locally in your browser. OCR quality matters: if the OCR says `Bare Smit`, the
+app can correct a few known cases, but you should still review names and rules.
 
-### Step 2 — Upload your PDF
+### 2. Choose element types
 
-Drag and drop or browse for your supplement PDF. The app will immediately pre-fill the source name and abbreviation from the filename.
+Select the element types you want to parse. You can optionally enter a page range
+such as `24-32` to focus extraction on a known section.
 
-A note on file sizes:
-- **Under 5 MB** — the full PDF is sent directly to Gemini for each extraction call.
-- **5–30 MB** — the app reads the table of contents first to identify which pages contain which element types, then sends only the relevant pages per call. This significantly reduces token usage.
-- **30+ MB** — same TOC-guided approach, but you may also want to use the **Manual Page Range Override** field (see below) to help the app focus on specific sections.
+### 3. Parse
 
-### Step 3 — Extraction options
+Click **Parse PDF**. The parser scans the selected pages with repeatable layout
+rules. It is intentionally conservative: it prefers fewer high-confidence
+elements over guessed content.
 
-**Source details** are auto-filled from the PDF on upload and refined during extraction (the app reads the cover page to find the proper title and author). You can override any of these fields manually.
+### 4. Review and edit
 
-**Element types** — check the types you want to extract:
+Extracted elements appear in tabs. Expand each entry to review and edit fields.
+Validation warnings are shown before download when required Aurora fields or
+shape rules are missing.
 
-| Type | Notes |
-|------|-------|
-| Spells | Fully supported, including technomagic keyword |
-| Subclasses | Generates parent Archetype + individual Archetype Feature elements |
-| Items / Equipment | Weapons, armor, tools, and gear |
-| Feats | Includes rule inference for ability score increases and proficiency grants |
-| Magic Items | Includes attunement, charges, and recharge |
-| Other *(experimental)* | Attempts to extract anything else — races, classes, backgrounds, companions, languages, etc. Results use a generic XML template and are grouped into separate files by detected type |
+### 5. Download
 
-**Manual Page Range Override** — if you know which pages a section occupies (e.g. `45-62`), entering it here skips the TOC detection step and tells Gemini exactly where to look. Useful for very large supplements or when the TOC detection misses a section. This field overrides TOC auto-detection entirely.
+- **Download ZIP** creates one XML file per element type plus `source.xml`.
+- **Single XML** creates one combined XML file for quick testing.
 
-### Step 4 — Extract
+If incomplete elements were skipped, the ZIP includes `skipped-elements.txt`.
 
-Click **Extract from PDF**. The progress bar will walk through each selected type. For large files, you'll see a TOC read step first, followed by per-type extraction. If a type's response is too large for a single call, the app automatically retries in two alphabetic halves and merges the results.
+---
 
-**Completeness filtering** runs automatically after extraction. Any element that is missing more than 20% of its required fields (e.g. a spell with no casting time, school, or description) is quietly removed and logged. If anything was filtered, you'll see a note in the extraction summary and a `skipped-elements.txt` file will appear in your ZIP explaining what was dropped and why.
+## Aurora XML validation
 
-### Step 5 — Review and edit
+The app performs in-browser Aurora shape validation before preview/download.
+The repository also includes a PowerShell validator for generated or hand-edited
+Aurora XML repositories:
 
-Extracted elements appear in tabs, one per type. Each entry can be expanded to review and edit all fields individually. Changes are saved to memory immediately — a **changes pending** badge on the download buttons lets you know when the output is out of date relative to your edits.
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Test-AuroraXmlShape.ps1 -RootPath .
+```
 
-Use the **search bar** at the top of each tab to filter by name or type.
-
-For feats, use **+ Add Benefit** to manually add bullet points that Gemini may have missed. For subclasses, use **+ Add Feature** to add features that weren't captured.
-
-**Pre-download validation** runs when you click either download button. It checks for blank names, invalid spell levels, archetypes with no features, duplicate IDs, and other issues. Problems are flagged with a red `!` badge on the affected card and listed in a summary. You'll be given the option to download anyway if you want to proceed despite warnings.
-
-### Step 6 — Download
-
-- **Download ZIP** — recommended. Produces a folder named after your source slug containing one XML file per element type (e.g. `mh-spells.xml`, `mh-archetypes.xml`) plus a `source.xml` index file. All filenames are prefixed with your source abbreviation to avoid collisions when you have multiple supplements installed.
-- **Single XML** — all elements combined into one file, useful for quick testing.
-
-Both options also include `skipped-elements.txt` in the ZIP if any elements were filtered.
+The validator checks XML parsing, root shape, `/elements/info/update`, required
+element attributes, duplicate IDs, class hit-die setters, multiclass IDs, and
+optional local/external ID references.
 
 ---
 
 ## Installation into Aurora Builder
 
-Extract the ZIP and copy the folder contents into:
+Extract the ZIP and copy the XML files into your Aurora custom content folder,
+for example:
 
-```
+```text
 %localappdata%\Aurora Legacy\custom\user\local
 ```
 
 or for older builds:
 
-```
+```text
 \5e Character Builder\custom\user\local
 ```
 
-Load Aurora and the new source should appear under **Manage Content**. If you don't see it, check that `source.xml` is present in the folder and that the file URLs are either blank or valid — Aurora will skip files it can't reach.
+Load Aurora and the new source should appear under **Manage Content**. If it
+does not, run the validator script against the generated folder and fix any
+reported XML shape issues.
 
 ---
 
 ## Known limitations
 
-- **Rate limits** — the free Gemini tier allows roughly 5 requests per minute and 20 per day. Extracting all five element types from a single supplement uses 5–7 calls (more if truncation retry kicks in). Space out sessions accordingly.
-- **Incomplete elements** — if a supplement mentions a spell or item by name but doesn't include its full stat block, the app will flag it as incomplete and skip it. See `skipped-elements.txt` in the ZIP for the full list.
-- **The "Other" extractor** is experimental. It will attempt to handle races, classes, backgrounds, and similar types, but the resulting XML uses a generic template. It will load in Aurora, but you may need to manually add rules, proficiency grants, and other mechanics that require type-specific handling.
-- **Scanned PDFs** — Gemini can process these, but text quality depends heavily on the scan. OCR-processed PDFs yield significantly better results.
-- **Very large supplements (80+ MB)** — the app will do its best with TOC-guided extraction, but some supplements may require manual page range splits across multiple extraction sessions.
-
----
-
-## Roadmap
-
-- **Ollama support** — the goal is to replace Gemini calls with a locally-run model, which would eliminate API keys, rate limits, and file size constraints entirely. The extraction architecture is already designed to swap backends cleanly.
-- **Custom class and race generators** — dedicated XML generators for Class, Race, Background, and Companion types, replacing the current generic template.
+- OCR quality still matters. Deterministic parsing cannot recover text the OCR
+  never captured correctly.
+- The parser targets common D&D/DDB-style layouts. Unusual page layouts may need
+  manual page ranges or hand cleanup.
+- Rules are generated conservatively. Some mechanics may require manual Aurora
+  rule edits after import.
+- Spell list tables are not treated as full spell definitions unless complete
+  spell blocks are present.
 
 ---
 
