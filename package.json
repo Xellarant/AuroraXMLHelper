@@ -1,0 +1,9 @@
+{
+  "name": "aurora-xml-helper",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Deterministic D&D PDF to Aurora Builder XML helper.",
+  "scripts": {
+    "test": "node tests/parser-regression.test.js"
+  }
+}

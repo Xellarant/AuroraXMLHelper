@@ -89,6 +89,21 @@ optional local/external ID references.
 
 ---
 
+## Development
+
+The browser app is static: `index.html` loads the application logic from
+`src/app.js`.
+
+Run parser and generator regression tests with:
+
+```powershell
+npm test
+```
+
+The tests use Node's built-in modules only, so no package install is required.
+
+---
+
 ## Installation into Aurora Builder
 
 Extract the ZIP and copy the XML files into your Aurora custom content folder,
