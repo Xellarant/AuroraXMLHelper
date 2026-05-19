@@ -191,6 +191,122 @@ test('subclass headings normalize common OCR damage', () => {
   assert.equal(archetypes[0].features.length, 2);
 });
 
+test('class parsing stops before subclass section and normalizes OCR feature names', () => {
+  const context = loadApp();
+  const text = [
+    'Core Artificer Traits',
+    'Hit Point Die D8 per Artificer level',
+    'Saving Throw Proficiencies Constitution and Intelligence',
+    'Skill Proficiencies. Choose 2: Arcana, History, Investigation, Medicine, Nature, Perception, Sleight of Hand',
+    'LeveL 1: SPELLCASTING',
+    'Intelligence is your spellcasting ability for your Artificer spells.',
+    'Levet 2: Repuicate Macic Item',
+    'You learn how to replicate magic items.',
+    'ARTIFICER SUBCLASSES',
+    'Alchemist',
+    'A specialist in alchemical magic.',
+    'Level 3: Toots oF THE TRADE',
+    'You gain alchemist supplies.'
+  ].join('\n');
+
+  const classes = context.parseClassesFromText(text);
+  const archetypes = context.parseArchetypesFromText(text);
+
+  assert.equal(classes.length, 1);
+  assert.equal(classes[0].features.map(feature => feature.name).join('|'), 'Spellcasting|Replicate Magic Item');
+  assert.equal(archetypes.length, 1);
+  assert.equal(archetypes[0].features[0].name, 'Tools of the Trade');
+});
+
+test('DDB-style species parse from title plus inline trait paragraphs', () => {
+  const context = loadApp();
+  const text = [
+    'CHANGELING',
+    'With ever-changing appearances, changelings reside in many societies undetected.',
+    'CHANGELING TRAITS',
+    'Creature Type: Fey',
+    'Size: Medium or Small, chosen when you select this species',
+    'Speed: 30 feet',
+    'As a Changeling, you have these special traits.',
+    'Changeling Instincts. You gain proficiency in two skills of your choice.',
+    'Shape-Shifter. As an action, you can change your appearance.'
+  ].join('\n');
+
+  const races = context.parseRacesFromText(text);
+
+  assert.equal(races.length, 1);
+  assert.equal(races[0].name, 'Changeling');
+  assert.equal(races[0].size, 'Medium');
+  assert.equal(races[0].speed, 30);
+  assert.equal(races[0].traits.map(trait => trait.name).join('|'), 'Changeling Instincts|Shape-Shifter');
+});
+
+test('2024-style backgrounds do not require background feature blocks', () => {
+  const context = loadApp();
+  const text = [
+    'Aperrant HEIR',
+    'Ability Scores: Strength, Constitution, Charisma',
+    'Feat: Aberrant Dragonmark (see Dragonmark Feats)',
+    'Skill Proficiencies: History and Intimidation',
+    'Tool Proficiency: Disguise Kit',
+    'Equipment: Choose A or B: Dagger or 50 GP',
+    'Your aberrant dragonmark has made life challenging since it manifested.'
+  ].join('\n');
+
+  const backgrounds = context.parseBackgroundsFromText(text);
+
+  assert.equal(backgrounds.length, 1);
+  assert.equal(backgrounds[0].name, 'Aberrant Heir');
+  assert.equal(backgrounds[0].abilityScores.join('|'), 'Strength|Constitution|Charisma');
+  assert.equal(backgrounds[0].feat, 'Aberrant Dragonmark');
+  assert.equal(backgrounds[0].skillProficiencies.join('|'), 'History|Intimidation');
+
+  setExtractedData(context, { spell: [], archetype: [], item: [], feat: [{ name: 'Aberrant Dragonmark', benefits: ['You gain a mark.'] }], magic: [], race: [], background: backgrounds, class: [], other: [] });
+  const xml = runInApp(context, 'generateXml()');
+  assert.ok(xml.includes('<stat name="strength" value="1" />'));
+  assert.ok(xml.includes('<grant type="Feat" id="ID_VSS_FEAT_ABERRANT_DRAGONMARK" />'));
+  assert.equal(context.checkCompleteness(backgrounds[0], 'background').keep, true);
+});
+
+test('dragonmark feat headings are recognized as feats', () => {
+  const context = loadApp();
+  const text = [
+    'Mark oF DETECTION',
+    'Dragonmark Feat (Prerequisite: Eberron Campaign, Can’t Have Another Dragonmark Feat)',
+    'You gain the following benefits.',
+    'Deductive Intuition. When you make an Intelligence check, you can roll 1d4.',
+    'Magical Detection. You always have the Detect Magic spell prepared.'
+  ].join('\n');
+
+  const feats = context.parseFeatsFromText(text);
+
+  assert.equal(feats.length, 1);
+  assert.equal(feats[0].name, 'Mark of Detection');
+  assert.match(feats[0].prerequisite, /Eberron Campaign/);
+  assert.equal(feats[0].benefits.length, 2);
+});
+
+test('generated XML strips OCR control characters that XML forbids', () => {
+  const context = loadApp();
+  setExtractedData(context, {
+    spell: [],
+    archetype: [],
+    item: [],
+    feat: [{ name: 'Glitch Proof', description: 'Before\u0015After', benefits: ['Keep\u0014going.'] }],
+    magic: [],
+    race: [],
+    background: [],
+    class: [],
+    other: []
+  });
+
+  const xml = runInApp(context, 'generateXml()');
+
+  assert.ok(!/[\x00-\x08\x0B\x0C\x0E-\x1F]/.test(xml));
+  assert.ok(xml.includes('BeforeAfter'));
+  assert.ok(xml.includes('Keepgoing.'));
+});
+
 test('generated XML metadata matches Aurora shape expectations', () => {
   const context = loadApp();
   const sampleData = {

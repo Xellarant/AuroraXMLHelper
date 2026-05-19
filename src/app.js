@@ -625,10 +625,12 @@ function detectSourceMetaFromText(pages) {
 function normalizeTextLines(text) {
   return text
     .replace(/\u00a0/g, ' ')
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
     .replace(/[â€œâ€]/g, '"')
     .replace(/[â€˜â€™]/g, "'")
     .split(/\r?\n/)
-    .map(s => s.replace(/\s+/g, ' ').trim())
+    .map(s => s.replace(/^[`'"]+/, '').replace(/\s+/g, ' ').trim())
     .filter(Boolean);
 }
 
@@ -654,7 +656,7 @@ function parseSpellsFromText(text) {
     const description = higher ? body.slice(0, higher.index).trim() : body.trim();
     const components = parseComponents(fields.components);
     spells.push({
-      name: lines[i],
+      name: normalizeExtractedName(lines[i]),
       school: kind.school,
       level: kind.level,
       castingTime: fields['casting time'],
@@ -667,7 +669,7 @@ function parseSpellsFromText(text) {
       isConcentration: /^concentration/i.test(fields.duration),
       isRitual: /\britual\b/i.test(lines[i + 1]),
       isTechnomagic: false,
-      classes: inferClasses(body),
+      classes: kind.classes?.length ? kind.classes : inferClasses(body),
       description,
       higherLevels: higher ? higher[1].trim() : ''
     });
@@ -678,10 +680,22 @@ function parseSpellsFromText(text) {
 
 function parseSpellKind(line) {
   const cantrip = line.match(/^([A-Za-z]+)\s+cantrip(?:\s*\((ritual)\))?$/i);
-  if (cantrip) return { level: 0, school: titleCase(cantrip[1]) };
+  if (cantrip && isSpellSchool(cantrip[1])) return { level: 0, school: titleCase(cantrip[1]) };
   const leveled = line.match(/^(\d+)(?:st|nd|rd|th)-level\s+([A-Za-z]+)(?:\s*\((ritual)\))?$/i);
-  if (leveled) return { level: parseInt(leveled[1], 10), school: titleCase(leveled[2]) };
+  if (leveled && isSpellSchool(leveled[2])) return { level: parseInt(leveled[1], 10), school: titleCase(leveled[2]) };
+  const ddb = line.match(/^Level\s+(\d+)\s+([A-Za-z]+)(?:\s*\(([^)]+)\))?/i);
+  if (ddb && isSpellSchool(ddb[2])) {
+    return {
+      level: parseInt(ddb[1], 10),
+      school: titleCase(ddb[2]),
+      classes: ddb[3] ? splitListValue(ddb[3]).map(titleCase) : []
+    };
+  }
   return null;
+}
+
+function isSpellSchool(value) {
+  return /^(Abjuration|Conjuration|Divination|Enchantment|Evocation|Illusion|Necromancy|Transmutation)$/i.test(String(value || '').trim());
 }
 
 function parseComponents(text) {
@@ -733,7 +747,7 @@ function featStartInfo(lines, i) {
     return { name, prerequisite, bodyStart: i + 1 + (prerequisite ? 1 : 0) };
   }
   if (!looksLikeTitle(line) || isRejectedFeatTitle(line) || /:/.test(line)) return null;
-  const featKind = next.match(/^(?:(?:General|Origin|Epic Boon|Fighting Style)\s+)?Feat(?:\s*\(([^)]*)\)|\s*$)/i);
+  const featKind = next.match(/^(?:(?:General|Origin|Epic Boon|Fighting Style|Dragonmark)\s+)?Feat(?:\s*\(([^)]*)\)|\s*$)/i);
   if (featKind) {
     const prerequisite = (featKind[1]?.match(/Prerequisite:\s*(.+)$/i) || [])[1]?.trim() || '';
     return { name: normalizeExtractedName(line), prerequisite, bodyStart: i + 2 };
@@ -750,14 +764,17 @@ function isRejectedFeatTitle(title) {
   return !text
     || /^ARTIST:/i.test(text)
     || /^Level\s+\d+\b/i.test(text)
-    || /^(General|Origin|Epic Boon|Fighting Style)\s+Feats?$/i.test(text)
+    || /^(General|Origin|Epic Boon|Fighting Style|Dragonmark)\s+Feats?$/i.test(text)
+    || /^(Favou?red|Favoneo|Recognized|Recocnizeo|Preeminent)\s+in\s+House$/i.test(text)
+    || /^Training$/i.test(text)
+    || /,\s*(common|uncommon|rare|very rare|legendary|artifact|varies)\b/i.test(text)
     || /\(see\b/i.test(text);
 }
 
 function isFeatMetaLine(line) {
   return /^ARTIST:/i.test(line)
     || /^['â€™]?TIS\b/i.test(line)
-    || /^(?:(?:General|Origin|Epic Boon|Fighting Style)\s+)?Feat\b/i.test(line);
+    || /^(?:(?:General|Origin|Epic Boon|Fighting Style|Dragonmark)\s+)?Feat\b/i.test(line);
 }
 
 function parseMagicItemsFromText(text) {
@@ -816,7 +833,7 @@ function parseBackgroundsFromText(text) {
     const end = findElementEnd(lines, i + 1);
     const block = lines.slice(i + 1, end);
     const parsed = parseBackgroundBlock(name, block);
-    if (parsed.features.length || parsed.skillProficiencies.length) backgrounds.push(parsed);
+    if (parsed.features.length || parsed.skillProficiencies.length || parsed.abilityScores.length || parsed.feat) backgrounds.push(parsed);
     i = Math.max(i, end - 1);
   }
   return uniqueByName(backgrounds);
@@ -891,8 +908,10 @@ function parseClassesFromText(text) {
 
 function parseBackgroundBlock(name, block) {
   const background = {
-    name,
+    name: normalizeExtractedName(name),
     description: '',
+    abilityScores: [],
+    feat: '',
     skillProficiencies: [],
     toolProficiencies: [],
     languages: [],
@@ -903,11 +922,17 @@ function parseBackgroundBlock(name, block) {
   let firstField = block.length;
   for (let i = 0; i < block.length; i++) {
     const line = block[i];
-    if (/^Skill Proficiencies:/i.test(line)) {
+    if (isAbilityScoreFieldLine(line)) {
+      background.abilityScores = parseAbilitiesFromText(line);
+      firstField = Math.min(firstField, i);
+    } else if (isFeatFieldLine(line)) {
+      background.feat = normalizeBackgroundFeatName(stripLeadingFieldLabel(line, /^(Feat|Fea?t|t)/i));
+      firstField = Math.min(firstField, i);
+    } else if (/^Skill\s+Pro/i.test(line)) {
       background.skillProficiencies = parseSkillsFromText(line);
       firstField = Math.min(firstField, i);
-    } else if (/^Tool Proficiencies:/i.test(line)) {
-      background.toolProficiencies = splitListValue(afterColon(line));
+    } else if (/^Tool\s+Pro/i.test(line)) {
+      background.toolProficiencies = splitListValue(stripLeadingFieldLabel(line, /^Tool\s+Pro(?:ficienc(?:y|ies)|ficiency|ficienci|fi)?/i));
       firstField = Math.min(firstField, i);
     } else if (/^Languages:/i.test(line)) {
       const languageInfo = parseLanguageInfo(afterColon(line));
@@ -919,7 +944,8 @@ function parseBackgroundBlock(name, block) {
       firstField = Math.min(firstField, i);
     }
   }
-  background.description = block.slice(0, firstField).filter(line => !isBackgroundMetaLine(line)).join(' ');
+  const proseLines = block.filter(line => !isBackgroundMetaLine(line) && !isLayoutNoiseLine(line) && !/^ARTIST:/i.test(line));
+  background.description = proseLines.join(' ');
   for (let i = 0; i < block.length; i++) {
     const feature = block[i].match(/^(?:Background\s+)?Feature:\s*(.+)$/i);
     if (!feature) continue;
@@ -931,20 +957,15 @@ function parseBackgroundBlock(name, block) {
     i = next - 1;
   }
   if (!background.features.length) {
-    const featureStart = block.findIndex((line, i) => looksLikeTitle(line) && i > firstField && !isBackgroundMetaLine(line));
-    if (featureStart !== -1) {
-      background.features.push({
-        name: block[featureStart],
-        description: block.slice(featureStart + 1).filter(line => !isBackgroundMetaLine(line)).join('\n').trim()
-      });
-    }
+    // 2024-style backgrounds often grant ability scores and feats instead of
+    // named background feature blocks, so avoid inventing features from prose.
   }
   return background;
 }
 
 function parseRaceBlock(name, block) {
   const race = {
-    name,
+    name: normalizeExtractedName(name).replace(/\s+Traits$/i, ''),
     description: '',
     size: '',
     speed: 0,
@@ -971,8 +992,14 @@ function parseRaceBlock(name, block) {
     }
   }
   race.abilityScores = parseAbilityScoresFromText(block.join(' '));
-  race.description = block.slice(0, firstField).filter(line => !isRaceMetaLine(line)).join(' ');
-  const traitBlocks = parseNamedBlocks(block, line => looksLikeTitle(line) && !isRaceMetaLine(line) && !isGenericRaceHeading(line));
+  race.description = block
+    .slice(0, firstField)
+    .filter(line => !isRaceMetaLine(line) && !isGenericRaceHeading(line) && !isLayoutNoiseLine(line) && !/^ARTIST:/i.test(line))
+    .join(' ');
+  const traitBlocks = parseInlineTraitBlocks(block);
+  if (!traitBlocks.length) {
+    traitBlocks.push(...parseNamedBlocks(block, line => looksLikeTitle(line) && !isRaceMetaLine(line) && !isGenericRaceHeading(line)));
+  }
   race.traits = traitBlocks
     .map(t => ({ name: t.name, description: t.lines.filter(line => !isRaceMetaLine(line)).join('\n').trim() }))
     .filter(t => t.description);
@@ -1050,20 +1077,31 @@ function parseClassBlock(name, block) {
 
 function backgroundStartName(lines, i) {
   if (isKnownFieldLine(lines[i])) return '';
+  if (/^ARTIST:/i.test(lines[i]) || isVisualNoiseTitle(lines[i])) return '';
+  if (/^species descriptions\b/i.test(cleanExtractedTitle(lines[i])) || isGenericRaceHeading(lines[i])) return '';
+  if (/^backgrounds\b/i.test(cleanExtractedTitle(lines[i]))) return '';
   const prefixed = lines[i].match(/^Background:\s*(.+)$/i);
-  if (prefixed) return prefixed[1].trim();
-  if (looksLikeTitle(lines[i]) && lines.slice(i + 1, i + 8).some(line => /^Skill Proficiencies:/i.test(line))) return lines[i];
+  if (prefixed) return normalizeExtractedName(prefixed[1]);
+  const window = lines.slice(i + 1, i + 14).join('\n');
+  const hasBackgroundFields = /^Skill\s+Pro/im.test(window)
+    || (/(?:^|\n)(?:Ability Scores?|Abili)\b/im.test(window) && /(?:^|\n)(?:Equipment|Choose\s*A\s+or\s+B)\b/im.test(window));
+  if (looksLikeTitle(lines[i]) && hasBackgroundFields) return normalizeExtractedName(lines[i]);
   return '';
 }
 
 function raceStartName(lines, i) {
   if (isKnownFieldLine(lines[i])) return '';
+  if (/^ARTIST:/i.test(lines[i]) || isVisualNoiseTitle(lines[i])) return '';
+  if (/^species descriptions\b/i.test(cleanExtractedTitle(lines[i]))) return '';
+  const previous = cleanExtractedTitle(lines[i - 1] || '');
+  if (looksLikeTitle(previous) && !isKnownFieldLine(previous) && !isGenericRaceHeading(previous)) return '';
   if (backgroundStartName(lines, i) || classStartName(lines, i)) return '';
   const prefixed = lines[i].match(/^(?:Race|Species):\s*(.+)$/i);
-  if (prefixed) return prefixed[1].trim();
-  const next = lines.slice(i + 1, i + 10).join('\n');
+  if (prefixed) return normalizeExtractedName(prefixed[1]).replace(/\s+Traits$/i, '');
+  if (isGenericRaceHeading(lines[i])) return '';
+  const next = lines.slice(i + 1, i + 50).join('\n');
   const markers = [/^Size:/im, /^Speed:/im, /^Languages:/im, /^Creature Type:/im].filter(re => re.test(next)).length;
-  if (looksLikeTitle(lines[i]) && markers >= 2) return lines[i];
+  if (looksLikeTitle(lines[i]) && !isGenericRaceHeading(lines[i]) && markers >= 2) return normalizeExtractedName(lines[i]).replace(/\s+Traits$/i, '');
   return '';
 }
 
@@ -1088,20 +1126,27 @@ function archetypeStartInfo(lines, i, subclassSectionClass = '') {
 }
 
 function subclassSectionHeadingClass(line) {
-  const m = cleanExtractedTitle(line).match(/\b([A-Za-z]+)\s+Subclasses\b/i);
+  const clean = cleanExtractedTitle(line);
+  const letters = clean.replace(/[^A-Za-z]/g, '');
+  const uppercase = (letters.match(/[A-Z]/g) || []).length;
+  const lowercase = (letters.match(/[a-z]/g) || []).length;
+  if (uppercase <= lowercase * 2) return '';
+  const m = clean.match(/\b([A-Za-z]+)\s+Subclasses\b/i);
   return m ? titleCase(m[1]) : '';
 }
 
 function looksLikeSubclassHeading(lines, i) {
   const line = cleanExtractedTitle(lines[i] || '');
   if (!looksLikeTitle(line) || isGenericArchetypeHeading(line)) return false;
-  if (/^(artist|art|table|spell|level|features?|chapter|appendix)\b/i.test(line)) return false;
+  if (/^(artist|art|table|spell|level|features?|chapter|appendix|actions?|reactions?|traits?)\b/i.test(line)) return false;
   if (/[\d,.;:]/.test(line)) return false;
   if (line.split(/\s+/).length > 4) return false;
+  if (/^(1d\d+|d\d+|Artificer Level|Spell Level|Medium|Tiny|Small|Large)\b/i.test(cleanExtractedTitle(lines[i + 1] || ''))) return false;
   const previous = cleanExtractedTitle(lines[i - 1] || '');
   if (looksLikeTitle(previous) && !isGenericArchetypeHeading(previous)) return false;
   const introWindow = lines.slice(i + 1, i + 7).join('\n');
   const featureWindow = lines.slice(i + 1, i + 24);
+  if (featureWindow.some(isLeveledFeatureHeading)) return true;
   return /ARTIST:|Craft|Expert|Specialist|specialization|expert|modifies|creates|builds/i.test(introWindow)
     && (/\bSUBCLASS\b/i.test(featureWindow.join('\n')) || featureWindow.some(isLeveledFeatureHeading));
 }
@@ -1268,6 +1313,36 @@ function parseSkillChoice(line) {
   };
 }
 
+function parseInlineTraitBlocks(lines) {
+  const blocks = [];
+  for (let i = 0; i < lines.length; i++) {
+    const start = inlineTraitStart(lines[i]);
+    if (!start) continue;
+    const collected = [start.description];
+    let j = i + 1;
+    while (j < lines.length && !inlineTraitStart(lines[j]) && !isKnownFieldLine(lines[j]) && !isElementStart(lines, j) && !isSectionHeading(lines[j])) {
+      if (!isLayoutNoiseLine(lines[j])) collected.push(lines[j]);
+      j++;
+    }
+    blocks.push({ name: normalizeExtractedName(start.name), lines: collected });
+    i = j - 1;
+  }
+  return blocks;
+}
+
+function inlineTraitStart(line) {
+  const text = cleanExtractedTitle(line);
+  const match = text.match(/^([A-Z][A-Za-z'’ -]{2,45})\.\s+(.+)$/);
+  if (!match) return null;
+  const name = match[1].trim();
+  if (/^ARTIST:/i.test(name) || isVisualNoiseTitle(name) || /^(Action|Actions|Reaction|Reactions|Trait|Traits)$/i.test(name)) return null;
+  if (name.split(/\s+/).length > 4) return null;
+  if (name.split(/\s+/).some(word => /^[a-z]/.test(word) && !/^(of|the|and|or|in|with|from)$/i.test(word))) return null;
+  if (/^(As a|The|This|Whenever|When|While|Once|In addition|Choose|Your|You)\b/i.test(name)) return null;
+  if (isRaceMetaLine(name) || isGenericRaceHeading(name)) return null;
+  return { name, description: match[2].trim() };
+}
+
 function parseNamedBlocks(lines, isStart) {
   const blocks = [];
   for (let i = 0; i < lines.length; i++) {
@@ -1304,15 +1379,15 @@ function featureStartInfo(lines, i, fallbackKind) {
   if (leveled) return { name: leveled.name, level: leveled.level, descriptionStart: i + 1 };
   if (looksLikeTitle(line)) {
     const marker = next.match(/^(\d+)(?:st|nd|rd|th)-level\b.*(?:feature|features?)\b/i);
-    if (marker) return { name: line, level: parseInt(marker[1], 10), descriptionStart: i + 2 };
+    if (marker) return { name: normalizeExtractedName(line), level: parseInt(marker[1], 10), descriptionStart: i + 2 };
   }
   const direct = line.match(/^(\d+)(?:st|nd|rd|th)(?:-|\s+)level:?\s+(.+)$/i);
-  if (direct) return { name: direct[2].replace(/\bfeatures?\b/i, '').trim(), level: parseInt(direct[1], 10), descriptionStart: i + 1 };
+  if (direct) return { name: normalizeExtractedName(direct[2].replace(/\bfeatures?\b/i, '').trim()), level: parseInt(direct[1], 10), descriptionStart: i + 1 };
   const named = line.match(/^(.+?)\s+\((\d+)(?:st|nd|rd|th)(?:-|\s+)level(?:\s+.+?)?\)$/i);
-  if (named) return { name: named[1].trim(), level: parseInt(named[2], 10), descriptionStart: i + 1 };
+  if (named) return { name: normalizeExtractedName(named[1]), level: parseInt(named[2], 10), descriptionStart: i + 1 };
   if (looksLikeTitle(line) && /\bfeature\b/i.test(fallbackKind || '') && /^\d+(?:st|nd|rd|th)-level\b/i.test(next)) {
     const level = parseInt(next.match(/^(\d+)/)[1], 10);
-    return { name: line, level, descriptionStart: i + 2 };
+    return { name: normalizeExtractedName(line), level, descriptionStart: i + 2 };
   }
   return null;
 }
@@ -1328,7 +1403,7 @@ function parseLeveledFeatureHeading(line) {
   const match = text.match(/^Leve\w*\.?\s*(\d+)\s*[:;.]\s*(.+)$/i)
     || text.match(/^Level\s*(\d+)\s*[:;.]\s*(.+)$/i);
   if (!match) return null;
-  const name = cleanExtractedTitle(match[2]);
+  const name = normalizeExtractedName(match[2]);
   if (!name || isGenericFeatureHeading(name)) return null;
   return { level: parseInt(match[1], 10), name };
 }
@@ -1339,8 +1414,10 @@ function isLeveledFeatureHeading(line) {
 
 function cleanExtractedTitle(text) {
   return String(text || '')
+    .replace(/[‘’]/g, "'")
+    .replace(/^['"`]+/, '')
     .replace(/\s+/g, ' ')
-    .replace(/[â€ ]+$/i, '')
+    .replace(/[.!?â€ ]+$/i, '')
     .trim();
 }
 
@@ -1348,11 +1425,57 @@ function normalizeExtractedName(text) {
   let value = cleanExtractedTitle(text);
   const corrections = [
     [/^Bare Smit$/i, 'Battle Smith'],
+    [/^CarTOoGRAPHER$/i, 'Cartographer'],
+    [/^WarrorGeo$/i, 'Warforged'],
+    [/^Warrorceo$/i, 'Warforged'],
+    [/^Kuoravar$/i, 'Khoravar'],
+    [/^Homuncutus Servant$/i, 'Homunculus Servant'],
+    [/^House Acent$/i, 'House Agent'],
+    [/^House Denerti Heir$/i, 'House Deneith Heir'],
+    [/^House Kunoarak Heir$/i, 'House Kundarak Heir'],
+    [/^House Lyranbar Heir$/i, 'House Lyrandar Heir'],
+    [/^Aperrant Heir$/i, 'Aberrant Heir'],
+    [/^House Vaoauis Hei$/i, 'House Vadalis Heir'],
+    [/^INauisiTivE$/i, 'Inquisitive'],
     [/^ApTILLeRIsT$/i, 'Artillerist'],
+    [/^Antillerist$/i, 'Artillerist'],
     [/\bGrearer\b/gi, 'Greater'],
     [/\bHosprtauity\b/gi, 'Hospitality'],
+    [/\bHospitauiry\b/gi, 'Hospitality'],
+    [/\bWaroing\b/gi, 'Warding'],
     [/\bSiperYs\b/gi, 'Siberys'],
-    [/\bSeribing\b/gi, 'Scribing']
+    [/\bSeribing\b/gi, 'Scribing'],
+    [/\bMacic\b/gi, 'Magic'],
+    [/\bRepuicate\b/gi, 'Replicate'],
+    [/\bARmiFiceR\b/gi, 'Artificer'],
+    [/\bAsitity\b/gi, 'Ability'],
+    [/\bHem\b/gi, 'Item'],
+    [/\bFuas\b/gi, 'Flash'],
+    [/\bApert\b/gi, 'Adept'],
+    [/\bSpeut-Storine\b/gi, 'Spell-Storing'],
+    [/\bAovanceo\b/gi, 'Advanced'],
+    [/\bArriFice\b/gi, 'Artifice'],
+    [/\bEric\b/gi, 'Epic'],
+    [/\bSout\b/gi, 'Soul'],
+    [/\bToots\b/gi, 'Tools'],
+    [/\bReacents\b/gi, 'Reagents'],
+    [/\bCuemicaL\b/gi, 'Chemical'],
+    [/\bMonet\b/gi, 'Model'],
+    [/\bIMproveo\b/gi, 'Improved'],
+    [/\bExprirct Canon\b/gi, 'Eldritch Cannon'],
+    [/\bExptosive\b/gi, 'Explosive'],
+    [/\bForririen\b/gi, 'Fortified'],
+    [/\bBaTtie\b/gi, 'Battle'],
+    [/\bBartue\b/gi, 'Battle'],
+    [/\bReapy\b/gi, 'Ready'],
+    [/\bBATTue\b/gi, 'Battle'],
+    [/\bEtpritch\b/gi, 'Eldritch'],
+    [/\bSteet\b/gi, 'Steel'],
+    [/\bDereNoeR\b/gi, 'Defender'],
+    [/\bJott\b/gi, 'Jolt'],
+    [/\bMappine\b/gi, 'Mapping'],
+    [/\bGuioeo\b/gi, 'Guided'],
+    [/\bINceNious\b/gi, 'Ingenious']
   ];
   corrections.forEach(([pattern, replacement]) => {
     value = value.replace(pattern, replacement);
@@ -1379,7 +1502,18 @@ function inferUsage(text) {
 }
 
 function isBackgroundMetaLine(line) {
-  return /^(Skill Proficiencies|Tool Proficiencies|Languages|Equipment|Starting Equipment):/i.test(line);
+  return isAbilityScoreFieldLine(line)
+    || isFeatFieldLine(line)
+    || /^(Skill\s+Pro|Tool\s+Pro|Languages|Equipment|Starting Equipment)\b/i.test(String(line || '').trim())
+    || /^Choose\s*A\s+or\s+B\b/i.test(String(line || '').trim());
+}
+
+function isAbilityScoreFieldLine(line) {
+  return /^(Ability Scores?|Abili)\b/i.test(String(line || '').trim());
+}
+
+function isFeatFieldLine(line) {
+  return /^(Feat|Fea?t|t)\s*:/i.test(String(line || '').trim());
 }
 
 function isRaceMetaLine(line) {
@@ -1387,7 +1521,7 @@ function isRaceMetaLine(line) {
 }
 
 function isClassMetaLine(line) {
-  return /^(Hit Dice?|Hit Point Die|Hit Points|Proficiencies|Armor|Weapons?|Tools?|Saving Throw(?:s| Proficiencies)?|Skill(?:s| Proficiencies)?|Equipment|Starting Equipment|Spellcasting Ability)\b/i.test(line);
+  return /^(Primary Ability|Hit Dice?|Hit Point Die|Hit Points|Proficiencies|Armor|Weapons?|Tools?|Saving Throw(?:s| Proficiencies)?|Skill(?:s| Proficiencies)?|Equipment|Starting Equipment|Spellcasting Ability)\b/i.test(line);
 }
 
 function isArchetypeMetaLine(line) {
@@ -1399,7 +1533,33 @@ function isKnownFieldLine(line) {
 }
 
 function isGenericRaceHeading(line) {
-  return /^(Racial Traits|Species Traits|Traits)$/i.test(line);
+  return /^(Racial Traits|Species Traits|Traits)$/i.test(cleanExtractedTitle(line))
+    || /\b(?:Traits|Trains)$/i.test(cleanExtractedTitle(line));
+}
+
+function isLayoutNoiseLine(line) {
+  const text = String(line || '').trim();
+  if (!text) return true;
+  if (/^https?:\/\//i.test(text)) return true;
+  if (/^\d{1,2}\/\d{1,2}\/\d{2,4},/.test(text)) return true;
+  const letters = (text.match(/[A-Za-z]/g) || []).length;
+  return letters < 3 && text.length < 30;
+}
+
+function isVisualNoiseTitle(line) {
+  const text = cleanExtractedTitle(line);
+  if (!text) return true;
+  if (/^(Vat|Fan Mq)$/i.test(text)) return true;
+  const words = text.split(/\s+/);
+  if (words.length === 1 && text.length <= 3 && !/^(Elf|Orc)$/i.test(text)) return true;
+  return false;
+}
+
+function normalizeBackgroundFeatName(text) {
+  return normalizeExtractedName(String(text || '')
+    .replace(/\(.*?\)/g, '')
+    .replace(/\bsee\b.*$/i, '')
+    .trim());
 }
 
 function inferClassFromBlock(lines) {
@@ -1434,7 +1594,10 @@ function looksLikeTitle(line) {
 }
 
 function isSectionHeading(line) {
-  return /^(chapter|appendix|contents|table of contents|spells|feats|magic items|equipment|races|backgrounds|classes|bastions?|bastion facilities|companions?|vehicles?|monsters?)$/i.test(line);
+  const clean = cleanExtractedTitle(line);
+  return /^(chapter|appendix|contents|table of contents|spell|spells|feats|magic items|equipment|races|species descriptions|backgrounds|classes|bastions?|bastion facilities|companions?|vehicles?|monsters?)$/i.test(clean)
+    || /^(species descriptions|backgrounds)\b/i.test(clean)
+    || (/^[A-Za-z\s]+subclasses\b/i.test(clean) && clean.length < 40);
 }
 
 function isElementStart(lines, i) {
@@ -1471,7 +1634,11 @@ function uniqueStrings(items) {
 }
 
 function titleCase(text) {
-  return String(text || '').toLowerCase().replace(/\b[a-z]/g, c => c.toUpperCase()).replace(/\bOf\b/g, 'of');
+  return String(text || '')
+    .toLowerCase()
+    .replace(/\b[a-z]/g, c => c.toUpperCase())
+    .replace(/'S\b/g, "'s")
+    .replace(/\b(Of|The|And|Or|A|An|In|On|To|With|For)\b/g, (word, _match, offset) => offset === 0 ? word : word.toLowerCase());
 }
 
 function parseCharges(text) {
@@ -2522,8 +2689,8 @@ function checkCompleteness(item, type) {
 
   else if (type === 'background') {
     if (!has(item.name))        missing.push('name');
+    if (!has(item.description)) missing.push('description');
     if (!item.skillProficiencies || item.skillProficiencies.length === 0) missing.push('skill proficiencies');
-    if (!item.features || item.features.length === 0) missing.push('features');
   }
 
   else if (type === 'class') {
@@ -2653,8 +2820,6 @@ function validateAll() {
       if (type === 'background') {
         if (!item.skillProficiencies || item.skillProficiencies.length === 0)
           issues.push({ type, i, field: null, msg: `${label} (${name}): has no skill proficiencies` });
-        if (!item.features || item.features.length === 0)
-          issues.push({ type, i, field: null, msg: `${label} (${name}): has no background features` });
       }
 
       if (type === 'class') {
@@ -3313,6 +3478,8 @@ function languageChoiceSelect(ownerName, count) {
 
 function backgroundShort(bg) {
   const parts = [];
+  if (bg.abilityScores?.length) parts.push(bg.abilityScores.join(', '));
+  if (bg.feat) parts.push(bg.feat);
   if (bg.skillProficiencies?.length) parts.push(bg.skillProficiencies.join(', '));
   if (bg.toolProficiencies?.length) parts.push(bg.toolProficiencies.join(', '));
   const languageChoices = (parseInt(bg.languageChoices, 10) || 0) + choiceCountFromValues(bg.languages);
@@ -3320,6 +3487,60 @@ function backgroundShort(bg) {
   const fixedLanguages = (bg.languages || []).filter(lang => !isChoiceLanguage(lang));
   if (fixedLanguages.length) parts.push(fixedLanguages.join(', '));
   return parts.join(', ');
+}
+
+function abilityStatName(ability) {
+  return {
+    strength: 'strength',
+    dexterity: 'dexterity',
+    constitution: 'constitution',
+    intelligence: 'intelligence',
+    wisdom: 'wisdom',
+    charisma: 'charisma'
+  }[String(ability || '').toLowerCase()] || '';
+}
+
+function backgroundFeatGrantId(featName, prefix) {
+  const name = normalizeBackgroundFeatName(featName);
+  if (!name) return '';
+  const standard = {
+    Alert: 'ID_WOTC_PHB24_FEAT_ALERT',
+    Lucky: 'ID_WOTC_PHB24_FEAT_LUCKY',
+    Skilled: 'ID_WOTC_PHB24_FEAT_SKILLED'
+  };
+  if (standard[name]) return standard[name];
+  const localFeats = (extractedData.feat || []).map(feat => normalizeExtractedName(feat.name));
+  if (localFeats.includes(name)) return `${prefix}_FEAT_${idify(name)}`;
+  return '';
+}
+
+function toolProficiencyRule(tool, ownerName) {
+  const value = String(tool || '').trim();
+  if (!value) return '';
+  if (/\bchoose\b|\bchoice\b|\bone kind\b/i.test(value)) {
+    const supports = /gaming set/i.test(value) ? 'Gaming Set'
+      : /artisan/i.test(value) ? 'Artisan tools'
+      : /musical/i.test(value) ? 'Musical Instrument'
+      : 'Tool';
+    return `<select type="Proficiency" name="${escAttrXml(supports)} (${escAttrXml(ownerName)})" supports="${escAttrXml(supports)}" />`;
+  }
+  const toolIds = {
+    "cartographer's tools": 'ID_PROFICIENCY_TOOL_PROFICIENCY_CARTOGRAPHERS_TOOLS',
+    'cartographers tools': 'ID_PROFICIENCY_TOOL_PROFICIENCY_CARTOGRAPHERS_TOOLS',
+    'disguise kit': 'ID_PROFICIENCY_TOOL_PROFICIENCY_DISGUISE_KIT',
+    'herbalism kit': 'ID_PROFICIENCY_TOOL_PROFICIENCY_HERBALISM_KIT',
+    "thieves' tools": 'ID_PROFICIENCY_TOOL_PROFICIENCY_THIEVES_TOOLS',
+    'thieves tools': 'ID_PROFICIENCY_TOOL_PROFICIENCY_THIEVES_TOOLS',
+    "cook's utensils": 'ID_PROFICIENCY_TOOL_PROFICIENCY_COOKS_UTENSILS',
+    'cooks utensils': 'ID_PROFICIENCY_TOOL_PROFICIENCY_COOKS_UTENSILS',
+    "calligrapher's supplies": 'ID_PROFICIENCY_TOOL_PROFICIENCY_CALLIGRAPHERS_SUPPLIES',
+    'calligraphers supplies': 'ID_PROFICIENCY_TOOL_PROFICIENCY_CALLIGRAPHERS_SUPPLIES',
+    "navigator's tools": 'ID_PROFICIENCY_TOOL_PROFICIENCY_NAVIGATORS_TOOLS',
+    'navigators tools': 'ID_PROFICIENCY_TOOL_PROFICIENCY_NAVIGATORS_TOOLS'
+  };
+  const key = value.toLowerCase().replace(/[’]/g, "'");
+  const id = toolIds[key];
+  return id ? `<grant type="Proficiency" id="${id}" />` : '';
 }
 
 function magicCategoryFromType(type) {
@@ -3398,6 +3619,11 @@ function genBackgroundXml(bg, source, prefix) {
   lines.push(`\t<element name="${escAttrXml(bg.name)}" type="Background" source="${escAttrXml(source)}" id="${bgId}">`);
   lines.push(`\t\t<description>`);
   lines.push(`\t\t\t<p>${escXml(bg.description||'')}</p>`);
+  if (bg.abilityScores?.length) lines.push(`\t\t\t<p><b>Ability Scores:</b> ${escXml(bg.abilityScores.join(', '))}</p>`);
+  if (bg.feat) lines.push(`\t\t\t<p><b>Feat:</b> ${escXml(bg.feat)}</p>`);
+  if (bg.skillProficiencies?.length) lines.push(`\t\t\t<p><b>Skill Proficiencies:</b> ${escXml(bg.skillProficiencies.join(', '))}</p>`);
+  if (bg.toolProficiencies?.length) lines.push(`\t\t\t<p><b>Tool Proficiencies:</b> ${escXml(bg.toolProficiencies.join(', '))}</p>`);
+  if (bg.equipment) lines.push(`\t\t\t<p><b>Equipment:</b> ${escXml(bg.equipment)}</p>`);
   (bg.features||[]).forEach(f => {
     const fid = `${bgId}_FEATURE_${idify(f.name)}`;
     lines.push(`\t\t\t<div element="${fid}" />`);
@@ -3411,6 +3637,16 @@ function genBackgroundXml(bg, source, prefix) {
   }
   lines.push(`\t\t<sheet display="false" />`);
   lines.push(`\t\t<rules>`);
+  (bg.abilityScores || []).forEach(ability => {
+    const stat = abilityStatName(ability);
+    if (stat) lines.push(`\t\t\t<stat name="${stat}" value="1" />`);
+  });
+  const featGrant = backgroundFeatGrantId(bg.feat, prefix);
+  if (featGrant) {
+    lines.push(`\t\t\t<grant type="Feat" id="${featGrant}" />`);
+  } else if (bg.feat) {
+    lines.push(`\t\t\t<!-- Background feat: ${escXml(bg.feat)} — include the feat in this export or add its Aurora ID manually. -->`);
+  }
   // Skill proficiencies
   const skillIdMap = {
     'acrobatics':'ID_PROFICIENCY_SKILL_ACROBATICS','animal handling':'ID_PROFICIENCY_SKILL_ANIMALHANDLING',
@@ -3428,7 +3664,9 @@ function genBackgroundXml(bg, source, prefix) {
     if (sid) lines.push(`\t\t\t<grant type="Proficiency" id="${sid}" />`);
   });
   (bg.toolProficiencies||[]).forEach(tool => {
-    lines.push(`\t\t\t<!-- Tool proficiency: ${escXml(tool)} â€” add ID manually -->`);
+    const rule = toolProficiencyRule(tool, bg.name);
+    if (rule) lines.push(`\t\t\t${rule}`);
+    else lines.push(`\t\t\t<!-- Tool proficiency: ${escXml(tool)} — add ID manually -->`);
   });
   (bg.languages||[]).filter(lang => !isChoiceLanguage(lang)).forEach(lang => {
       lines.push(`\t\t\t<grant type="Language" id="ID_LANGUAGE_${idify(lang)}" />`);
@@ -3669,7 +3907,11 @@ function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 function escAttr(s) { return String(s||'').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
-function escXml(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function stripInvalidXmlChars(s) {
+  return String(s || '').replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '');
+}
+
+function escXml(s) { return stripInvalidXmlChars(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function escAttrXml(s) { return escXml(s).replace(/"/g,'&quot;'); }
 
 function ordinal(n) {
