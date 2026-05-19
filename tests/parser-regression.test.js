@@ -24,7 +24,9 @@ function createStubElement(value = '') {
     querySelector() { return null; },
     querySelectorAll() { return []; },
     closest() { return element; },
+    appendChild() {},
     insertAdjacentHTML() {},
+    focus() {},
     remove() {},
     scrollIntoView() {}
   };
@@ -305,6 +307,86 @@ test('generated XML strips OCR control characters that XML forbids', () => {
   assert.ok(!/[\x00-\x08\x0B\x0C\x0E-\x1F]/.test(xml));
   assert.ok(xml.includes('BeforeAfter'));
   assert.ok(xml.includes('Keepgoing.'));
+});
+
+test('manual author templates are available for every supported type', () => {
+  const context = loadApp();
+  const types = ['spell', 'archetype', 'item', 'feat', 'magic', 'race', 'background', 'class', 'other'];
+  const templates = JSON.parse(runInApp(context, `JSON.stringify(${JSON.stringify(types)}.map(type => [type, createBlankElement(type)]))`));
+  const byType = Object.fromEntries(templates);
+
+  assert.equal(byType.spell.school, '');
+  assert.deepEqual(byType.feat.benefits, []);
+  assert.deepEqual(byType.race.traits, []);
+  assert.deepEqual(byType.background.abilityScores, []);
+  assert.deepEqual(byType.class.features, []);
+  assert.equal(byType.other.type, '');
+});
+
+test('manual pasted text uses deterministic parser when it matches a known layout', () => {
+  const context = loadApp();
+  const text = [
+    'Mark oF Handling',
+    'Dragonmark Feat (Prerequisite: Eberron Campaign)',
+    'You gain the following benefits.',
+    'Animal Intuition. When you make a Wisdom check involving animals, roll 1d4.',
+    'Primal Connection. You learn the Animal Friendship spell.'
+  ].join('\n');
+
+  const parsed = JSON.parse(runInApp(context, `JSON.stringify(parseManualTextForType('feat', ${JSON.stringify(text)}))`));
+
+  assert.equal(parsed.length, 1);
+  assert.equal(parsed[0].name, 'Mark of Handling');
+  assert.equal(parsed[0].benefits.length, 2);
+});
+
+test('manual pasted text falls back to an editable seeded record', () => {
+  const context = loadApp();
+  const text = [
+    'Mystic Gizmo',
+    'This section has enough text to seed a manual record, but not enough structure for a spell parser.'
+  ].join('\n');
+
+  const parsed = JSON.parse(runInApp(context, `JSON.stringify(parseManualTextForType('spell', ${JSON.stringify(text)}))`));
+
+  assert.equal(parsed.length, 1);
+  assert.equal(parsed[0].name, 'Mystic Gizmo');
+  assert.equal(parsed[0].school, '');
+  assert.match(parsed[0].description, /seed a manual record/);
+});
+
+test('manual added elements participate in XML generation', () => {
+  const context = loadApp();
+  runInApp(context, `
+    addManualElement('feat', {
+      name: 'Manual Spark',
+      prerequisite: '',
+      description: 'A manually authored feat.',
+      benefits: ['You gain proficiency in the Arcana skill.']
+    });
+  `);
+
+  const xml = runInApp(context, 'generateXml()');
+
+  assert.ok(xml.includes('ID_VSS_FEAT_MANUAL_SPARK'));
+  assert.ok(xml.includes('<grant type="Proficiency" id="ID_PROFICIENCY_SKILL_ARCANA" />'));
+});
+
+test('manual elements can be removed before export', () => {
+  const context = loadApp();
+  runInApp(context, `
+    addManualElement('feat', {
+      name: 'Temporary Feat',
+      prerequisite: '',
+      description: 'A draft feat.',
+      benefits: ['You can remove this.']
+    });
+    removeElement('feat-0');
+  `);
+
+  const xml = runInApp(context, 'generateXml()');
+
+  assert.ok(!xml.includes('TEMPORARY_FEAT'));
 });
 
 test('generated XML metadata matches Aurora shape expectations', () => {

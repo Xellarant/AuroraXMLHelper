@@ -20,6 +20,9 @@ const TYPE_LABELS = {
   other: 'Other'
 };
 
+const ELEMENT_TYPES = ['spell', 'archetype', 'item', 'feat', 'magic', 'race', 'background', 'class', 'other'];
+const MANUAL_AUTHOR_TYPES = ELEMENT_TYPES;
+
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Init
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -1654,6 +1657,25 @@ function parseRecharge(text) {
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Extraction
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function ensureExtractedDataBuckets() {
+  if (!extractedData || typeof extractedData !== 'object') extractedData = {};
+  ELEMENT_TYPES.forEach(type => {
+    if (!Array.isArray(extractedData[type])) extractedData[type] = [];
+  });
+  return extractedData;
+}
+
+function startManualAuthoring() {
+  ensureExtractedDataBuckets();
+  skippedItems = [];
+  document.getElementById('stepReview').classList.remove('hidden');
+  document.getElementById('extractProgress').classList.add('hidden');
+  document.getElementById('extractErrors').classList.add('hidden');
+  document.getElementById('reviewArea').classList.remove('hidden');
+  buildReviewUI();
+  setManualAuthorStatus('Manual authoring ready.', 'info');
+}
+
 async function startExtraction() {
   const types = getSelectedTypes();
   if (!types.length || !pdfFile) return;
@@ -1679,6 +1701,7 @@ async function startExtraction() {
     errors.push(err.message);
     console.error('Deterministic extraction failed:', err);
   }
+  ensureExtractedDataBuckets();
 
   skippedItems = filterIncomplete();
 
@@ -1993,19 +2016,23 @@ function setProgress(pct, msg) {
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Review UI builder
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-function buildReviewUI() {
-  const total = Object.values(extractedData).reduce((s, a) => s + a.length, 0);
+function buildReviewUI(preferredType = '') {
+  ensureExtractedDataBuckets();
+  const total = Object.values(extractedData)
+    .filter(Array.isArray)
+    .reduce((s, a) => s + a.length, 0);
   const summaryEl = document.getElementById('reviewSummary');
   if (total === 0) {
     summaryEl.className = 'alert alert-warning';
-    summaryEl.innerHTML = '<strong>No elements were parsed.</strong> This usually means the PDF has scanned/image-only pages, the selected page range does not contain supported layouts, or the content type does not have a deterministic parser yet.';
+    summaryEl.innerHTML = '<strong>No elements were parsed.</strong> Use Manual Author to add missed sections or paste a smaller section below.';
   } else {
-    const breakdown = Object.entries(extractedData)
+    const breakdown = ELEMENT_TYPES
+      .map(type => [type, extractedData[type] || []])
       .filter(([,arr]) => arr.length > 0)
       .map(([type, arr]) => `${arr.length} ${TYPE_LABELS[type]}`)
       .join(', ');
     summaryEl.className = 'alert alert-success';
-    summaryEl.textContent = `âœ“ Extracted ${total} elements: ${breakdown}. Expand each entry to review and edit, then download.`;
+    summaryEl.textContent = `Current elements: ${breakdown}. Expand each entry to review and edit, then download.`;
   }
 
   const tabsEl = document.getElementById('reviewTabs');
@@ -2013,27 +2040,29 @@ function buildReviewUI() {
   tabsEl.innerHTML = '';
   panelsEl.innerHTML = '';
 
-  let first = true;
-  for (const [type, items] of Object.entries(extractedData)) {
+  const activeType = extractedData[preferredType]?.length
+    ? preferredType
+    : ELEMENT_TYPES.find(type => extractedData[type]?.length);
+  for (const type of ELEMENT_TYPES) {
+    const items = extractedData[type] || [];
     if (!items.length) continue;
     const tabId = `tab-${type}`;
     const panelId = `panel-${type}`;
+    const active = type === activeType;
 
     const tab = document.createElement('button');
-    tab.className = 'tab' + (first ? ' active' : '');
+    tab.className = 'tab' + (active ? ' active' : '');
     tab.id = tabId;
     tab.innerHTML = `${TYPE_LABELS[type]} <span class="tab-badge">${items.length}</span>`;
     tab.onclick = () => switchTab(type);
     tabsEl.appendChild(tab);
 
     const panel = document.createElement('div');
-    panel.className = 'tab-panel' + (first ? ' active' : '');
+    panel.className = 'tab-panel' + (active ? ' active' : '');
     panel.id = panelId;
     const searchBar = `<input type="text" class="panel-search" placeholder="Search ${TYPE_LABELS[type] || type}..." oninput="filterPanel('${type}', this.value)" />`;
     panel.innerHTML = searchBar + buildPanelHTML(type, items);
     panelsEl.appendChild(panel);
-
-    first = false;
   }
 }
 
@@ -2062,6 +2091,9 @@ function buildPanelHTML(type, items) {
         <span class="element-type-badge">${escHtml(badge)}</span>
       </div>
       <div class="element-card-body" id="body-${type}-${i}">
+        <div style="display:flex; justify-content:flex-end; margin-bottom:0.75rem;">
+          <button class="btn btn-secondary" style="font-size:0.7rem; padding:0.3rem 0.75rem;" onclick="removeElement('${type}-${i}', event)">Remove Element</button>
+        </div>
         ${buildFieldsHTML(type, item, i)}
       </div>
     </div>`;
@@ -2109,11 +2141,11 @@ function buildFieldsHTML(type, item, i) {
   if (type === 'race') return buildRaceFields(item, id);
   if (type === 'background') return buildBackgroundFields(item, id);
   if (type === 'class') return buildClassFields(item, id);
+  if (type === 'other') return buildOtherFields(item, id);
   return '';
 }
 
 function buildSpellFields(s, id) {
-  const classes = ['Bard','Cleric','Druid','Sorcerer','Warlock','Wizard'];
   const schools = ['Abjuration','Conjuration','Divination','Enchantment','Evocation','Illusion','Necromancy','Transmutation'];
   return `
     <div class="field-row">
@@ -2121,6 +2153,7 @@ function buildSpellFields(s, id) {
       <div>
         <label>School</label>
         <select data-field="school" data-id="${id}" onchange="updateField(this)">
+          <option value="" ${!s.school?'selected':''}>Select school</option>
           ${schools.map(sc => `<option ${s.school===sc?'selected':''}>${sc}</option>`).join('')}
         </select>
       </div>
@@ -2162,6 +2195,7 @@ function buildArchetypeFields(a, id) {
     <div>
       <label>Supports (Aurora archetype category)</label>
       <select data-field="supports" data-id="${id}" onchange="updateField(this)">
+        <option value="" ${!a.supports?'selected':''}>Select support</option>
         ${supports.map(s => `<option ${a.supports===s?'selected':''}>${s}</option>`).join('')}
       </select>
     </div>
@@ -2238,6 +2272,7 @@ function buildMagicFields(item, id) {
       <div>
         <label>Rarity</label>
         <select data-field="rarity" data-id="${id}" onchange="updateField(this)">
+          <option value="" ${!item.rarity?'selected':''}>Select rarity</option>
           ${rarities.map(r=>`<option ${item.rarity===r?'selected':''}>${r}</option>`).join('')}
         </select>
       </div>
@@ -2275,6 +2310,10 @@ function buildBackgroundFields(bg, id) {
     <div class="field-row">
       <div><label>Name</label><input type="text" value="${escAttr(bg.name)}" data-field="name" data-id="${id}" onchange="updateField(this)" /></div>
       <div><label>Skill Proficiencies</label><input type="text" value="${escAttr((bg.skillProficiencies||[]).join(', '))}" data-field="skillProficiencies" data-id="${id}" onchange="updateFieldArr(this)" /></div>
+    </div>
+    <div class="field-row">
+      <div><label>Ability Scores</label><input type="text" value="${escAttr((bg.abilityScores||[]).join(', '))}" data-field="abilityScores" data-id="${id}" onchange="updateFieldArr(this)" /></div>
+      <div><label>Feat</label><input type="text" value="${escAttr(bg.feat||'')}" data-field="feat" data-id="${id}" onchange="updateField(this)" /></div>
     </div>
     <div class="field-row-3">
       <div><label>Tool Proficiencies</label><input type="text" value="${escAttr((bg.toolProficiencies||[]).join(', '))}" data-field="toolProficiencies" data-id="${id}" onchange="updateFieldArr(this)" /></div>
@@ -2323,6 +2362,20 @@ function buildClassFields(cls, id) {
       <button class="btn btn-secondary" style="font-size:0.7rem; padding:0.3rem 0.75rem;" onclick="addFeature('${id}')">+ Add Feature</button>
     </div>
     <div id="features-${id}">${(cls.features||[]).map((f,fi) => buildFeatureBlock(id, f, fi)).join('')}</div>`;
+}
+
+function buildOtherFields(item, id) {
+  return `
+    <div class="field-row">
+      <div><label>Name</label><input type="text" value="${escAttr(item.name||'')}" data-field="name" data-id="${id}" onchange="updateField(this)" /></div>
+      <div><label>Aurora Type</label><input type="text" value="${escAttr(item.type||'')}" data-field="type" data-id="${id}" onchange="updateField(this)" /></div>
+    </div>
+    <div><label>Description</label><textarea rows="4" data-field="description" data-id="${id}" onchange="updateField(this)">${escHtml(item.description||'')}</textarea></div>
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-top:0.75rem; margin-bottom:0.5rem;">
+      <span class="section-label" style="margin:0; border:none; padding:0;">Features</span>
+      <button class="btn btn-secondary" style="font-size:0.7rem; padding:0.3rem 0.75rem;" onclick="addSimpleFeature('${id}')">+ Add Feature</button>
+    </div>
+    <div id="features-${id}">${buildNestedTextBlocks(id, 'features', item.features || [], 'Feature Name')}</div>`;
 }
 
 function buildNestedTextBlocks(id, field, items, label) {
@@ -2528,6 +2581,170 @@ function flashField(el) {
   el.classList.add('field-saved');
   setTimeout(() => el.classList.remove('field-saved'), 1200);
   markChanged();
+}
+
+function normalizeManualType(type) {
+  return MANUAL_AUTHOR_TYPES.includes(type) ? type : 'feat';
+}
+
+function createBlankElement(type) {
+  switch (normalizeManualType(type)) {
+    case 'spell':
+      return {
+        name: '',
+        school: '',
+        level: '',
+        castingTime: '',
+        range: '',
+        duration: '',
+        material: '',
+        hasVerbal: false,
+        hasSomatic: false,
+        hasMaterial: false,
+        isConcentration: false,
+        isRitual: false,
+        isTechnomagic: false,
+        classes: [],
+        description: '',
+        higherLevels: ''
+      };
+    case 'archetype':
+      return { name: '', class: '', supports: '', description: '', features: [] };
+    case 'item':
+      return { name: '', category: 'Equipment', cost: '0', currency: 'gp', weight: '0', damage: '', properties: '', description: '' };
+    case 'feat':
+      return { name: '', prerequisite: '', description: '', benefits: [] };
+    case 'magic':
+      return { name: '', type: 'Wondrous Item', rarity: '', requiresAttunement: false, charges: 0, recharge: '', description: '' };
+    case 'race':
+      return { name: '', size: '', speed: '', languages: [], languageChoices: '', abilityScores: {}, description: '', traits: [] };
+    case 'background':
+      return {
+        name: '',
+        description: '',
+        abilityScores: [],
+        feat: '',
+        skillProficiencies: [],
+        toolProficiencies: [],
+        languages: [],
+        languageChoices: 0,
+        equipment: '',
+        features: []
+      };
+    case 'class':
+      return {
+        name: '',
+        hitDie: '',
+        savingThrows: [],
+        skillChoices: { count: 0, from: [] },
+        armorProficiencies: [],
+        weaponProficiencies: [],
+        toolProficiencies: [],
+        startingEquipment: '',
+        archetypeLevel: '',
+        archetypeLabel: '',
+        archetypeSupports: '',
+        spellcastingAbility: '',
+        spellcastingList: '',
+        description: '',
+        features: []
+      };
+    case 'other':
+    default:
+      return { name: '', type: '', description: '', features: [] };
+  }
+}
+
+function createSeededManualElement(type, text) {
+  const normalizedType = normalizeManualType(type);
+  const item = createBlankElement(normalizedType);
+  const lines = normalizeTextLines(text);
+  const name = normalizeExtractedName(lines[0] || '');
+  const body = lines.slice(1).join('\n');
+
+  item.name = name;
+  if ('description' in item) item.description = body || String(text || '').trim();
+
+  if (normalizedType === 'feat') {
+    const parsed = parseFeatFullText({ name, fullText: body || String(text || '').trim() });
+    return { ...item, ...parsed, name: name || parsed.name || '' };
+  }
+
+  return item;
+}
+
+function parseManualTextForType(type, text) {
+  const normalizedType = normalizeManualType(type);
+  const trimmed = String(text || '').trim();
+  if (!trimmed) return [];
+
+  const parser = DETERMINISTIC_PARSERS[normalizedType];
+  const parsed = parser ? parser(trimmed) : [];
+  return parsed.length ? parsed : [createSeededManualElement(normalizedType, trimmed)];
+}
+
+function addManualElement(typeOverride = '', itemOverride = null) {
+  const select = document.getElementById('manualAddType');
+  const type = normalizeManualType(typeOverride || select?.value || 'feat');
+  const item = itemOverride || createBlankElement(type);
+
+  ensureExtractedDataBuckets();
+  extractedData[type].push(item);
+  const index = extractedData[type].length - 1;
+  buildReviewUI(type);
+  openElementCard(type, index);
+  setManualAuthorStatus(`Added entry #${index + 1} to ${TYPE_LABELS[type] || type}.`, 'info');
+  markChanged();
+}
+
+function parseManualSection() {
+  const select = document.getElementById('manualAddType');
+  const textarea = document.getElementById('manualSourceText');
+  const type = normalizeManualType(select?.value || 'feat');
+  const parsed = parseManualTextForType(type, textarea?.value || '');
+
+  if (!parsed.length) {
+    setManualAuthorStatus('Paste text before parsing.', 'warning');
+    return;
+  }
+
+  ensureExtractedDataBuckets();
+  const firstIndex = extractedData[type].length;
+  extractedData[type].push(...parsed);
+  buildReviewUI(type);
+  openElementCard(type, firstIndex);
+  setManualAuthorStatus(`Added ${parsed.length} entr${parsed.length === 1 ? 'y' : 'ies'} to ${TYPE_LABELS[type] || type}.`, 'info');
+  markChanged();
+}
+
+function removeElement(id, event) {
+  if (event?.stopPropagation) event.stopPropagation();
+  const { type, index } = parseId(id);
+  if (!extractedData[type] || !extractedData[type][index]) return;
+  const item = extractedData[type][index];
+  if (!confirm(`Remove ${item.name || TYPE_LABELS[type] || type}?`)) return;
+  extractedData[type].splice(index, 1);
+  buildReviewUI(type);
+  setManualAuthorStatus('Element removed.', 'info');
+  markChanged();
+}
+
+function openElementCard(type, index) {
+  switchTab(type);
+  const body = document.getElementById(`body-${type}-${index}`);
+  if (body) {
+    body.classList.add('open');
+    body.querySelector('input, textarea, select')?.focus?.();
+  }
+  document.getElementById(`card-${type}-${index}`)?.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' });
+}
+
+function setManualAuthorStatus(message, tone = 'info') {
+  const el = document.getElementById('manualAuthorStatus');
+  if (!el) return;
+  el.className = `alert alert-${tone} manual-status`;
+  el.textContent = message;
+  el.classList.remove('hidden');
 }
 
 
@@ -2827,6 +3044,13 @@ function validateAll() {
           issues.push({ type, i, field: null, msg: `${label} (${name}): hit die is missing` });
         if (!item.features || item.features.length === 0)
           issues.push({ type, i, field: null, msg: `${label} (${name}): has no class features` });
+      }
+
+      if (type === 'other') {
+        if (!item.type)
+          issues.push({ type, i, field: 'type', msg: `${label} (${name}): Aurora type is blank` });
+        if (!item.description)
+          issues.push({ type, i, field: 'description', msg: `${label} (${name}): description is blank` });
       }
 
       // Duplicate name check within same type

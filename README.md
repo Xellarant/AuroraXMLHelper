@@ -64,6 +64,12 @@ Extracted elements appear in tabs. Expand each entry to review and edit fields.
 Validation warnings are shown before download when required Aurora fields or
 shape rules are missing.
 
+You can also click **Manual Author** to start without a parsed PDF result, add a
+blank element for any supported type, or paste a missed section into the review
+screen. Pasted text is first sent through the deterministic parser for the
+selected type; if it does not match a known layout, the app creates an editable
+seed record instead of dropping the text.
+
 ### 5. Download
 
 - **Download ZIP** creates one XML file per element type plus `source.xml`.
@@ -130,7 +136,7 @@ reported XML shape issues.
 - OCR quality still matters. Deterministic parsing cannot recover text the OCR
   never captured correctly.
 - The parser targets common D&D/DDB-style layouts. Unusual page layouts may need
-  manual page ranges or hand cleanup.
+  manual page ranges or Manual Author cleanup.
 - Rules are generated conservatively. Some mechanics may require manual Aurora
   rule edits after import.
 - Spell list tables are not treated as full spell definitions unless complete

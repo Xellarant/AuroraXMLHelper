@@ -336,6 +336,52 @@
   .tab-panel { display: none; }
   .tab-panel.active { display: block; }
 
+  .manual-author {
+    border: 1px solid var(--border-light);
+    border-radius: 3px;
+    background: var(--parchment);
+    padding: 1rem;
+    margin-bottom: 1rem;
+  }
+
+  .manual-author-row {
+    display: flex;
+    align-items: flex-end;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+  }
+
+  .manual-author-row > label {
+    flex: 0 0 auto;
+    margin-bottom: 0.45rem;
+  }
+
+  .manual-author-row > select {
+    width: auto;
+    min-width: 210px;
+  }
+
+  .manual-paste {
+    margin-top: 0.75rem;
+  }
+
+  .manual-paste summary {
+    cursor: pointer;
+    font-family: 'Cinzel', serif;
+    font-size: 0.78rem;
+    letter-spacing: 0.08em;
+    color: var(--gold);
+  }
+
+  .manual-paste textarea {
+    margin-top: 0.75rem;
+  }
+
+  .manual-status {
+    margin-top: 0.75rem;
+    margin-bottom: 0;
+  }
+
   /* â”€â”€ Element cards in review â”€â”€ */
   .element-card {
     border: 1px solid var(--border-light);
@@ -651,10 +697,13 @@
 
     <label style="margin-top:0.5rem;">Manual Page Range <span style="font-weight:400; text-transform:none; font-style:italic;">(optional, e.g. "24-32")</span></label>
     <input type="text" id="pageRange" placeholder="Leave blank to scan the whole PDF" style="max-width:420px;" />
-    <button class="btn btn-primary" id="extractBtn" onclick="startExtraction()" disabled>
-      <span class="spinner hidden" id="extractSpinner"></span>
-      Parse PDF
-    </button>
+    <div style="display:flex; gap:0.75rem; flex-wrap:wrap; align-items:center;">
+      <button class="btn btn-primary" id="extractBtn" onclick="startExtraction()" disabled>
+        <span class="spinner hidden" id="extractSpinner"></span>
+        Parse PDF
+      </button>
+      <button class="btn btn-secondary" onclick="startManualAuthoring()">Manual Author</button>
+    </div>
     <p class="text-muted" id="extractHint" style="margin-top:0.5rem; font-size:0.82rem;">
       Button is enabled when a PDF is uploaded and at least one element type is selected.
     </p>
@@ -676,6 +725,30 @@
 
     <div id="reviewArea" class="hidden">
       <div class="alert alert-success" id="reviewSummary"></div>
+
+      <div class="manual-author" id="manualAuthorControls">
+        <div class="manual-author-row">
+          <label for="manualAddType">Manual Element</label>
+          <select id="manualAddType">
+            <option value="spell">Spell</option>
+            <option value="archetype">Subclass</option>
+            <option value="item">Item / Equipment</option>
+            <option value="feat">Feat</option>
+            <option value="magic">Magic Item</option>
+            <option value="race">Race / Species</option>
+            <option value="background">Background</option>
+            <option value="class">Class</option>
+            <option value="other">Generic Element</option>
+          </select>
+          <button class="btn btn-secondary" onclick="addManualElement()">Add Blank</button>
+        </div>
+        <details class="manual-paste">
+          <summary>Parse Pasted Text</summary>
+          <textarea id="manualSourceText" rows="7" placeholder="Paste a missed spell, feat, subclass, race, background, class, item, or magic item section."></textarea>
+          <button class="btn btn-secondary" onclick="parseManualSection()">Parse Text</button>
+        </details>
+        <div class="alert alert-info manual-status hidden" id="manualAuthorStatus"></div>
+      </div>
 
       <div class="tabs" id="reviewTabs"></div>
       <div id="reviewPanels"></div>
