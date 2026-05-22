@@ -389,6 +389,60 @@ test('manual elements can be removed before export', () => {
   assert.ok(!xml.includes('TEMPORARY_FEAT'));
 });
 
+test('manual authoring initializes empty data buckets', () => {
+  const context = loadApp();
+
+  runInApp(context, `
+    extractedData = {};
+    startManualAuthoring();
+  `);
+  const bucketLengths = JSON.parse(runInApp(context, `
+    JSON.stringify(['spell', 'archetype', 'item', 'feat', 'magic', 'race', 'background', 'class', 'other']
+      .map(type => [type, extractedData[type].length]))
+  `));
+
+  assert.deepEqual(Object.fromEntries(bucketLengths), {
+    spell: 0,
+    archetype: 0,
+    item: 0,
+    feat: 0,
+    magic: 0,
+    race: 0,
+    background: 0,
+    class: 0,
+    other: 0
+  });
+});
+
+test('manual other elements export with their custom Aurora type', () => {
+  const context = loadApp();
+  setExtractedData(context, {
+    spell: [],
+    archetype: [],
+    item: [],
+    feat: [],
+    magic: [],
+    race: [],
+    background: [],
+    class: [],
+    other: [{
+      name: 'Shield Guardian',
+      type: 'Companion',
+      description: 'A construct bound to a control amulet.',
+      features: [{ name: 'Bound', description: 'The guardian obeys its wearer.' }]
+    }]
+  });
+
+  const zipDocs = JSON.parse(runInApp(context, 'JSON.stringify(buildZipXmlDocuments(getSourceMeta()))'));
+  const companionDoc = zipDocs.find(doc => doc.fileName === 'vss-companion.xml');
+
+  assert.ok(companionDoc);
+  assert.ok(companionDoc.xml.includes('type="Companion"'));
+  assert.ok(companionDoc.xml.includes('ID_VSS_COMPANION_SHIELD_GUARDIAN'));
+  assert.ok(companionDoc.xml.includes('type="Companion Feature"'));
+  assert.ok(zipDocs.find(doc => doc.fileName === 'source.xml').xml.includes('vss-companion.xml'));
+});
+
 test('generated XML metadata matches Aurora shape expectations', () => {
   const context = loadApp();
   const sampleData = {
