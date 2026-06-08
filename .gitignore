@@ -1,0 +1,3 @@
+tests/fixtures/local-corpus.json
+tests/fixtures/local-corpus.*.json
+!tests/fixtures/local-corpus.example.json

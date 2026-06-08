@@ -4,6 +4,11 @@
   "private": true,
   "description": "Deterministic D&D PDF to Aurora Builder XML helper.",
   "scripts": {
-    "test": "node tests/parser-regression.test.js"
+    "test": "npm run test:regression && npm run test:fixtures && npm run test:validator",
+    "test:regression": "node tests/parser-regression.test.js",
+    "test:fixtures": "node tests/golden-fixtures.test.js",
+    "test:validator": "node tests/validator-integration.test.js",
+    "benchmark:corpus": "node scripts/benchmark-corpus.js",
+    "corpus:local": "node scripts/run-local-corpus-benchmarks.js"
   }
 }

@@ -1,0 +1,18 @@
+{
+  "benchmarks": [
+    {
+      "name": "Eberron: Forge of the Artificer",
+      "source": "{USERPROFILE}\\Documents\\DnD\\books and docs\\Eberron_ Forge of the Artificer.md",
+      "canonical": "{USERPROFILE}\\source\\repos\\The Book Of Xellarant\\Eberron Forge of the Artificer",
+      "sourceMeta": {
+        "name": "Eberron: Forge of the Artificer",
+        "abbr": "EFA",
+        "author": "Wizards of the Coast"
+      },
+      "thresholds": {
+        "minExactPercent": 99,
+        "maxUnmatched": 0
+      }
+    }
+  ]
+}

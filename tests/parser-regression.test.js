@@ -38,6 +38,7 @@ function loadApp() {
     sourceName: createStubElement('Validator Sample Source'),
     sourceAbbr: createStubElement('VSS'),
     sourceAuthor: createStubElement('Codex Test'),
+    sourceYear: createStubElement(''),
     pageRange: createStubElement('')
   };
 
@@ -150,6 +151,32 @@ test('browser namespace exposes parser and generator API', () => {
   assert.equal(typeof context.window.AuroraXMLHelper.generateXml, 'function');
 });
 
+test('source ruleset defaults to 2014 unless year or 5.5e signal proves 2024', () => {
+  const context = loadApp();
+
+  let meta = JSON.parse(runInApp(context, 'JSON.stringify(getSourceMeta())'));
+  assert.equal(meta.ruleset, '2014');
+
+  runInApp(context, `document.getElementById('sourceYear').value = '2025';`);
+  meta = JSON.parse(runInApp(context, 'JSON.stringify(getSourceMeta())'));
+  assert.equal(meta.ruleset, '2024');
+
+  assert.equal(runInApp(context, `detectModernRulesetSignal('This feature uses the Magic action.')`), 'Magic action');
+  assert.equal(runInApp(context, `detectModernRulesetSignal('This old feature uses an action.')`), '');
+  assert.equal(runInApp(context, `detectModernRulesetSignal('This rule tells you to take the Search action.')`), '');
+  assert.equal(runInApp(context, `detectModernRulesetSignal('Range: Self (10-foot Emanation)')`), 'Emanation area');
+  assert.equal(runInApp(context, `detectModernRulesetSignal('Level 19: Epic Boon')`), 'Epic Boon feat');
+  assert.equal(runInApp(context, `detectModernRulesetSignal('Choose one Mastery property for this weapon.')`), 'Weapon Mastery property');
+
+  runInApp(context, `
+    document.getElementById('sourceYear').value = '2014';
+    detectSourceMetaFromText([{ page: 1, text: 'Copyright 2014\\nThis subclass uses the Magic action.' }]);
+  `);
+  meta = JSON.parse(runInApp(context, 'JSON.stringify(getSourceMeta())'));
+  assert.equal(meta.ruleset, '2024');
+  assert.equal(runInApp(context, `document.getElementById('sourceYear').dataset.rulesetEvidence`), 'Magic action');
+});
+
 test('DDB-style feat blocks parse prerequisite and grouped benefits', () => {
   const context = loadApp();
   const text = [
@@ -171,6 +198,66 @@ test('DDB-style feat blocks parse prerequisite and grouped benefits', () => {
   assert.equal(feats[0].benefits.length, 3);
   assert.ok(feats[0].benefits[1].includes('you can roll 1d6'));
   assert.ok(!feats[0].benefits.join(' ').includes('ARTIST'));
+});
+
+test('Markdown-style DDB blocks parse headings and compact possessive ids', () => {
+  const context = loadApp();
+  const text = [
+    '## Spell',
+    "This new spell appears on the Artificer's spell list.",
+    '### Homunculus Servant',
+    '*Level 2 Conjuration (ritual)*',
+    '**Casting Time:** 1 hour (ritual)',
+    '**Range:** 10 feet',
+    '**Components:** V, S, M (a gem worth 100+ GP)',
+    '**Duration:** instant',
+    'You summon a special homunculus in an unoccupied space within range.',
+    '**Using a Higher-Level Spell Slot.** Use the spell slot level for the spell.',
+    '------',
+    '## Artificer Subclasses',
+    '### Alchemist (Artificer Subclass)',
+    '*Craft Magic Elixirs and Potions*',
+    '#### Tools of the Trade (Level 3)',
+    'You gain the following benefits.',
+    "**Tool Proficiency.** You gain proficiency with Alchemist's Supplies.",
+    '#### Alchemist Spells (Level 3)',
+    'When you reach an Artificer level specified in the Alchemist Spells table, you have spells prepared.',
+    '| Artificer Level | Spells |',
+    '| --- | --- |',
+    "| 5 | Flaming Sphere, Melf's Acid Arrow |"
+  ].join('\n');
+
+  const spells = context.parseSpellsFromText(text);
+  const archetypes = context.parseArchetypesFromText(text);
+
+  assert.equal(spells.length, 1);
+  assert.equal(spells[0].classes.join(','), 'Artificer');
+  assert.equal(spells[0].castingTime, '1 hour or Ritual');
+  assert.equal(spells[0].duration, 'Instantaneous');
+  assert.equal(spells[0].higherLevels, 'Use the spell slot level for the spell.');
+  assert.equal(archetypes.length, 1);
+  assert.equal(archetypes[0].supports, 'Artificer Specialist');
+  assert.equal(archetypes[0].features.map(feature => feature.name).join('|'), 'Tools of the Trade|Alchemist Spells');
+  assert.equal(runInApp(context, `idify("Melf's Acid Arrow")`), 'MELFS_ACID_ARROW');
+  assert.equal(runInApp(context, `idify("Adventurer's Atlas")`), 'ADVENTURERS_ATLAS');
+
+  runInApp(context, `document.getElementById('sourceYear').value = '2024';`);
+  setExtractedData(context, {
+    spell: [],
+    archetype: archetypes,
+    item: [],
+    feat: [],
+    magic: [],
+    race: [],
+    background: [],
+    class: [],
+    other: []
+  });
+  const xml = runInApp(context, 'generateXml()');
+  assert.ok(xml.includes('ID_VSS_ARCHETYPE_FEATURE_ALCHEMIST_SPELLS'));
+  assert.ok(!xml.includes('ID_VSS_ARCHETYPE_FEATURE_ALCHEMIST_ALCHEMIST_SPELLS'));
+  assert.ok(xml.includes('ID_PROFICIENCY_TOOL_PROFICIENCY_ALCHEMISTS_SUPPLIES'));
+  assert.ok(xml.includes('ID_WOTC_PHB24_SPELL_MELFS_ACID_ARROW'));
 });
 
 test('subclass headings normalize common OCR damage', () => {
@@ -220,6 +307,67 @@ test('class parsing stops before subclass section and normalizes OCR feature nam
   assert.equal(archetypes[0].features[0].name, 'Tools of the Trade');
 });
 
+test('artificer subclass helper rules infer canonical repeated stats and selects', () => {
+  const context = loadApp();
+  runInApp(context, `document.getElementById('sourceYear').value = '2025';`);
+  setExtractedData(context, {
+    spell: [],
+    archetype: [
+      {
+        name: 'Alchemist',
+        class: 'Artificer',
+        supports: 'Artificer Specialist',
+        description: '',
+        features: [{
+          name: 'Experimental Elixir',
+          level: 3,
+          description: 'You magically produce two elixirs. You can make a total of three at level 5, four at level 9, and five at level 15.'
+        }]
+      },
+      {
+        name: 'Artillerist',
+        class: 'Artificer',
+        supports: 'Artificer Specialist',
+        description: '',
+        features: [{ name: 'Eldritch Cannon', level: 3, description: 'You create an Eldritch Cannon.' }]
+      },
+      {
+        name: 'Battle Smith',
+        class: 'Artificer',
+        supports: 'Artificer Specialist',
+        description: '',
+        features: [{ name: 'Steel Defender', level: 3, description: 'Your tinkering has borne you a companion, a Steel Defender.' }]
+      },
+      {
+        name: 'Cartographer',
+        class: 'Artificer',
+        supports: 'Artificer Specialist',
+        description: '',
+        features: [
+          { name: "Adventurer's Atlas", level: 3, description: 'You create maps up to a maximum number of creatures equal to 1 plus your Intelligence modifier.' },
+          { name: 'Superior Atlas', level: 15, description: "The creature's Hit Points instead change to a number equal to twice your Artificer level." }
+        ]
+      }
+    ],
+    item: [],
+    feat: [],
+    magic: [],
+    race: [],
+    background: [],
+    class: [],
+    other: []
+  });
+
+  const xml = runInApp(context, 'generateXml()');
+
+  assert.ok(xml.includes('<stat name="alchemist:elixirs:max" value="2" level="3" />'));
+  assert.ok(xml.includes('<stat name="alchemist:elixirs:max" value="1" level="15" />'));
+  assert.equal((xml.match(/<stat name="cannon:hp" value="level:artificer" \/>/g) || []).length, 5);
+  assert.ok(xml.includes('<select type="Companion" name="Steel Defender" supports="VSS Steel Defender" default="ID_VSS_COMPANION_ARTIFICER_STEEL_DEFENDER" />'));
+  assert.ok(xml.includes('<stat name="atlas:targets" value="intelligence:modifier" />'));
+  assert.equal((xml.match(/<stat name="atlas:safe haven:hp" value="level:artificer" \/>/g) || []).length, 2);
+});
+
 test('DDB-style species parse from title plus inline trait paragraphs', () => {
   const context = loadApp();
   const text = [
@@ -243,8 +391,39 @@ test('DDB-style species parse from title plus inline trait paragraphs', () => {
   assert.equal(races[0].traits.map(trait => trait.name).join('|'), 'Changeling Instincts|Shape-Shifter');
 });
 
+test('race ability score rules are gated against background ASI', () => {
+  const context = loadApp();
+  setExtractedData(context, {
+    spell: [],
+    archetype: [],
+    item: [],
+    feat: [],
+    magic: [],
+    race: [{
+      name: 'Testborn',
+      size: 'Medium',
+      speed: 30,
+      languages: ['Common'],
+      languageChoices: '',
+      abilityScores: { strength: 2, charisma: 1 },
+      description: 'A test species.',
+      traits: []
+    }],
+    background: [],
+    class: [],
+    other: []
+  });
+
+  const xml = runInApp(context, 'generateXml()');
+
+  assert.ok(xml.includes('<!-- Source rule: Increase strength by 2 unless a background provides ability scores. -->'));
+  assert.ok(xml.includes('<stat name="strength" value="2" requirements="!ID_INTERNAL_GRANTS_BACKGROUND_ASI" />'));
+  assert.ok(xml.includes('<stat name="charisma" value="1" requirements="!ID_INTERNAL_GRANTS_BACKGROUND_ASI" />'));
+});
+
 test('2024-style backgrounds do not require background feature blocks', () => {
   const context = loadApp();
+  runInApp(context, `document.getElementById('sourceYear').value = '2025';`);
   const text = [
     'Aperrant HEIR',
     'Ability Scores: Strength, Constitution, Charisma',
@@ -265,9 +444,56 @@ test('2024-style backgrounds do not require background feature blocks', () => {
 
   setExtractedData(context, { spell: [], archetype: [], item: [], feat: [{ name: 'Aberrant Dragonmark', benefits: ['You gain a mark.'] }], magic: [], race: [], background: backgrounds, class: [], other: [] });
   const xml = runInApp(context, 'generateXml()');
-  assert.ok(xml.includes('<stat name="strength" value="1" />'));
+  assert.ok(xml.includes('<ul class="unstyled" style="text-indent:-1em; margin-left:1em; margin-bottom:5px">'));
+  assert.ok(xml.includes('<div class="reference">'));
+  assert.ok(xml.includes('<!-- Source rule: Choose +2/+1 or +1/+1/+1 among Strength, Constitution, Charisma. -->'));
+  assert.ok(xml.includes('<grant type="Ability Score Improvement" id="ID_INTERNAL_ABILITY_SCORE_IMPROVEMENT_COMBINATION_STR_CON_CHA" />'));
+  assert.ok(xml.includes('<grant type="Grants" id="ID_INTERNAL_GRANTS_BACKGROUND_ASI" />'));
   assert.ok(xml.includes('<grant type="Feat" id="ID_VSS_FEAT_ABERRANT_DRAGONMARK" />'));
+  assert.ok(xml.includes('<set name="short">Strength, Constitution, Charisma, Aberrant Dragonmark Feat, History and Intimidation Skills, Disguise Kit</set>'));
   assert.equal(context.checkCompleteness(backgrounds[0], 'background').keep, true);
+});
+
+test('2024 background short text and choice tool selects match canonical phrasing', () => {
+  const context = loadApp();
+  runInApp(context, `document.getElementById('sourceYear').value = '2025';`);
+  const text = [
+    'House Agent',
+    'Ability Scores: Strength, Intelligence, Charisma',
+    'Feat: Lucky',
+    'Skill Proficiencies: Investigation and Persuasion',
+    "Tool Proficiency: Choose one kind of Artisan's Tools",
+    'Equipment: Choose A or B'
+  ].join('\n');
+
+  const backgrounds = context.parseBackgroundsFromText(text);
+  setExtractedData(context, { spell: [], archetype: [], item: [], feat: [], magic: [], race: [], background: backgrounds, class: [], other: [] });
+  const xml = runInApp(context, 'generateXml()');
+
+  assert.ok(xml.includes('<set name="short">Strength, Intelligence, Charisma, Lucky Feat, Investigation and Persuasion Skills, one Artisan\'s Tool</set>'));
+  assert.ok(xml.includes('<select type="Proficiency" name="Artisan\'s Tool (House Agent)" supports="Artisan tools" />'));
+});
+
+test('unknown-year backgrounds default to 2014 direct ability grants', () => {
+  const context = loadApp();
+  const text = [
+    'Wandering Student',
+    'Ability Scores: Dexterity, Intelligence, Wisdom',
+    'Feat: Skilled',
+    'Skill Proficiencies: History and Survival',
+    "Tool Proficiencies: Cartographer's Tools",
+    'You studied maps and old roads.'
+  ].join('\n');
+
+  const backgrounds = context.parseBackgroundsFromText(text);
+  setExtractedData(context, { spell: [], archetype: [], item: [], feat: [], magic: [], race: [], background: backgrounds, class: [], other: [] });
+  const xml = runInApp(context, 'generateXml()');
+
+  assert.ok(xml.includes('<stat name="dexterity" value="1" />'));
+  assert.ok(xml.includes('<stat name="intelligence" value="1" />'));
+  assert.ok(xml.includes('<stat name="wisdom" value="1" />'));
+  assert.ok(!xml.includes('ID_INTERNAL_ABILITY_SCORE_IMPROVEMENT_COMBINATION_DEX_INT_WIS'));
+  assert.ok(!xml.includes('ID_INTERNAL_GRANTS_BACKGROUND_ASI'));
 });
 
 test('dragonmark feat headings are recognized as feats', () => {
@@ -286,6 +512,248 @@ test('dragonmark feat headings are recognized as feats', () => {
   assert.equal(feats[0].name, 'Mark of Detection');
   assert.match(feats[0].prerequisite, /Eberron Campaign/);
   assert.equal(feats[0].benefits.length, 2);
+});
+
+test('dragonmark and epic boon feat rules infer Aurora supports and spell grants', () => {
+  const context = loadApp();
+  runInApp(context, `document.getElementById('sourceYear').value = '2025';`);
+  setExtractedData(context, {
+    spell: [],
+    archetype: [],
+    item: [],
+    feat: [
+      {
+        name: 'Mark of Storm',
+        prerequisite: "Eberron campaign; can't already have a Dragonmark feat",
+        description: '',
+        benefits: [
+          "Storm's Boon. You have Resistance to Lightning damage.",
+          "Storm Magic. You know the Thunderclap cantrip. When you reach character level 3, you also always have the Gust of Wind spell prepared.",
+          "Spells of the Mark. If you have the Spellcasting or Pact Magic class feature, the spells on the Mark of Storm Spells table are added to that feature's spell list. | Spell Level | Spells | | --- | --- | | 1 | Feather Fall, Fog Cloud |"
+        ]
+      },
+      {
+        name: 'Greater Mark of Handling',
+        prerequisite: 'mark of handling; Level 4',
+        description: 'Ability Score Increase. Increase one ability score of your choice by 1, to a maximum of 20.',
+        benefits: [
+          'Subdue Animal. The target must succeed on a Wisdom saving throw (DC 8 plus your Wisdom modifier and Proficiency Bonus).'
+        ]
+      },
+      {
+        name: 'Greater Mark of Hospitality',
+        prerequisite: 'mark of hospitality; Level 4',
+        description: 'Ability Score Increase. Increase one ability score of your choice by 1, to a maximum of 20.',
+        benefits: [
+          "Improved Hospitality. A creature gains Temporary Hit Points equal to your Proficiency Bonus plus your Intelligence, Wisdom, or Charisma modifier (choose when you select this feat)."
+        ]
+      },
+      {
+        name: 'Potent Dragonmark',
+        prerequisite: 'Level 4',
+        description: 'Ability Score Increase. Increase the spellcasting ability score used by your Dragonmark feat by 1, to a maximum of 20.',
+        benefits: [
+          "Dragonmark Spellcasting. The spell slot's level is half your level (round up), to a maximum of level 5."
+        ]
+      },
+      {
+        name: 'Boon of Siberys',
+        prerequisite: 'Level 19; Eberron campaign',
+        description: 'Ability Score Increase. Increase one ability score of your choice by 1, to a maximum of 20.',
+        benefits: [
+          'Aberrant Magic. Choose a level 8 or lower spell from the Sorcerer spell list.'
+        ]
+      }
+    ],
+    magic: [],
+    race: [],
+    background: [],
+    class: [],
+    other: []
+  });
+
+  const xml = runInApp(context, 'generateXml()');
+
+  assert.ok(xml.includes('<supports>Dragonmark</supports>'));
+  assert.ok(xml.includes('<supports>Epic Boon</supports>'));
+  assert.ok(xml.includes('<grant type="Spell" id="ID_WOTC_PHB24_SPELL_THUNDERCLAP" prepared="true" />'));
+  assert.ok(xml.includes('<grant type="Spell" id="ID_WOTC_PHB24_SPELL_GUST_OF_WIND" prepared="true" level="3" />'));
+  assert.ok(xml.includes('<grant type="Condition" id="ID_INTERNAL_CONDITION_DAMAGE_RESISTANCE_LIGHTNING" />'));
+  assert.ok(xml.includes('<select type="Feat Feature" name="Spellcasting Ability (Mark of Storm)" supports="ID_VSS_FEAT_FEATURE_DRAGONMARK_INTELLIGENCE|ID_VSS_FEAT_FEATURE_DRAGONMARK_WISDOM|ID_VSS_FEAT_FEATURE_DRAGONMARK_CHARISMA" />'));
+  assert.ok(xml.includes('<grant type="Feat Feature" id="ID_VSS_FEAT_FEATURE_MARK_OF_STORM_SPELLS_OF_THE_MARK" />'));
+  assert.ok(xml.includes('<element name="Spells of the Mark" type="Feat Feature" source="Validator Sample Source" id="ID_VSS_FEAT_FEATURE_MARK_OF_STORM_SPELLS_OF_THE_MARK">'));
+  assert.ok(xml.includes('<extend>ID_WOTC_PHB24_SPELL_FEATHER_FALL</extend>'));
+  assert.ok(xml.includes('<element name="Intelligence" type="Feat Feature" source="Validator Sample Source" id="ID_VSS_FEAT_FEATURE_DRAGONMARK_INTELLIGENCE">'));
+  assert.ok(xml.includes('<select type="Ability Score Improvement" name="Ability Score Increase (Greater Mark of Handling)" supports="Ability Score Increase" />'));
+  assert.ok(xml.includes('<stat name="subdue animal:dc" value="wisdom:modifier" />'));
+  assert.ok(xml.includes('<select type="Feat Feature" name="Hospitality Ability (Greater Mark of Hospitality)" supports="ID_VSS_FEAT_FEATURE_GREATER_MARK_OF_HOSPITALITY_INTELLIGENCE|ID_VSS_FEAT_FEATURE_GREATER_MARK_OF_HOSPITALITY_WISDOM|ID_VSS_FEAT_FEATURE_GREATER_MARK_OF_HOSPITALITY_CHARISMA" />'));
+  assert.ok(xml.includes('<element name="Charisma" type="Feat Feature" source="Validator Sample Source" id="ID_VSS_FEAT_FEATURE_GREATER_MARK_OF_HOSPITALITY_CHARISMA">'));
+  assert.ok(xml.includes('<stat name="hospitality:temp hp" value="charisma:modifier" bonus="ability" />'));
+  assert.ok(xml.includes('<stat name="potent dragonmark:slot level" value="level:half:up" maximum="5" />'));
+  assert.ok(xml.includes('<select type="Ability Score Improvement" name="Ability Score Increase (Boon of Siberys)" supports="Ability Score Increase, 30" />'));
+  assert.ok(xml.includes('<select type="Spell" name="Siberys Spell (Boon of Siberys)" supports="Sorcerer,(1||2||3||4||5||6||7||8)" />'));
+});
+
+test('spell XML uses canonical sparse setters', () => {
+  const context = loadApp();
+  runInApp(context, `document.getElementById('sourceYear').value = '2024';`);
+  setExtractedData(context, {
+    spell: [{
+      name: 'Clean Spark',
+      level: 1,
+      school: 'Evocation',
+      castingTime: 'Action',
+      range: '60 feet',
+      hasVerbal: true,
+      hasSomatic: false,
+      hasMaterial: false,
+      material: '',
+      duration: 'Instantaneous',
+      isRitual: false,
+      isConcentration: false,
+      classes: ['Wizard'],
+      description: 'A precise spark leaps to a target.'
+    }],
+    archetype: [],
+    item: [],
+    feat: [],
+    magic: [],
+    race: [],
+    background: [],
+    class: [],
+    other: []
+  });
+
+  const xml = runInApp(context, 'generateXml()');
+
+  assert.ok(xml.includes('<set name="level">1</set>\n\t\t\t<set name="school">Evocation</set>'));
+  assert.ok(xml.includes('<set name="hasVerbalComponent">true</set>'));
+  assert.ok(!xml.includes('<set name="keywords"></set>'));
+  assert.ok(!xml.includes('<set name="isRitual">false</set>'));
+  assert.ok(!xml.includes('<set name="hasSomaticComponent">false</set>'));
+  assert.ok(!xml.includes('<set name="hasMaterialComponent">false</set>'));
+  assert.ok(!xml.includes('<set name="materialComponent"></set>'));
+  assert.ok(!xml.includes('<set name="isConcentration">false</set>'));
+});
+
+test('spell XML defaults to legacy explicit setters for unknown-year sources', () => {
+  const context = loadApp();
+  setExtractedData(context, {
+    spell: [{
+      name: 'Clean Spark',
+      level: 1,
+      school: 'Evocation',
+      castingTime: 'Action',
+      range: '60 feet',
+      hasVerbal: true,
+      hasSomatic: false,
+      hasMaterial: false,
+      material: '',
+      duration: 'Instantaneous',
+      isRitual: false,
+      isConcentration: false,
+      classes: ['Wizard'],
+      description: 'A precise spark leaps to a target.'
+    }],
+    archetype: [],
+    item: [],
+    feat: [],
+    magic: [],
+    race: [],
+    background: [],
+    class: [],
+    other: []
+  });
+
+  const xml = runInApp(context, 'generateXml()');
+
+  assert.ok(xml.includes('<set name="keywords"></set>'));
+  assert.ok(xml.includes('<set name="hasSomaticComponent">false</set>'));
+  assert.ok(xml.includes('<set name="hasMaterialComponent">false</set>'));
+  assert.ok(xml.includes('<set name="materialComponent" />'));
+  assert.ok(xml.includes('<set name="isConcentration">false</set>'));
+  assert.ok(xml.includes('<set name="isRitual">false</set>'));
+});
+
+test('spell supports and inferred keywords follow source ruleset', () => {
+  const context = loadApp();
+  setExtractedData(context, {
+    spell: [{
+      name: 'Flame Verdict',
+      level: 1,
+      school: 'Evocation',
+      castingTime: 'Action',
+      range: '60 feet',
+      hasVerbal: true,
+      hasSomatic: true,
+      hasMaterial: false,
+      material: '',
+      duration: 'Instantaneous',
+      isRitual: false,
+      isConcentration: false,
+      classes: ['Wizard'],
+      description: 'A target makes a Dexterity saving throw. On a failed save, it takes fire damage.',
+      higherLevels: 'The damage increases by 1d6 for each slot level above 1.'
+    }],
+    archetype: [],
+    item: [],
+    feat: [],
+    magic: [],
+    race: [],
+    background: [],
+    class: [],
+    other: []
+  });
+
+  let xml = runInApp(context, 'generateXml()');
+  assert.ok(xml.includes('<supports>Wizard, Spell Saving Throw</supports>'));
+  assert.ok(!xml.includes('Damaging Spell'));
+  assert.ok(xml.includes('<set name="keywords">fire, dexterity, save, damage, saving throws, saves, higher levels</set>'));
+
+  runInApp(context, `document.getElementById('sourceYear').value = '2024';`);
+  xml = runInApp(context, 'generateXml()');
+  assert.ok(xml.includes('<supports>Wizard, Spell Saving Throw, Damaging Spell</supports>'));
+  assert.ok(xml.includes('<set name="keywords">fire, dexterity, save, damage, saving throws, saves, upcasting, higher-level spell slot</set>'));
+});
+
+test('spell upcast wording follows source ruleset', () => {
+  const context = loadApp();
+  const sampleData = {
+    spell: [{
+      name: 'Scaling Spark',
+      level: 1,
+      school: 'Evocation',
+      castingTime: 'Action',
+      range: '60 feet',
+      hasVerbal: true,
+      hasSomatic: true,
+      hasMaterial: false,
+      material: '',
+      duration: 'Instantaneous',
+      isRitual: false,
+      isConcentration: false,
+      classes: ['Wizard'],
+      description: 'A spark leaps to a target.',
+      higherLevels: 'The damage increases by 1d6 for each slot level above 1.'
+    }],
+    archetype: [],
+    item: [],
+    feat: [],
+    magic: [],
+    race: [],
+    background: [],
+    class: [],
+    other: []
+  };
+
+  setExtractedData(context, sampleData);
+  let xml = runInApp(context, 'generateXml()');
+  assert.ok(xml.includes('<b><i>At Higher Levels.</i></b>'));
+  assert.ok(!xml.includes('Using a Higher-Level Spell Slot.'));
+
+  runInApp(context, `document.getElementById('sourceYear').value = '2024';`);
+  xml = runInApp(context, 'generateXml()');
+  assert.ok(xml.includes('<b><i>Using a Higher-Level Spell Slot.</i></b>'));
 });
 
 test('generated XML strips OCR control characters that XML forbids', () => {
@@ -369,6 +837,7 @@ test('manual added elements participate in XML generation', () => {
   const xml = runInApp(context, 'generateXml()');
 
   assert.ok(xml.includes('ID_VSS_FEAT_MANUAL_SPARK'));
+  assert.ok(xml.includes('<!-- Source rule: Gain proficiency in arcana. -->'));
   assert.ok(xml.includes('<grant type="Proficiency" id="ID_PROFICIENCY_SKILL_ARCANA" />'));
 });
 

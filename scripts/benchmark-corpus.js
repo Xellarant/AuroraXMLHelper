@@ -1,0 +1,457 @@
+#!/usr/bin/env node
+
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+
+const repoRoot = path.resolve(__dirname, '..');
+const defaultCustomRoot = path.join(process.env.USERPROFILE || '', 'Documents', '5e Character Builder', 'custom');
+
+const ELEMENT_TYPES = ['spell', 'archetype', 'feat', 'magic', 'item', 'race', 'background', 'class'];
+const PARSERS = {
+  spell: 'parseSpellsFromText',
+  archetype: 'parseArchetypesFromText',
+  feat: 'parseFeatsFromText',
+  magic: 'parseMagicItemsFromText',
+  item: 'parseItemsFromText',
+  race: 'parseRacesFromText',
+  background: 'parseBackgroundsFromText',
+  class: 'parseClassesFromText'
+};
+
+function usage() {
+  return [
+    'Usage:',
+    '  node scripts/benchmark-corpus.js --source <text-or-md-file> --canonical <file-or-dir> [options]',
+    '',
+    'Options:',
+    '  --type <type>             Include one parser type. May be repeated. Defaults to all supported types.',
+    '  --source-name <name>      Source name to use while generating XML.',
+    '  --source-abbr <abbr>      Source abbreviation to use while generating XML.',
+    '  --source-author <name>    Source author to use while generating XML.',
+    '  --source-year <year>      Publication year; 2024+ uses 2024 generation rules.',
+    '  --custom-root <dir>       Canonical Aurora custom root for dependency lookups.',
+    '  --out <file>              Write a Markdown report to this path.',
+    '  --json                    Print JSON instead of Markdown.',
+    '',
+    'PDFs are intentionally not parsed by this script yet; feed OCR text, Markdown, or text extracted by another tool.'
+  ].join('\n');
+}
+
+function parseArgs(argv) {
+  const args = {
+    canonical: [],
+    types: [],
+    customRoot: defaultCustomRoot,
+    json: false
+  };
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    const next = () => {
+      if (i + 1 >= argv.length) throw new Error(`Missing value for ${arg}`);
+      return argv[++i];
+    };
+    switch (arg) {
+      case '--source': args.source = next(); break;
+      case '--canonical': args.canonical.push(next()); break;
+      case '--type': args.types.push(next().toLowerCase()); break;
+      case '--source-name': args.sourceName = next(); break;
+      case '--source-abbr': args.sourceAbbr = next(); break;
+      case '--source-author': args.sourceAuthor = next(); break;
+      case '--source-year': args.sourceYear = next(); break;
+      case '--custom-root': args.customRoot = next(); break;
+      case '--out': args.out = next(); break;
+      case '--json': args.json = true; break;
+      case '--help':
+      case '-h':
+        console.log(usage());
+        process.exit(0);
+        break;
+      default:
+        throw new Error(`Unknown option: ${arg}`);
+    }
+  }
+  if (!args.source) throw new Error('Missing --source');
+  if (!args.canonical.length) throw new Error('Missing --canonical');
+  args.types = args.types.length ? args.types : ELEMENT_TYPES;
+  for (const type of args.types) {
+    if (!ELEMENT_TYPES.includes(type)) throw new Error(`Unsupported benchmark type: ${type}`);
+  }
+  return args;
+}
+
+function createStubElement(value = '') {
+  const element = {
+    value,
+    checked: false,
+    disabled: false,
+    textContent: '',
+    innerHTML: '',
+    className: '',
+    style: {},
+    dataset: {},
+    classList: {
+      add() {},
+      remove() {},
+      toggle() {}
+    },
+    addEventListener() {},
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+    closest() { return element; },
+    appendChild() {},
+    insertAdjacentHTML() {},
+    focus() {},
+    remove() {},
+    scrollIntoView() {}
+  };
+  return element;
+}
+
+function loadApp(sourceMeta) {
+  const elements = {
+    sourceName: createStubElement(sourceMeta.name || 'Benchmark Source'),
+    sourceAbbr: createStubElement(sourceMeta.abbr || 'BENCH'),
+    sourceAuthor: createStubElement(sourceMeta.author || 'Benchmark'),
+    sourceYear: createStubElement(sourceMeta.year || ''),
+    pageRange: createStubElement('')
+  };
+  const fallbackElement = createStubElement();
+  const document = {
+    getElementById(id) {
+      return elements[id] || fallbackElement;
+    },
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+    createElement() { return createStubElement(); },
+    addEventListener() {},
+    documentElement: { dataset: {} }
+  };
+  const window = {
+    addEventListener() {},
+    localStorage: {
+      getItem() { return null; },
+      setItem() {}
+    }
+  };
+  const context = {
+    console,
+    document,
+    window,
+    localStorage: window.localStorage,
+    Blob: class Blob {},
+    URL: {
+      createObjectURL() { return ''; },
+      revokeObjectURL() {}
+    },
+    confirm() { return true; },
+    alert() {},
+    setTimeout,
+    clearTimeout
+  };
+  vm.createContext(context);
+  const appScript = fs.readFileSync(path.join(repoRoot, 'src', 'app.js'), 'utf8');
+  vm.runInContext(appScript, context, { filename: 'src/app.js' });
+  return { context, elements };
+}
+
+function runInApp(context, code) {
+  return vm.runInContext(code, context);
+}
+
+function listXmlFiles(inputPath) {
+  const resolved = path.resolve(inputPath);
+  if (!fs.existsSync(resolved)) throw new Error(`Canonical path does not exist: ${inputPath}`);
+  const stat = fs.statSync(resolved);
+  if (stat.isFile()) return resolved.toLowerCase().endsWith('.xml') ? [resolved] : [];
+  const files = [];
+  for (const entry of fs.readdirSync(resolved, { withFileTypes: true })) {
+    const full = path.join(resolved, entry.name);
+    if (entry.isDirectory()) files.push(...listXmlFiles(full));
+    else if (entry.isFile() && entry.name.toLowerCase().endsWith('.xml')) files.push(full);
+  }
+  return files;
+}
+
+function attrMap(tag) {
+  const attrs = {};
+  for (const match of tag.matchAll(/([A-Za-z_:][-A-Za-z0-9_:.]*)\s*=\s*"([^"]*)"/g)) {
+    attrs[match[1]] = decodeXml(match[2]);
+  }
+  return attrs;
+}
+
+function decodeXml(value) {
+  return String(value || '')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&');
+}
+
+function stripTags(value) {
+  return decodeXml(String(value || '').replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
+}
+
+function normalizeSpace(value) {
+  return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+function normalizeName(value) {
+  return normalizeSpace(decodeXml(value)).toLowerCase();
+}
+
+function parseElements(xml, fileName = '') {
+  const elements = [];
+  const elementRegex = /<element\b([^>]*)>([\s\S]*?)<\/element>/gi;
+  let match;
+  while ((match = elementRegex.exec(xml))) {
+    const attrs = attrMap(match[1]);
+    const body = match[2];
+    const supports = stripTags((body.match(/<supports\b[^>]*>([\s\S]*?)<\/supports>/i) || [])[1] || '');
+    const description = stripTags((body.match(/<description\b[^>]*>([\s\S]*?)<\/description>/i) || [])[1] || '');
+    const setters = {};
+    const setterAttrs = {};
+    const settersBody = (body.match(/<setters\b[^>]*>([\s\S]*?)<\/setters>/i) || [])[1] || '';
+    for (const setter of settersBody.matchAll(/<set\b([^>]*?)(?:\/>|>([\s\S]*?)<\/set>)/gi)) {
+      const setAttrs = attrMap(setter[1]);
+      if (!setAttrs.name) continue;
+      setters[setAttrs.name] = stripTags(setter[2] || '');
+      setterAttrs[setAttrs.name] = setAttrs;
+    }
+    const rulesBody = (body.match(/<rules\b[^>]*>([\s\S]*?)<\/rules>/i) || [])[1] || '';
+    const rules = [];
+    for (const rule of rulesBody.matchAll(/<(grant|select|stat|append)\b([^>]*?)(?:\/>|>([\s\S]*?)<\/\1>)/gi)) {
+      const kind = rule[1];
+      const ruleAttrs = attrMap(rule[2]);
+      const signature = [kind]
+        .concat(Object.keys(ruleAttrs).sort().map(key => `${key}=${ruleAttrs[key]}`))
+        .join('|');
+      rules.push(signature);
+    }
+    elements.push({
+      fileName,
+      name: attrs.name || '',
+      type: attrs.type || '',
+      source: attrs.source || '',
+      id: attrs.id || '',
+      supports,
+      description,
+      setters,
+      setterAttrs,
+      rules: rules.sort(),
+      key: `${normalizeName(attrs.type)}::${normalizeName(attrs.name)}`
+    });
+  }
+  return elements;
+}
+
+function compareValues(generated, canonical) {
+  if (generated === canonical) return null;
+  return { generated, canonical };
+}
+
+function compareMaps(generated, canonical) {
+  const diffs = [];
+  const keys = new Set([...Object.keys(generated), ...Object.keys(canonical)]);
+  for (const key of Array.from(keys).sort()) {
+    const diff = compareValues(generated[key] || '', canonical[key] || '');
+    if (diff) diffs.push({ name: key, ...diff });
+  }
+  return diffs;
+}
+
+function compareRules(generated, canonical) {
+  const generatedSet = new Set(generated);
+  const canonicalSet = new Set(canonical);
+  return {
+    missing: canonical.filter(rule => !generatedSet.has(rule)),
+    extra: generated.filter(rule => !canonicalSet.has(rule))
+  };
+}
+
+function indexByKey(elements) {
+  const index = new Map();
+  for (const element of elements) {
+    if (!index.has(element.key)) index.set(element.key, []);
+    index.get(element.key).push(element);
+  }
+  return index;
+}
+
+function generateBenchmarkXml(context, text, types) {
+  const data = {};
+  for (const type of ELEMENT_TYPES) data[type] = [];
+  data.other = [];
+  for (const type of types) {
+    const parserName = PARSERS[type];
+    const parsed = context[parserName](text);
+    data[type] = type === 'feat' ? parsed.map(feat => context.parseFeatFullText(feat)) : parsed;
+  }
+  runInApp(context, `extractedData = ${JSON.stringify(data)};`);
+  const xml = runInApp(context, 'generateXml()');
+  const meta = JSON.parse(runInApp(context, 'JSON.stringify(getSourceMeta())'));
+  return { data, xml, meta };
+}
+
+function summarizeExtractedData(data) {
+  return Object.fromEntries(Object.entries(data)
+    .filter(([, items]) => Array.isArray(items) && items.length)
+    .map(([type, items]) => [type, items.length]));
+}
+
+function benchmark(args) {
+  const sourcePath = path.resolve(args.source);
+  if (!fs.existsSync(sourcePath)) throw new Error(`Source path does not exist: ${args.source}`);
+  const sourceText = fs.readFileSync(sourcePath, 'utf8');
+  const sourceBase = path.basename(sourcePath, path.extname(sourcePath));
+  const sourceMeta = {
+    name: args.sourceName || sourceBase.replace(/[_-]/g, ' '),
+    abbr: args.sourceAbbr || sourceBase.split(/\s+/).map(word => word[0]).join('').toUpperCase().slice(0, 8) || 'BENCH',
+    author: args.sourceAuthor || 'Benchmark',
+    year: args.sourceYear || ''
+  };
+  const { context, elements } = loadApp(sourceMeta);
+  runInApp(context, `detectSourceMetaFromText([{ page: 1, text: ${JSON.stringify(sourceText)} }]);`);
+  if (args.sourceName) elements.sourceName.value = args.sourceName;
+  if (args.sourceAbbr) elements.sourceAbbr.value = args.sourceAbbr;
+  if (args.sourceAuthor) elements.sourceAuthor.value = args.sourceAuthor;
+  if (args.sourceYear) elements.sourceYear.value = args.sourceYear;
+
+  const generated = generateBenchmarkXml(context, sourceText, args.types);
+  const generatedElements = parseElements(generated.xml, sourcePath).filter(element => element.type !== 'Source');
+  const canonicalFiles = args.canonical.flatMap(listXmlFiles);
+  const canonicalElements = [];
+  for (const file of canonicalFiles) {
+    canonicalElements.push(...parseElements(fs.readFileSync(file, 'utf8'), file));
+  }
+  const canonicalIndex = indexByKey(canonicalElements);
+  const matches = [];
+  const unmatched = [];
+  for (const element of generatedElements) {
+    const candidates = canonicalIndex.get(element.key) || [];
+    if (!candidates.length) {
+      unmatched.push(element);
+      continue;
+    }
+    const canonical = candidates.find(candidate => candidate.id === element.id) || candidates[0];
+    const setterDiffs = compareMaps(element.setters, canonical.setters);
+    const rules = compareRules(element.rules, canonical.rules);
+    const supportsDiff = compareValues(element.supports, canonical.supports);
+    matches.push({
+      generated: element,
+      canonical,
+      supportsDiff,
+      setterDiffs,
+      rules,
+      different: !!supportsDiff || setterDiffs.length > 0 || rules.missing.length > 0 || rules.extra.length > 0
+    });
+  }
+  return {
+    source: sourcePath,
+    canonical: canonicalFiles,
+    meta: generated.meta,
+    extractedCounts: summarizeExtractedData(generated.data),
+    generatedCount: generatedElements.length,
+    canonicalCount: canonicalElements.length,
+    matchedCount: matches.length,
+    exactShapeMatches: matches.filter(match => !match.different).length,
+    differentMatches: matches.filter(match => match.different).length,
+    unmatchedCount: unmatched.length,
+    unmatched: unmatched.slice(0, 40).map(element => ({
+      type: element.type,
+      name: element.name,
+      id: element.id
+    })),
+    matches: matches
+      .filter(match => match.different)
+      .slice(0, 40)
+      .map(match => ({
+        type: match.generated.type,
+        name: match.generated.name,
+        generatedId: match.generated.id,
+        canonicalId: match.canonical.id,
+        canonicalFile: match.canonical.fileName,
+        supports: match.supportsDiff,
+        setters: match.setterDiffs.slice(0, 12),
+        missingRules: match.rules.missing.slice(0, 12),
+        extraRules: match.rules.extra.slice(0, 12)
+      }))
+  };
+}
+
+function renderMarkdown(result) {
+  const pct = result.matchedCount
+    ? ((result.exactShapeMatches / result.matchedCount) * 100).toFixed(1)
+    : '0.0';
+  const lines = [];
+  lines.push('# Corpus Benchmark Report');
+  lines.push('');
+  lines.push(`- Source: \`${result.source}\``);
+  lines.push(`- Canonical files scanned: ${result.canonical.length}`);
+  lines.push(`- Source ruleset: ${result.meta.ruleset}${result.meta.year ? ` (${result.meta.year})` : ''}`);
+  lines.push(`- Extracted counts: ${Object.entries(result.extractedCounts).map(([type, count]) => `${type}=${count}`).join(', ') || 'none'}`);
+  lines.push(`- Generated elements: ${result.generatedCount}`);
+  lines.push(`- Matched canonical elements by name/type: ${result.matchedCount}`);
+  lines.push(`- Exact shape matches among matched elements: ${result.exactShapeMatches}/${result.matchedCount} (${pct}%)`);
+  lines.push(`- Differing matched elements: ${result.differentMatches}`);
+  lines.push(`- Unmatched generated elements: ${result.unmatchedCount}`);
+  lines.push('');
+  if (result.matches.length) {
+    lines.push('## Differing Matched Elements');
+    lines.push('');
+    for (const match of result.matches) {
+      lines.push(`### ${match.type}: ${match.name}`);
+      lines.push(`- Generated ID: \`${match.generatedId}\``);
+      lines.push(`- Canonical ID: \`${match.canonicalId}\``);
+      lines.push(`- Canonical file: \`${match.canonicalFile}\``);
+      if (match.supports) {
+        lines.push(`- Supports: generated \`${match.supports.generated}\`, canonical \`${match.supports.canonical}\``);
+      }
+      for (const setter of match.setters) {
+        lines.push(`- Setter \`${setter.name}\`: generated \`${setter.generated}\`, canonical \`${setter.canonical}\``);
+      }
+      for (const rule of match.missingRules) lines.push(`- Missing rule: \`${rule}\``);
+      for (const rule of match.extraRules) lines.push(`- Extra rule: \`${rule}\``);
+      lines.push('');
+    }
+  }
+  if (result.unmatched.length) {
+    lines.push('## Unmatched Generated Elements');
+    lines.push('');
+    for (const element of result.unmatched) {
+      lines.push(`- ${element.type}: ${element.name} (\`${element.id}\`)`);
+    }
+    lines.push('');
+  }
+  return lines.join('\n');
+}
+
+function main() {
+  try {
+    const args = parseArgs(process.argv.slice(2));
+    const result = benchmark(args);
+    const output = args.json ? JSON.stringify(result, null, 2) : renderMarkdown(result);
+    if (args.out) {
+      fs.mkdirSync(path.dirname(path.resolve(args.out)), { recursive: true });
+      fs.writeFileSync(args.out, output, 'utf8');
+    }
+    console.log(output);
+  } catch (error) {
+    console.error(error.message);
+    console.error('');
+    console.error(usage());
+    process.exit(1);
+  }
+}
+
+if (require.main === module) {
+  main();
+}
+
+module.exports = {
+  ELEMENT_TYPES,
+  benchmark,
+  renderMarkdown
+};
