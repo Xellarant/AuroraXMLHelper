@@ -10,8 +10,67 @@
         "author": "Wizards of the Coast"
       },
       "thresholds": {
+        "minExtractedTotal": 50,
+        "minMatched": 100,
         "minExactPercent": 99,
-        "maxUnmatched": 0
+        "maxUnmatched": 0,
+        "maxHighSeverity": 0
+      }
+    },
+    {
+      "name": "Eberron: Rising from the Last War",
+      "enabled": false,
+      "source": "{USERPROFILE}\\Documents\\DnD\\books and docs\\Eberron -Rising from the Last War.pdf",
+      "canonical": "{USERPROFILE}\\Documents\\5e Character Builder\\custom\\supplements\\eberron-rising-from-the-last-war",
+      "sourceMeta": {
+        "name": "Eberron: Rising from the Last War",
+        "abbr": "WOTC_ERLW",
+        "author": "Wizards of the Coast",
+        "year": "2019"
+      },
+      "thresholds": {
+        "minExtractedTotal": 1,
+        "minMatched": 1,
+        "maxHighSeverity": 0
+      }
+    },
+    {
+      "name": "Fizban's Treasury of Dragons",
+      "enabled": false,
+      "source": "{USERPROFILE}\\Documents\\DnD\\books and docs\\Fizban's Treasury of Dragons [HQ] [OCR] [Bookmarked].pdf",
+      "canonical": "{USERPROFILE}\\Documents\\5e Character Builder\\custom\\supplements\\fizbans-treasury-of-dragons",
+      "sourceMeta": {
+        "name": "Fizban's Treasury of Dragons",
+        "abbr": "WOTC_FTOD",
+        "author": "Wizards of the Coast",
+        "year": "2021"
+      },
+      "thresholds": {
+        "minExtracted": {
+          "spell": 1,
+          "magic": 1
+        },
+        "minMatched": 2,
+        "maxUnmatched": 4,
+        "maxDifferent": 2,
+        "maxHighSeverity": 0
+      }
+    },
+    {
+      "name": "Guildmasters' Guide to Ravnica",
+      "enabled": false,
+      "source": "{USERPROFILE}\\Documents\\DnD\\books and docs\\Guildmasters_ Guide to Ravnica.pdf",
+      "canonical": "{USERPROFILE}\\Documents\\5e Character Builder\\custom\\supplements\\guildmasters-guide-to-ravnica",
+      "sourceMeta": {
+        "name": "Guildmasters' Guide to Ravnica",
+        "abbr": "WOTC_GGTR",
+        "author": "Wizards of the Coast",
+        "year": "2018"
+      },
+      "thresholds": {
+        "minExtractedTotal": 1,
+        "minMatched": 1,
+        "maxHighSeverity": 0
       }
     }
   ]

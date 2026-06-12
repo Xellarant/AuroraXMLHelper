@@ -10,6 +10,8 @@
   "types": ["spell", "archetype", "feat", "background"],
   "expected": {
     "ruleset": "2024",
+    "rulesetConfidence": "explicit-year",
+    "rulesetEvidence": ["Publication year 2025", "Epic Boon feat", "Magic action", "2024 upcast wording"],
     "counts": {
       "spell": 1,
       "archetype": 4,

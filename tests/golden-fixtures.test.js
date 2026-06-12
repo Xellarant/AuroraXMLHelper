@@ -22,16 +22,6 @@ function summarizeCounts(data) {
     .map(([type, items]) => [type, items.length]));
 }
 
-function test(name, fn) {
-  try {
-    fn();
-    console.log(`ok - ${name}`);
-  } catch (error) {
-    console.error(`not ok - ${name}`);
-    throw error;
-  }
-}
-
 for (const fixtureFile of listFixtureFiles()) {
   test(`golden fixture: ${path.basename(fixtureFile)}`, () => {
     const result = generateFromFixtureFile(fixtureFile);
@@ -40,6 +30,12 @@ for (const fixtureFile of listFixtureFiles()) {
 
     if (expected.ruleset) {
       assert.equal(result.meta.ruleset, expected.ruleset, 'ruleset');
+    }
+    if (expected.rulesetConfidence) {
+      assert.equal(result.meta.rulesetConfidence, expected.rulesetConfidence, 'ruleset confidence');
+    }
+    if (expected.rulesetEvidence) {
+      assert.deepEqual(result.meta.rulesetEvidence, expected.rulesetEvidence, 'ruleset evidence');
     }
     if (expected.counts) {
       assert.deepEqual(counts, expected.counts, 'extracted counts');

@@ -34,6 +34,7 @@ function createStubElement(value = '') {
 }
 
 function loadApp() {
+  const storage = {};
   const elements = {
     sourceName: createStubElement('Validator Sample Source'),
     sourceAbbr: createStubElement('VSS'),
@@ -62,8 +63,10 @@ function loadApp() {
   const window = {
     addEventListener() {},
     localStorage: {
-      getItem() { return null; },
-      setItem() {}
+      getItem(key) { return Object.prototype.hasOwnProperty.call(storage, key) ? storage[key] : null; },
+      setItem(key, value) { storage[key] = String(value); },
+      removeItem(key) { delete storage[key]; },
+      clear() { Object.keys(storage).forEach(key => delete storage[key]); }
     }
   };
 
@@ -97,16 +100,6 @@ function runInApp(context, code) {
 
 function setExtractedData(context, data) {
   runInApp(context, `extractedData = ${JSON.stringify(data)};`);
-}
-
-function test(name, fn) {
-  try {
-    fn();
-    console.log(`ok - ${name}`);
-  } catch (error) {
-    console.error(`not ok - ${name}`);
-    throw error;
-  }
 }
 
 test('leveled class and subclass features are not parsed as feats', () => {
@@ -148,6 +141,8 @@ test('browser namespace exposes parser and generator API', () => {
 
   assert.equal(typeof context.window.AuroraXMLHelper, 'object');
   assert.equal(typeof context.window.AuroraXMLHelper.parseFeatsFromText, 'function');
+  assert.equal(typeof context.window.AuroraXMLHelper.getSourceMeta, 'function');
+  assert.equal(typeof context.window.AuroraXMLHelper.detectModernRulesetSignals, 'function');
   assert.equal(typeof context.window.AuroraXMLHelper.generateXml, 'function');
 });
 
@@ -160,8 +155,14 @@ test('source ruleset defaults to 2014 unless year or 5.5e signal proves 2024', (
   runInApp(context, `document.getElementById('sourceYear').value = '2025';`);
   meta = JSON.parse(runInApp(context, 'JSON.stringify(getSourceMeta())'));
   assert.equal(meta.ruleset, '2024');
+  assert.equal(meta.rulesetConfidence, 'explicit-year');
+  assert.deepEqual(meta.rulesetEvidence, ['Publication year 2025']);
 
   assert.equal(runInApp(context, `detectModernRulesetSignal('This feature uses the Magic action.')`), 'Magic action');
+  assert.deepEqual(
+    JSON.parse(runInApp(context, `JSON.stringify(detectModernRulesetSignals('Level 19: Epic Boon. You can take the Magic action.'))`)),
+    ['Epic Boon feat', 'Magic action']
+  );
   assert.equal(runInApp(context, `detectModernRulesetSignal('This old feature uses an action.')`), '');
   assert.equal(runInApp(context, `detectModernRulesetSignal('This rule tells you to take the Search action.')`), '');
   assert.equal(runInApp(context, `detectModernRulesetSignal('Range: Self (10-foot Emanation)')`), 'Emanation area');
@@ -170,11 +171,15 @@ test('source ruleset defaults to 2014 unless year or 5.5e signal proves 2024', (
 
   runInApp(context, `
     document.getElementById('sourceYear').value = '2014';
-    detectSourceMetaFromText([{ page: 1, text: 'Copyright 2014\\nThis subclass uses the Magic action.' }]);
+    detectSourceMetaFromText([{ page: 1, text: 'Copyright 2014\\nThis subclass uses the Magic action. Level 19: Epic Boon.' }]);
   `);
   meta = JSON.parse(runInApp(context, 'JSON.stringify(getSourceMeta())'));
   assert.equal(meta.ruleset, '2024');
-  assert.equal(runInApp(context, `document.getElementById('sourceYear').dataset.rulesetEvidence`), 'Magic action');
+  assert.equal(meta.year, 2014);
+  assert.equal(meta.rulesetConfidence, '5.5e-signal');
+  assert.deepEqual(meta.rulesetEvidence, ['Epic Boon feat', 'Magic action']);
+  assert.match(meta.rulesetDecision, /Epic Boon feat/);
+  assert.equal(runInApp(context, `document.getElementById('sourceYear').dataset.rulesetEvidence`), 'Epic Boon feat|Magic action');
 });
 
 test('DDB-style feat blocks parse prerequisite and grouped benefits', () => {
@@ -198,6 +203,34 @@ test('DDB-style feat blocks parse prerequisite and grouped benefits', () => {
   assert.equal(feats[0].benefits.length, 3);
   assert.ok(feats[0].benefits[1].includes('you can roll 1d6'));
   assert.ok(!feats[0].benefits.join(' ').includes('ARTIST'));
+});
+
+test('2024 background blocks with feat rows are not parsed as feats', () => {
+  const context = loadApp();
+  const text = [
+    'House Vadalis Heir',
+    'You have grown up with respect for both family and nature.',
+    'Ability Scores: Constitution, Wisdom, Charisma',
+    'Feat: Mark of Handling',
+    'Skill Proficiencies: Animal Handling and Nature',
+    'Tool Proficiencies: Herbalism Kit',
+    'Equipment: Herbalism Kit, Fine Clothes, Net, 29 GP',
+    'Inquisitive',
+    'You have honed your talents of investigation and deduction.',
+    'Ability Scores: Constitution, Intelligence, Charisma',
+    'Feat: Alert',
+    'Skill Proficiencies: Insight and Investigation',
+    "Tool Proficiencies: Thieves' Tools",
+    "Equipment: Thieves' Tools, Bullseye Lantern, Crowbar, Traveler's Clothes, 10 GP"
+  ].join('\n');
+
+  const feats = context.parseFeatsFromText(text);
+  const backgrounds = context.parseBackgroundsFromText(text);
+
+  assert.equal(feats.length, 0);
+  assert.equal(backgrounds.length, 2);
+  assert.equal(backgrounds[0].feat, 'Mark of Handling');
+  assert.equal(backgrounds[1].feat, 'Alert');
 });
 
 test('Markdown-style DDB blocks parse headings and compact possessive ids', () => {
@@ -856,6 +889,99 @@ test('manual elements can be removed before export', () => {
   const xml = runInApp(context, 'generateXml()');
 
   assert.ok(!xml.includes('TEMPORARY_FEAT'));
+});
+
+test('review edits are one-off unless explicitly remembered', () => {
+  const context = loadApp();
+  const sampleData = {
+    spell: [{
+      name: 'Memory Spark',
+      school: 'Evocation',
+      level: 1,
+      castingTime: '1 Action',
+      range: '30 feet',
+      duration: 'Instantaneous',
+      hasVerbal: true,
+      hasSomatic: true,
+      hasMaterial: false,
+      isConcentration: false,
+      isRitual: false,
+      classes: ['Wizard'],
+      description: 'A brief flare of light.',
+      higherLevels: ''
+    }],
+    archetype: [],
+    item: [],
+    feat: [],
+    magic: [],
+    race: [],
+    background: [],
+    class: [],
+    other: []
+  };
+
+  setExtractedData(context, sampleData);
+  runInApp(context, `
+    captureGeneratedBaseline();
+    extractedData.spell[0].range = '60 feet';
+    extractedData = JSON.parse(JSON.stringify(generatedBaselineData));
+    captureGeneratedBaseline();
+    applyRememberedOverridesToExtractedData();
+  `);
+
+  const range = runInApp(context, `extractedData.spell[0].range`);
+  assert.equal(range, '30 feet');
+});
+
+test('remembered corrections opt in to future parse application and can be forgotten', () => {
+  const context = loadApp();
+  const sampleData = {
+    spell: [{
+      name: 'Memory Spark',
+      school: 'Evocation',
+      level: 1,
+      castingTime: '1 Action',
+      range: '30 feet',
+      duration: 'Instantaneous',
+      hasVerbal: true,
+      hasSomatic: true,
+      hasMaterial: false,
+      isConcentration: false,
+      isRitual: false,
+      classes: ['Wizard'],
+      description: 'A brief flare of light.',
+      higherLevels: ''
+    }],
+    archetype: [],
+    item: [],
+    feat: [],
+    magic: [],
+    race: [],
+    background: [],
+    class: [],
+    other: []
+  };
+
+  setExtractedData(context, sampleData);
+  runInApp(context, `
+    captureGeneratedBaseline();
+    extractedData.spell[0].range = '60 feet';
+    rememberOverride('spell-0');
+    extractedData = JSON.parse(JSON.stringify(generatedBaselineData));
+    captureGeneratedBaseline();
+  `);
+  const applied = runInApp(context, `applyRememberedOverridesToExtractedData()`);
+  assert.equal(applied, 1);
+  assert.equal(runInApp(context, `extractedData.spell[0].range`), '60 feet');
+
+  runInApp(context, `
+    forgetOverride('spell-0');
+    extractedData = JSON.parse(JSON.stringify(generatedBaselineData));
+    captureGeneratedBaseline();
+  `);
+  const appliedAfterForget = runInApp(context, `applyRememberedOverridesToExtractedData()`);
+  assert.equal(appliedAfterForget, 0);
+  assert.equal(runInApp(context, `extractedData.spell[0].range`), '30 feet');
 });
 
 test('manual authoring initializes empty data buckets', () => {

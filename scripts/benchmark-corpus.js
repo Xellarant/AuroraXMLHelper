@@ -22,7 +22,7 @@ const PARSERS = {
 function usage() {
   return [
     'Usage:',
-    '  node scripts/benchmark-corpus.js --source <text-or-md-file> --canonical <file-or-dir> [options]',
+    '  node scripts/benchmark-corpus.js --source <text-md-or-pdf-file> --canonical <file-or-dir> [options]',
     '',
     'Options:',
     '  --type <type>             Include one parser type. May be repeated. Defaults to all supported types.',
@@ -34,7 +34,7 @@ function usage() {
     '  --out <file>              Write a Markdown report to this path.',
     '  --json                    Print JSON instead of Markdown.',
     '',
-    'PDFs are intentionally not parsed by this script yet; feed OCR text, Markdown, or text extracted by another tool.'
+    'PDF sources use pdfjs-dist text extraction, matching the browser app as closely as possible.'
   ].join('\n');
 }
 
@@ -271,6 +271,93 @@ function compareRules(generated, canonical) {
   };
 }
 
+function splitSupportTokens(value) {
+  return normalizeSpace(value)
+    .split(/\s*(?:,|\|)\s*/)
+    .map(token => token.trim())
+    .filter(Boolean);
+}
+
+function compareTokenSets(generatedTokens, canonicalTokens) {
+  const generatedSet = new Set(generatedTokens.map(token => token.toLowerCase()));
+  const canonicalSet = new Set(canonicalTokens.map(token => token.toLowerCase()));
+  return {
+    missing: canonicalTokens.filter(token => !generatedSet.has(token.toLowerCase())),
+    extra: generatedTokens.filter(token => !canonicalSet.has(token.toLowerCase())),
+    same: generatedSet.size === canonicalSet.size && Array.from(generatedSet).every(token => canonicalSet.has(token))
+  };
+}
+
+function compareSupports(generated, canonical) {
+  if (generated === canonical) return null;
+  const generatedTokens = splitSupportTokens(generated);
+  const canonicalTokens = splitSupportTokens(canonical);
+  const tokenDiff = compareTokenSets(generatedTokens, canonicalTokens);
+  return {
+    generated,
+    canonical,
+    missing: tokenDiff.missing,
+    extra: tokenDiff.extra,
+    meaningful: !tokenDiff.same,
+    note: tokenDiff.same ? 'same support tokens in a different order or separator style' : ''
+  };
+}
+
+function classifySetterDiff(name) {
+  const key = String(name || '').toLowerCase();
+  if (['keywords', 'level', 'school', 'time', 'range', 'duration', 'components', 'material', 'isritual', 'isconcentration'].includes(key)) {
+    return 'spell-metadata';
+  }
+  if (['short', 'category', 'slot', 'cost', 'weight', 'rarity', 'type', 'armor', 'weapon'].includes(key)) {
+    return 'element-metadata';
+  }
+  return 'setter';
+}
+
+function classifyRuleSignature(signature) {
+  const kind = String(signature || '').split('|')[0] || 'rule';
+  if (kind === 'grant') return 'grant-rules';
+  if (kind === 'select') return 'choice-rules';
+  if (kind === 'stat') return 'stat-rules';
+  if (kind === 'append') return 'append-rules';
+  return 'rules';
+}
+
+function summarizeSemanticDiffs({ idDiff, supportsDiff, setterDiffs, rules }) {
+  const categories = new Set();
+  let severity = 'none';
+  const bump = next => {
+    const order = { none: 0, low: 1, medium: 2, high: 3 };
+    if (order[next] > order[severity]) severity = next;
+  };
+
+  if (idDiff) {
+    categories.add('id');
+    bump('high');
+  }
+  if (supportsDiff) {
+    categories.add('support-tags');
+    bump(supportsDiff.meaningful ? 'medium' : 'low');
+  }
+  for (const setter of setterDiffs) {
+    categories.add(classifySetterDiff(setter.name));
+    bump('medium');
+  }
+  for (const rule of rules.missing) {
+    categories.add(classifyRuleSignature(rule));
+    bump('high');
+  }
+  for (const rule of rules.extra) {
+    categories.add(classifyRuleSignature(rule));
+    bump('high');
+  }
+
+  return {
+    severity,
+    categories: Array.from(categories).sort()
+  };
+}
+
 function indexByKey(elements) {
   const index = new Map();
   for (const element of elements) {
@@ -301,10 +388,79 @@ function summarizeExtractedData(data) {
     .map(([type, items]) => [type, items.length]));
 }
 
-function benchmark(args) {
+function textItemsToLines(items) {
+  const rows = [];
+  for (const item of items) {
+    const y = Math.round((item.transform?.[5] || 0) * 2) / 2;
+    let row = rows.find(candidate => Math.abs(candidate.y - y) < 2);
+    if (!row) {
+      row = { y, items: [] };
+      rows.push(row);
+    }
+    row.items.push({ x: item.transform?.[4] || 0, str: item.str || '' });
+  }
+  return rows
+    .sort((a, b) => b.y - a.y)
+    .map(row => row.items
+      .sort((a, b) => a.x - b.x)
+      .map(item => item.str)
+      .join(' ')
+      .replace(/\s+/g, ' ')
+      .trim())
+    .filter(Boolean);
+}
+
+async function extractPdfPages(sourcePath) {
+  let pdfjsLib;
+  const shouldSuppressPdfJsWarning = args => /Cannot polyfill `(DOMMatrix|Path2D)`/.test(String(args[0] || ''));
+  const originalLog = console.log;
+  const originalWarn = console.warn;
+  const originalError = console.error;
+  try {
+    console.log = (...args) => { if (!shouldSuppressPdfJsWarning(args)) originalLog(...args); };
+    console.warn = (...args) => { if (!shouldSuppressPdfJsWarning(args)) originalWarn(...args); };
+    console.error = (...args) => { if (!shouldSuppressPdfJsWarning(args)) originalError(...args); };
+    pdfjsLib = require('pdfjs-dist/legacy/build/pdf.js');
+  } catch (error) {
+    throw new Error(`PDF source support requires pdfjs-dist and Node 20+: ${error.message}`);
+  } finally {
+    console.log = originalLog;
+    console.warn = originalWarn;
+    console.error = originalError;
+  }
+
+  pdfjsLib.GlobalWorkerOptions.workerSrc = '';
+  const data = new Uint8Array(fs.readFileSync(sourcePath));
+  const pdf = await pdfjsLib.getDocument({
+    data,
+    disableWorker: true,
+    standardFontDataUrl: path.join(repoRoot, 'node_modules', 'pdfjs-dist', 'standard_fonts') + path.sep
+  }).promise;
+  const pages = [];
+  for (let p = 1; p <= pdf.numPages; p++) {
+    const page = await pdf.getPage(p);
+    const content = await page.getTextContent();
+    pages.push({ page: p, text: textItemsToLines(content.items).join('\n') });
+  }
+  return pages;
+}
+
+async function readSource(sourcePath) {
+  if (/\.pdf$/i.test(sourcePath)) {
+    const pages = await extractPdfPages(sourcePath);
+    const text = pages.map(page => page.text).join('\n\n');
+    if (!text.trim()) throw new Error(`No selectable text was found in PDF source: ${sourcePath}`);
+    return { kind: 'pdf', pages, text };
+  }
+  const text = fs.readFileSync(sourcePath, 'utf8');
+  return { kind: 'text', pages: [{ page: 1, text }], text };
+}
+
+async function benchmark(args) {
   const sourcePath = path.resolve(args.source);
   if (!fs.existsSync(sourcePath)) throw new Error(`Source path does not exist: ${args.source}`);
-  const sourceText = fs.readFileSync(sourcePath, 'utf8');
+  const source = await readSource(sourcePath);
+  const sourceText = source.text;
   const sourceBase = path.basename(sourcePath, path.extname(sourcePath));
   const sourceMeta = {
     name: args.sourceName || sourceBase.replace(/[_-]/g, ' '),
@@ -313,7 +469,7 @@ function benchmark(args) {
     year: args.sourceYear || ''
   };
   const { context, elements } = loadApp(sourceMeta);
-  runInApp(context, `detectSourceMetaFromText([{ page: 1, text: ${JSON.stringify(sourceText)} }]);`);
+  runInApp(context, `detectSourceMetaFromText(${JSON.stringify(source.pages)});`);
   if (args.sourceName) elements.sourceName.value = args.sourceName;
   if (args.sourceAbbr) elements.sourceAbbr.value = args.sourceAbbr;
   if (args.sourceAuthor) elements.sourceAuthor.value = args.sourceAuthor;
@@ -338,18 +494,26 @@ function benchmark(args) {
     const canonical = candidates.find(candidate => candidate.id === element.id) || candidates[0];
     const setterDiffs = compareMaps(element.setters, canonical.setters);
     const rules = compareRules(element.rules, canonical.rules);
-    const supportsDiff = compareValues(element.supports, canonical.supports);
+    const supportsDiff = compareSupports(element.supports, canonical.supports);
+    const idDiff = compareValues(element.id, canonical.id);
+    const semantic = summarizeSemanticDiffs({ idDiff, supportsDiff, setterDiffs, rules });
     matches.push({
       generated: element,
       canonical,
+      idDiff,
       supportsDiff,
       setterDiffs,
       rules,
-      different: !!supportsDiff || setterDiffs.length > 0 || rules.missing.length > 0 || rules.extra.length > 0
+      semantic,
+      different: semantic.severity !== 'none'
     });
   }
+  const severityCounts = { high: 0, medium: 0, low: 0, none: 0 };
+  for (const match of matches) severityCounts[match.semantic.severity] += 1;
   return {
     source: sourcePath,
+    sourceKind: source.kind,
+    pageCount: source.pages.length,
     canonical: canonicalFiles,
     meta: generated.meta,
     extractedCounts: summarizeExtractedData(generated.data),
@@ -358,6 +522,8 @@ function benchmark(args) {
     matchedCount: matches.length,
     exactShapeMatches: matches.filter(match => !match.different).length,
     differentMatches: matches.filter(match => match.different).length,
+    severityCounts,
+    highSeverityMatches: severityCounts.high,
     unmatchedCount: unmatched.length,
     unmatched: unmatched.slice(0, 40).map(element => ({
       type: element.type,
@@ -373,6 +539,9 @@ function benchmark(args) {
         generatedId: match.generated.id,
         canonicalId: match.canonical.id,
         canonicalFile: match.canonical.fileName,
+        severity: match.semantic.severity,
+        categories: match.semantic.categories,
+        id: match.idDiff,
         supports: match.supportsDiff,
         setters: match.setterDiffs.slice(0, 12),
         missingRules: match.rules.missing.slice(0, 12),
@@ -389,13 +558,17 @@ function renderMarkdown(result) {
   lines.push('# Corpus Benchmark Report');
   lines.push('');
   lines.push(`- Source: \`${result.source}\``);
+  lines.push(`- Source kind: ${result.sourceKind}${result.pageCount ? ` (${result.pageCount} page${result.pageCount === 1 ? '' : 's'})` : ''}`);
   lines.push(`- Canonical files scanned: ${result.canonical.length}`);
   lines.push(`- Source ruleset: ${result.meta.ruleset}${result.meta.year ? ` (${result.meta.year})` : ''}`);
+  lines.push(`- Ruleset confidence: ${result.meta.rulesetConfidence || 'unknown'}`);
+  if (result.meta.rulesetEvidence?.length) lines.push(`- Ruleset evidence: ${result.meta.rulesetEvidence.join('; ')}`);
   lines.push(`- Extracted counts: ${Object.entries(result.extractedCounts).map(([type, count]) => `${type}=${count}`).join(', ') || 'none'}`);
   lines.push(`- Generated elements: ${result.generatedCount}`);
   lines.push(`- Matched canonical elements by name/type: ${result.matchedCount}`);
   lines.push(`- Exact shape matches among matched elements: ${result.exactShapeMatches}/${result.matchedCount} (${pct}%)`);
   lines.push(`- Differing matched elements: ${result.differentMatches}`);
+  lines.push(`- Difference severity: high=${result.severityCounts.high}, medium=${result.severityCounts.medium}, low=${result.severityCounts.low}`);
   lines.push(`- Unmatched generated elements: ${result.unmatchedCount}`);
   lines.push('');
   if (result.matches.length) {
@@ -406,8 +579,16 @@ function renderMarkdown(result) {
       lines.push(`- Generated ID: \`${match.generatedId}\``);
       lines.push(`- Canonical ID: \`${match.canonicalId}\``);
       lines.push(`- Canonical file: \`${match.canonicalFile}\``);
+      lines.push(`- Severity: ${match.severity}`);
+      if (match.categories.length) lines.push(`- Categories: ${match.categories.join(', ')}`);
+      if (match.id) {
+        lines.push(`- ID: generated \`${match.id.generated}\`, canonical \`${match.id.canonical}\``);
+      }
       if (match.supports) {
         lines.push(`- Supports: generated \`${match.supports.generated}\`, canonical \`${match.supports.canonical}\``);
+        if (match.supports.note) lines.push(`- Supports note: ${match.supports.note}`);
+        if (match.supports.missing.length) lines.push(`- Missing support tags: ${match.supports.missing.map(tag => `\`${tag}\``).join(', ')}`);
+        if (match.supports.extra.length) lines.push(`- Extra support tags: ${match.supports.extra.map(tag => `\`${tag}\``).join(', ')}`);
       }
       for (const setter of match.setters) {
         lines.push(`- Setter \`${setter.name}\`: generated \`${setter.generated}\`, canonical \`${setter.canonical}\``);
@@ -428,10 +609,10 @@ function renderMarkdown(result) {
   return lines.join('\n');
 }
 
-function main() {
+async function main() {
   try {
     const args = parseArgs(process.argv.slice(2));
-    const result = benchmark(args);
+    const result = await benchmark(args);
     const output = args.json ? JSON.stringify(result, null, 2) : renderMarkdown(result);
     if (args.out) {
       fs.mkdirSync(path.dirname(path.resolve(args.out)), { recursive: true });
@@ -453,5 +634,7 @@ if (require.main === module) {
 module.exports = {
   ELEMENT_TYPES,
   benchmark,
-  renderMarkdown
+  renderMarkdown,
+  compareSupports,
+  summarizeSemanticDiffs
 };

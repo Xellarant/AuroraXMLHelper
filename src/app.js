@@ -7,6 +7,9 @@ let skippedItems = []; // items filtered out for being < 80% complete
 let apiKey = '';
 let useOllama = false;
 let ollamaModel = 'qwen3:8b';
+let generatedBaselineData = {};
+const OVERRIDE_STORAGE_KEY = 'aurora_xml_helper_overrides_v1';
+let rememberedOverrides = loadRememberedOverrides();
 
 const TYPE_LABELS = {
   spell: 'Spells',
@@ -48,7 +51,7 @@ function toggleOllama(on) {
   localStorage.setItem('use_ollama', on ? 'true' : 'false');
   document.getElementById('ollamaSection').classList.toggle('hidden', !on);
   document.getElementById('geminiSection').style.opacity = on ? '0.4' : '1';
-  document.getElementById('keyStatus').textContent = on ? 'âœ“ Using Ollama' : (apiKey ? 'âœ“ API key saved' : 'âš  API key not set');
+  document.getElementById('keyStatus').textContent = on ? 'OK: Using Ollama' : (apiKey ? 'OK: API key saved' : 'API key not set');
   document.getElementById('keyStatus').className = on ? 'key-set' : (apiKey ? 'key-set' : 'key-unset');
   checkExtractReady();
 }
@@ -76,12 +79,12 @@ async function testOllama() {
     const found = models.some(m => m.startsWith(ollamaModel.split(':')[0]));
     resultEl.className = 'alert alert-success';
     resultEl.textContent = found
-      ? `âœ“ Connected. Model "${ollamaModel}" found.`
-      : `âœ“ Connected. Note: "${ollamaModel}" not found. Available: ${models.slice(0,5).join(', ')}${models.length > 5 ? '...' : ''}`;
+      ? `Connected. Model "${ollamaModel}" found.`
+      : `Connected. Note: "${ollamaModel}" not found. Available: ${models.slice(0,5).join(', ')}${models.length > 5 ? '...' : ''}`;
     resultEl.classList.remove('hidden');
   } catch(e) {
     resultEl.className = 'alert alert-error';
-    resultEl.textContent = `âœ— Could not reach Ollama at localhost:11434 â€” ${e.message}`;
+    resultEl.textContent = `Could not reach Ollama at localhost:11434 - ${e.message}`;
     resultEl.classList.remove('hidden');
   } finally {
     btn.disabled = false;
@@ -121,7 +124,7 @@ async function extractTextFromChunk(uint8Array) {
 }
 
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// Ollama raw call â€” mirrors geminiRaw shape
+// Ollama raw call - mirrors geminiRaw shape
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function ollamaRaw(textContent, promptText) {
   const body = {
@@ -135,7 +138,7 @@ async function ollamaRaw(textContent, promptText) {
   for (let attempt = 0; attempt < 4; attempt++) {
     if (attempt > 0) {
       const waitSec = [10, 20, 40][attempt - 1];
-      setProgress(null, `Ollama busy â€” retrying in ${waitSec}s (${attempt}/3)...`);
+      setProgress(null, `Ollama busy - retrying in ${waitSec}s (${attempt}/3)...`);
       await new Promise(r => setTimeout(r, waitSec * 1000));
     }
     try {
@@ -168,7 +171,7 @@ function toggleKeyVisibility() {
   const btn = document.getElementById('keyVisBtn');
   const isHidden = input.type === 'password';
   input.type = isHidden ? 'text' : 'password';
-  btn.textContent = isHidden ? 'ðŸ™ˆ' : 'ðŸ‘';
+  btn.textContent = isHidden ? 'Hide' : 'Show';
   btn.title = isHidden ? 'Hide key' : 'Show key';
 }
 
@@ -179,7 +182,7 @@ function saveKey() {
   localStorage.setItem('gemini_api_key', val);
   setKeyStatus(true);
   checkExtractReady();
-  showKeyTestResult(true, 'âœ“ Key saved. Use Test Key to verify it works.');
+  showKeyTestResult(true, 'Key saved. Use Test Key to verify it works.');
 }
 
 function setKeyStatus(ok) {
@@ -203,14 +206,14 @@ async function testKey() {
     );
     const data = await resp.json();
     if (!resp.ok) throw new Error(data.error?.message || `HTTP ${resp.status}`);
-    showKeyTestResult(true, 'âœ“ Key is valid and working.');
+    showKeyTestResult(true, 'Key is valid and working.');
     // Auto-save if test passes
     apiKey = val;
     localStorage.setItem('gemini_api_key', val);
     setKeyStatus(true);
     checkExtractReady();
   } catch(err) {
-    showKeyTestResult(false, 'âœ— ' + err.message);
+    showKeyTestResult(false, 'Error: ' + err.message);
   } finally {
     btn.disabled = false;
     btn.textContent = 'Test Key';
@@ -249,8 +252,8 @@ function setFile(f) {
   const warn = document.getElementById('fileSizeWarning');
   if (mb > 30) {
     warn.textContent = mb > 80
-      ? `Warning: very large file (${mb.toFixed(0)} MB) â€” local text parsing may take several minutes. A manual page range is recommended.`
-      : `Note: large file (${mb.toFixed(0)} MB) â€” local text parsing will scan the full PDF unless you provide a page range.`;
+      ? `Warning: very large file (${mb.toFixed(0)} MB) - local text parsing may take several minutes. A manual page range is recommended.`
+      : `Note: large file (${mb.toFixed(0)} MB) - local text parsing will scan the full PDF unless you provide a page range.`;
     warn.className = mb > 80 ? 'alert alert-warning' : 'alert alert-info';
     warn.classList.remove('hidden');
   } else {
@@ -271,6 +274,7 @@ function setFile(f) {
   autoFillAbbr(nameVal);
   // Clear author so it gets re-detected for this file
   document.getElementById('sourceAuthor').value = '';
+  updateSourceRulesetDecisionDisplay();
   checkExtractReady();
 }
 
@@ -280,6 +284,9 @@ function clearFile() {
   document.getElementById('fileInfo').classList.add('hidden');
   document.getElementById('fileSizeWarning')?.classList.add('hidden');
   document.getElementById('uploadZone').classList.remove('hidden');
+  const yearEl = document.getElementById('sourceYear');
+  if (yearEl) delete yearEl.dataset.rulesetEvidence;
+  updateSourceRulesetDecisionDisplay();
   checkExtractReady();
 }
 
@@ -417,7 +424,7 @@ async function splitPdfIntoChunks(file, progressCallback) {
   }
   const totalPages = srcDoc.getPageCount();
   if (totalPages === 0) throw new Error('PDF reports 0 pages');
-  progressCallback(`PDF has ${totalPages} pages â€” splitting into chunks of ${PAGES_PER_CHUNK}...`, 0.04);
+  progressCallback(`PDF has ${totalPages} pages - splitting into chunks of ${PAGES_PER_CHUNK}...`, 0.04);
 
   const chunks = [];
   for (let start = 0; start < totalPages; start += PAGES_PER_CHUNK) {
@@ -428,7 +435,7 @@ async function splitPdfIntoChunks(file, progressCallback) {
     pages.forEach(p => chunkDoc.addPage(p));
     const bytes = await chunkDoc.save();
     chunks.push({ bytes, startPage: start + 1, endPage: end, totalPages });
-    progressCallback(`Chunking pages ${start+1}â€“${end} of ${totalPages}...`, 0.04 + (end / totalPages) * 0.04);
+    progressCallback(`Chunking pages ${start + 1}-${end} of ${totalPages}...`, 0.04 + (end / totalPages) * 0.04);
   }
 
   progressCallback(`Split into ${chunks.length} chunk(s).`, 0.08);
@@ -633,11 +640,11 @@ function detectSourceMetaFromText(pages) {
   const year = inferPublicationYear(firstLines.join(' '));
   const yearEl = document.getElementById('sourceYear');
   if (year && yearEl && !yearEl.value.trim()) yearEl.value = String(year);
-  const modernSignal = detectModernRulesetSignal(allText);
-  if (modernSignal && yearEl && (parsePublicationYear(yearEl.value) || 0) < 2024) {
-    yearEl.value = '2024';
-    yearEl.dataset.rulesetEvidence = modernSignal;
+  const modernSignals = detectModernRulesetSignals(allText);
+  if (modernSignals.length && yearEl) {
+    yearEl.dataset.rulesetEvidence = modernSignals.join('|');
   }
+  updateSourceRulesetDecisionDisplay();
 }
 
 function normalizeTextLines(text) {
@@ -803,6 +810,7 @@ function featStartInfo(lines, i) {
     return { name, prerequisite, bodyStart: i + 1 + (prerequisite ? 1 : 0) };
   }
   if (!looksLikeTitle(line) || isRejectedFeatTitle(line) || /:/.test(line)) return null;
+  if (looksLikeBackgroundStatBlockAhead(lines, i)) return null;
   const featKind = next.match(/^(?:(?:General|Origin|Epic Boon|Fighting Style|Dragonmark)\s+)?Feat(?:\s*\(([^)]*)\)|\s*$)/i);
   if (featKind) {
     const prerequisite = (featKind[1]?.match(/Prerequisite:\s*(.+)$/i) || [])[1]?.trim() || '';
@@ -813,6 +821,18 @@ function featStartInfo(lines, i) {
     return { name: normalizeExtractedName(line), prerequisite, bodyStart: i + 1 + (prerequisite ? 1 : 0) };
   }
   return null;
+}
+
+function looksLikeBackgroundStatBlockAhead(lines, i) {
+  const block = [];
+  for (let j = i + 1; j < Math.min(lines.length, i + 16); j++) {
+    if (isSectionHeading(lines[j])) break;
+    block.push(lines[j]);
+  }
+  const lookahead = block.join('\n');
+  const hasBackgroundRows = /^(Ability Scores?|Skill Proficiencies|Tool Proficienc(?:y|ies)|Equipment):/im.test(lookahead);
+  const hasFeatRow = /^Feat:\s*\S/im.test(lookahead);
+  return hasBackgroundRows && hasFeatRow;
 }
 
 function isRejectedFeatTitle(title) {
@@ -1742,8 +1762,108 @@ function ensureExtractedDataBuckets() {
   return extractedData;
 }
 
+function cloneData(value) {
+  return JSON.parse(JSON.stringify(value ?? null));
+}
+
+function normalizeForCompare(value) {
+  if (Array.isArray(value)) return value.map(normalizeForCompare);
+  if (!value || typeof value !== 'object') return value;
+  return Object.keys(value)
+    .filter(key => !key.startsWith('_'))
+    .sort()
+    .reduce((out, key) => {
+      out[key] = normalizeForCompare(value[key]);
+      return out;
+    }, {});
+}
+
+function sameGeneratedShape(a, b) {
+  return JSON.stringify(normalizeForCompare(a)) === JSON.stringify(normalizeForCompare(b));
+}
+
+function loadRememberedOverrides() {
+  try {
+    return JSON.parse(localStorage.getItem(OVERRIDE_STORAGE_KEY) || '{}') || {};
+  } catch {
+    return {};
+  }
+}
+
+function saveRememberedOverrides() {
+  try {
+    localStorage.setItem(OVERRIDE_STORAGE_KEY, JSON.stringify(rememberedOverrides));
+  } catch (err) {
+    console.warn('Could not save remembered overrides:', err.message);
+  }
+}
+
+function overrideKeyForItem(type, item, meta = getSourceMeta()) {
+  return [
+    meta.prefix,
+    idify(meta.name),
+    type,
+    idify(item?.name || 'UNNAMED')
+  ].join('::');
+}
+
+function captureGeneratedBaseline() {
+  ensureExtractedDataBuckets();
+  generatedBaselineData = cloneData(extractedData) || {};
+  ELEMENT_TYPES.forEach(type => {
+    if (!Array.isArray(generatedBaselineData[type])) generatedBaselineData[type] = [];
+  });
+}
+
+function appendGeneratedBaselineItems(type, items) {
+  if (!Array.isArray(generatedBaselineData[type])) generatedBaselineData[type] = [];
+  generatedBaselineData[type].push(...cloneData(items || []));
+}
+
+function overrideKeyForIndex(type, index) {
+  const baseline = generatedBaselineData[type]?.[index];
+  const current = extractedData[type]?.[index];
+  if (!baseline && !current) return '';
+  return overrideKeyForItem(type, baseline || current);
+}
+
+function applyRememberedOverrideAt(type, index) {
+  const key = overrideKeyForIndex(type, index);
+  const override = key ? rememberedOverrides[key] : null;
+  if (!override?.item || !extractedData[type]?.[index]) return false;
+  extractedData[type][index] = cloneData(override.item);
+  return true;
+}
+
+function applyRememberedOverridesToExtractedData() {
+  ensureExtractedDataBuckets();
+  let applied = 0;
+  for (const type of ELEMENT_TYPES) {
+    const items = extractedData[type] || [];
+    for (let i = 0; i < items.length; i++) {
+      if (applyRememberedOverrideAt(type, i)) applied++;
+    }
+  }
+  return applied;
+}
+
+function isEditedFromGenerated(type, index) {
+  const baseline = generatedBaselineData[type]?.[index];
+  const current = extractedData[type]?.[index];
+  if (!baseline || !current) return false;
+  return !sameGeneratedShape(current, baseline);
+}
+
+function hasRememberedOverride(type, index) {
+  const key = overrideKeyForIndex(type, index);
+  return !!(key && rememberedOverrides[key]);
+}
+
 function startManualAuthoring() {
   ensureExtractedDataBuckets();
+  if (!Object.values(generatedBaselineData).some(items => Array.isArray(items) && items.length)) {
+    captureGeneratedBaseline();
+  }
   skippedItems = [];
   document.getElementById('stepReview').classList.remove('hidden');
   document.getElementById('extractProgress').classList.add('hidden');
@@ -1781,19 +1901,24 @@ async function startExtraction() {
   ensureExtractedDataBuckets();
 
   skippedItems = filterIncomplete();
+  captureGeneratedBaseline();
+  const appliedOverrides = applyRememberedOverridesToExtractedData();
 
   setProgress(100, 'Parsing complete.');
   document.getElementById('extractSpinner').classList.add('hidden');
   document.getElementById('extractBtn').disabled = false;
 
   const deterministicBannerParts = [];
-  if (errors.length) deterministicBannerParts.push(...errors.map(e => 'â€¢ ' + e));
+  if (errors.length) deterministicBannerParts.push(...errors.map(e => '- ' + e));
   if (skippedItems.length) {
-    deterministicBannerParts.push(`â€¢ ${skippedItems.length} element(s) skipped â€” below 80% complete (see skipped-elements.txt in ZIP)`);
+    deterministicBannerParts.push(`- ${skippedItems.length} element(s) skipped - below 80% complete (see skipped-elements.txt in ZIP)`);
   }
   const unsupportedTypes = types.filter(t => !DETERMINISTIC_PARSERS[t]);
   if (unsupportedTypes.length) {
-    deterministicBannerParts.push(`â€¢ Rule parsers are not implemented yet for: ${unsupportedTypes.map(t => TYPE_LABELS[t] || t).join(', ')}`);
+    deterministicBannerParts.push(`- Rule parsers are not implemented yet for: ${unsupportedTypes.map(t => TYPE_LABELS[t] || t).join(', ')}`);
+  }
+  if (appliedOverrides) {
+    deterministicBannerParts.push(`- Applied ${appliedOverrides} remembered correction${appliedOverrides === 1 ? '' : 's'}.`);
   }
   if (deterministicBannerParts.length) {
     const errEl = document.getElementById('extractErrors');
@@ -1822,10 +1947,10 @@ async function startExtraction() {
       setProgress(8, `Split into ${pdfChunks.length} chunk(s) of ${PAGES_PER_CHUNK} pages.`);
       await new Promise(r => setTimeout(r, 400));
     } catch(e) {
-      // pdf-lib couldn't parse this PDF â€” fall back to sending it inline as one piece.
+      // pdf-lib couldn't parse this PDF - fall back to sending it inline as one piece.
       // This may hit token limits on very large files but is better than hard-failing.
       console.warn('PDF splitting failed, falling back to single inline chunk:', e.message);
-      setProgress(8, `PDF splitting unavailable (${e.message.slice(0,60)}) â€” sending as single file.`);
+      setProgress(8, `PDF splitting unavailable (${e.message.slice(0,60)}) - sending as single file.`);
       await new Promise(r => setTimeout(r, 600));
       pdfChunks = null;
       try {
@@ -1837,7 +1962,7 @@ async function startExtraction() {
         document.getElementById('extractBtn').disabled = false;
         const errEl = document.getElementById('extractErrors');
         errEl.className = 'alert alert-error';
-        errEl.innerHTML = '<strong>Error:</strong><br>' + errors.map(e => 'â€¢ ' + e).join('<br>');
+        errEl.innerHTML = '<strong>Error:</strong><br>' + errors.map(e => '- ' + e).join('<br>');
         errEl.classList.remove('hidden');
         return;
       }
@@ -1853,7 +1978,7 @@ async function startExtraction() {
   };
   const firstChunkBase64 = getChunkBase64(0);
 
-  // TOC pass â€” use first chunk (always contains cover/TOC) if no manual range and file > 5MB
+  // TOC pass - use first chunk (always contains cover/TOC) if no manual range and file > 5MB
   if (!manualRange && fileSizeMB > 5) {
     setProgress(9, 'Reading table of contents...');
     discoveredPageRanges = await discoverPageRanges(firstChunkBase64, false, setProgress);
@@ -1861,10 +1986,10 @@ async function startExtraction() {
     const found = Object.keys(discoveredPageRanges);
     if (found.length > 0) {
       const rangeList = found.map(k => `${TYPE_LABELS[k] || k}: p.${discoveredPageRanges[k]}`).join(', ');
-      setProgress(13, `TOC read â€” found: ${rangeList}`);
+      setProgress(13, `TOC read - found: ${rangeList}`);
       await new Promise(r => setTimeout(r, 800));
     } else {
-      setProgress(13, 'No TOC found â€” will search all chunks');
+      setProgress(13, 'No TOC found - will search all chunks');
       await new Promise(r => setTimeout(r, 400));
     }
   }
@@ -1902,9 +2027,9 @@ async function startExtraction() {
   document.getElementById('extractBtn').disabled = false;
 
   const bannerParts = [];
-  if (errors.length) bannerParts.push(...errors.map(e => 'â€¢ ' + e));
+  if (errors.length) bannerParts.push(...errors.map(e => '- ' + e));
   if (skippedItems.length) {
-    bannerParts.push(`â€¢ ${skippedItems.length} element(s) skipped â€” below 80% complete (see skipped-elements.txt in ZIP)`);
+    bannerParts.push(`- ${skippedItems.length} element(s) skipped - below 80% complete (see skipped-elements.txt in ZIP)`);
   }
   if (bannerParts.length) {
     const errEl = document.getElementById('extractErrors');
@@ -1940,7 +2065,7 @@ async function geminiRaw(base64, isUri, promptText) {
   for (let attempt = 0; attempt < 4; attempt++) {
     if (attempt > 0) {
       const waitSec = [15, 30, 60][attempt - 1];
-      setProgress(null, `Rate limit hit â€” waiting ${waitSec}s before retry ${attempt}/3...`);
+      setProgress(null, `Rate limit hit - waiting ${waitSec}s before retry ${attempt}/3...`);
       await new Promise(r => setTimeout(r, waitSec * 1000));
     }
     const resp = await fetch(
@@ -1950,7 +2075,7 @@ async function geminiRaw(base64, isUri, promptText) {
     if (resp.ok) {
       const data = await resp.json();
       if (data.promptFeedback?.blockReason) throw new Error(`Blocked: ${data.promptFeedback.blockReason}`);
-      if (!data.candidates?.length) throw new Error('No candidates returned â€” PDF may be too large or response was filtered.');
+      if (!data.candidates?.length) throw new Error('No candidates returned - PDF may be too large or response was filtered.');
       const candidate = data.candidates[0];
       const text = candidate?.content?.parts?.[0]?.text || '';
       if (!text) throw new Error('Empty response from Gemini.');
@@ -2015,7 +2140,7 @@ async function callModel(pdfChunks, smallBase64, type, progressCallback) {
     const chunkIdx = chunksToProcess[ci];
     const base64 = pdfChunks ? uint8ToBase64(pdfChunks[chunkIdx].bytes) : smallBase64;
     const chunkInfo = pdfChunks
-      ? ` (pages ${pdfChunks[chunkIdx].startPage}â€“${pdfChunks[chunkIdx].endPage} of ${pdfChunks[chunkIdx].totalPages})`
+      ? ` (pages ${pdfChunks[chunkIdx].startPage}-${pdfChunks[chunkIdx].endPage} of ${pdfChunks[chunkIdx].totalPages})`
       : '';
     const pct = 0.1 + (ci / chunksToProcess.length) * 0.7;
 
@@ -2035,8 +2160,8 @@ async function callModel(pdfChunks, smallBase64, type, progressCallback) {
     }
 
     if (truncated) {
-      console.warn(`Chunk ${chunkIdx} truncated for ${type} â€” splitting alphabetically`);
-      progressCallback(`${label} chunk too large â€” retrying in halves...`, pct + 0.05);
+      console.warn(`Chunk ${chunkIdx} truncated for ${type} - splitting alphabetically`);
+      progressCallback(`${label} chunk too large - retrying in halves...`, pct + 0.05);
       const halves = [
         prompt + '\nOnly include elements whose name starts with A through M.',
         prompt + '\nOnly include elements whose name starts with N through Z.'
@@ -2169,6 +2294,7 @@ function buildPanelHTML(type, items) {
         <span class="element-type-badge">${escHtml(badge)}</span>
       </div>
       <div class="element-card-body" id="body-${type}-${i}">
+        ${buildOverrideControls(type, i)}
         <div style="display:flex; justify-content:flex-end; margin-bottom:0.75rem;">
           <button class="btn btn-secondary" style="font-size:0.7rem; padding:0.3rem 0.75rem;" onclick="removeElement('${type}-${i}', event)">Remove Element</button>
         </div>
@@ -2176,6 +2302,30 @@ function buildPanelHTML(type, items) {
       </div>
     </div>`;
   }).join('');
+}
+
+function overrideStatusText(type, index) {
+  const edited = isEditedFromGenerated(type, index);
+  const remembered = hasRememberedOverride(type, index);
+  if (remembered && edited) return 'Remembered correction will apply on future parses.';
+  if (remembered) return 'Remembered correction exists for this generated element.';
+  if (edited) return 'Edited for this export only. Click Remember Correction to reuse it later.';
+  return 'Matches generated parser output. Edits are one-off until remembered.';
+}
+
+function buildOverrideControls(type, index) {
+  const id = `${type}-${index}`;
+  const edited = isEditedFromGenerated(type, index);
+  const remembered = hasRememberedOverride(type, index);
+  return `
+    <div class="override-controls" id="override-controls-${id}">
+      <span class="override-status" id="override-status-${id}">${escHtml(overrideStatusText(type, index))}</span>
+      <span class="override-actions">
+        <button class="btn btn-secondary" id="remember-${id}" style="font-size:0.68rem; padding:0.25rem 0.65rem;" onclick="rememberOverride('${id}', event)" ${edited ? '' : 'disabled'}>Remember Correction</button>
+        <button class="btn btn-secondary" id="forget-${id}" style="font-size:0.68rem; padding:0.25rem 0.65rem;" onclick="forgetOverride('${id}', event)" ${remembered ? '' : 'disabled'}>Forget</button>
+        <button class="btn btn-secondary" id="revert-${id}" style="font-size:0.68rem; padding:0.25rem 0.65rem;" onclick="revertToGenerated('${id}', event)" ${edited ? '' : 'disabled'}>Revert to Generated</button>
+      </span>
+    </div>`;
 }
 
 
@@ -2323,10 +2473,10 @@ function buildFeatFields(feat, id) {
   const benefitsHtml = benefits.length
     ? benefits.map((b, bi) => `
         <div style="display:flex; gap:8px; align-items:flex-start; margin-bottom:6px;">
-          <span style="color:var(--gold); font-size:1.1rem; line-height:1.5; flex-shrink:0;">â€¢</span>
+          <span style="color:var(--gold); font-size:1.1rem; line-height:1.5; flex-shrink:0;">&bull;</span>
           <textarea rows="2" style="flex:1; margin-bottom:0;" data-field="benefits.${bi}" data-id="${id}" onchange="updateBenefit(this)">${escHtml(b)}</textarea>
         </div>`).join('')
-    : '<p class="text-muted" style="font-size:0.85rem;">No benefits extracted â€” check the PDF and add manually if needed.</p>';
+    : '<p class="text-muted" style="font-size:0.85rem;">No benefits extracted - check the PDF and add manually if needed.</p>';
   return `
     <div class="field-row">
       <div><label>Name</label><input type="text" value="${escAttr(feat.name)}" data-field="name" data-id="${id}" onchange="updateField(this)" /></div>
@@ -2503,6 +2653,7 @@ function updateFieldBool(el) {
   const { type, index } = parseId(el.dataset.id);
   extractedData[type][index][el.dataset.field] = el.checked;
   markChanged();
+  updateOverrideStatusForId(el.dataset.id);
 }
 
 function updateFieldArr(el) {
@@ -2558,7 +2709,7 @@ function parseFeatFullText(feat) {
   }
 
   // Split on common bullet markers Gemini uses
-  const bulletRe = /(?:^|\n)\s*(?:[â€¢\-\*]|\d+[.)])\s+/m;
+  const bulletRe = /(?:^|\n)\s*(?:[\u2022\-\*]|\d+[.)])\s+/m;
 
   if (!bulletRe.test(raw)) {
     const lines = raw.split(/\n+/).map(s => s.trim()).filter(Boolean);
@@ -2589,7 +2740,7 @@ function parseFeatFullText(feat) {
   const bulletSection = raw.slice(firstBullet);
 
   const bullets = bulletSection
-    .split(/(?:^|\n)\s*(?:[â€¢\-\*]|\d+[.)])\s+/m)
+    .split(/(?:^|\n)\s*(?:[\u2022\-\*]|\d+[.)])\s+/m)
     .map(s => s.trim())
     .filter(Boolean);
 
@@ -2633,6 +2784,69 @@ function updateNestedField(el) {
   flashField(el);
 }
 
+function updateOverrideStatusForId(id) {
+  if (!id) return;
+  const { type, index } = parseId(id);
+  const status = document.getElementById(`override-status-${id}`);
+  if (status) status.textContent = overrideStatusText(type, index);
+  const edited = isEditedFromGenerated(type, index);
+  const remembered = hasRememberedOverride(type, index);
+  const rememberBtn = document.getElementById(`remember-${id}`);
+  const forgetBtn = document.getElementById(`forget-${id}`);
+  const revertBtn = document.getElementById(`revert-${id}`);
+  if (rememberBtn) rememberBtn.disabled = !edited;
+  if (forgetBtn) forgetBtn.disabled = !remembered;
+  if (revertBtn) revertBtn.disabled = !edited;
+}
+
+function rememberOverride(id, event) {
+  if (event?.stopPropagation) event.stopPropagation();
+  const { type, index } = parseId(id);
+  const key = overrideKeyForIndex(type, index);
+  const current = extractedData[type]?.[index];
+  const baseline = generatedBaselineData[type]?.[index];
+  if (!key || !current || !baseline || !isEditedFromGenerated(type, index)) {
+    updateOverrideStatusForId(id);
+    return;
+  }
+  const meta = getSourceMeta();
+  rememberedOverrides[key] = {
+    type,
+    sourceName: meta.name,
+    sourceAbbr: meta.abbr,
+    originalName: baseline.name || '',
+    savedAt: new Date().toISOString(),
+    item: cloneData(current)
+  };
+  saveRememberedOverrides();
+  updateOverrideStatusForId(id);
+  setManualAuthorStatus(`Remembered correction for ${current.name || baseline.name || TYPE_LABELS[type] || type}.`, 'success');
+}
+
+function forgetOverride(id, event) {
+  if (event?.stopPropagation) event.stopPropagation();
+  const { type, index } = parseId(id);
+  const key = overrideKeyForIndex(type, index);
+  if (key && rememberedOverrides[key]) {
+    delete rememberedOverrides[key];
+    saveRememberedOverrides();
+  }
+  updateOverrideStatusForId(id);
+  setManualAuthorStatus('Forgot saved correction. Current edits remain one-off for this export.', 'info');
+}
+
+function revertToGenerated(id, event) {
+  if (event?.stopPropagation) event.stopPropagation();
+  const { type, index } = parseId(id);
+  const baseline = generatedBaselineData[type]?.[index];
+  if (!baseline || !extractedData[type]?.[index]) return;
+  extractedData[type][index] = cloneData(baseline);
+  buildReviewUI(type);
+  openElementCard(type, index);
+  markChanged();
+  setManualAuthorStatus('Reverted current element to generated parser output.', 'info');
+}
+
 
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Change tracking
@@ -2659,6 +2873,7 @@ function flashField(el) {
   el.classList.add('field-saved');
   setTimeout(() => el.classList.remove('field-saved'), 1200);
   markChanged();
+  updateOverrideStatusForId(el.dataset.id);
 }
 
 function normalizeManualType(type) {
@@ -2769,6 +2984,8 @@ function addManualElement(typeOverride = '', itemOverride = null) {
   ensureExtractedDataBuckets();
   extractedData[type].push(item);
   const index = extractedData[type].length - 1;
+  appendGeneratedBaselineItems(type, [item]);
+  applyRememberedOverrideAt(type, index);
   buildReviewUI(type);
   openElementCard(type, index);
   setManualAuthorStatus(`Added entry #${index + 1} to ${TYPE_LABELS[type] || type}.`, 'info');
@@ -2789,6 +3006,8 @@ function parseManualSection() {
   ensureExtractedDataBuckets();
   const firstIndex = extractedData[type].length;
   extractedData[type].push(...parsed);
+  appendGeneratedBaselineItems(type, parsed);
+  for (let i = firstIndex; i < firstIndex + parsed.length; i++) applyRememberedOverrideAt(type, i);
   buildReviewUI(type);
   openElementCard(type, firstIndex);
   setManualAuthorStatus(`Added ${parsed.length} entr${parsed.length === 1 ? 'y' : 'ies'} to ${TYPE_LABELS[type] || type}.`, 'info');
@@ -2802,6 +3021,7 @@ function removeElement(id, event) {
   const item = extractedData[type][index];
   if (!confirm(`Remove ${item.name || TYPE_LABELS[type] || type}?`)) return;
   extractedData[type].splice(index, 1);
+  if (Array.isArray(generatedBaselineData[type])) generatedBaselineData[type].splice(index, 1);
   buildReviewUI(type);
   setManualAuthorStatus('Element removed.', 'info');
   markChanged();
@@ -2837,12 +3057,13 @@ function addBenefit(id) {
   if (container) {
     const div = document.createElement('div');
     div.style.cssText = 'display:flex; gap:8px; align-items:flex-start; margin-bottom:6px;';
-    div.innerHTML = `<span style="color:var(--gold); font-size:1.1rem; line-height:1.5; flex-shrink:0;">â€¢</span>
+    div.innerHTML = `<span style="color:var(--gold); font-size:1.1rem; line-height:1.5; flex-shrink:0;">&bull;</span>
       <textarea rows="2" style="flex:1; margin-bottom:0;" data-field="benefits.${bi}" data-id="${id}" onchange="updateBenefit(this)"></textarea>`;
     container.appendChild(div);
     div.querySelector('textarea').focus();
   }
   markChanged();
+  updateOverrideStatusForId(id);
 }
 
 function addFeature(id) {
@@ -2870,6 +3091,7 @@ function addFeature(id) {
     div.querySelector('input').focus();
   }
   markChanged();
+  updateOverrideStatusForId(id);
 }
 
 function addSimpleFeature(id) {
@@ -2889,6 +3111,7 @@ function addSimpleFeature(id) {
     div.querySelector('input').focus();
   }
   markChanged();
+  updateOverrideStatusForId(id);
 }
 
 function addTrait(id) {
@@ -2908,6 +3131,7 @@ function addTrait(id) {
     div.querySelector('input').focus();
   }
   markChanged();
+  updateOverrideStatusForId(id);
 }
 
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -3038,9 +3262,9 @@ function filterIncomplete() {
 function generateSkippedReport(skipped, sourceName) {
   if (!skipped.length) return null;
   const lines = [];
-  lines.push(`Skipped Elements Report â€” ${sourceName}`);
+  lines.push(`Skipped Elements Report - ${sourceName}`);
   lines.push(`Generated: ${new Date().toLocaleString()}`);
-  lines.push(`${'â”€'.repeat(60)}`);
+  lines.push('-'.repeat(60));
   lines.push(`${skipped.length} element(s) were skipped due to insufficient data (below 80% complete).`);
   lines.push('');
   const byType = {};
@@ -3050,9 +3274,9 @@ function generateSkippedReport(skipped, sourceName) {
   }
   for (const [type, items] of Object.entries(byType)) {
     lines.push(`${type} (${items.length})`);
-    lines.push('â”€'.repeat(40));
+    lines.push('-'.repeat(40));
     for (const s of items) {
-      lines.push(`  â€¢ ${s.name} â€” ${s.completeness}% complete`);
+      lines.push(`  - ${s.name} - ${s.completeness}% complete`);
       lines.push(`    Missing: ${s.missing.join(', ')}`);
     }
     lines.push('');
@@ -3277,8 +3501,8 @@ function showValidationResult(issues) {
 
   errEl.className = 'alert alert-error';
   errEl.dataset.validationMessage = '1';
-  errEl.innerHTML = `<strong>Warning: ${issues.length} issue${issues.length > 1 ? 's' : ''} found â€” review before downloading:</strong><br>` +
-    issues.slice(0, 8).map(x => `â€¢ ${x.msg}`).join('<br>') +
+  errEl.innerHTML = `<strong>Warning: ${issues.length} issue${issues.length > 1 ? 's' : ''} found - review before downloading:</strong><br>` +
+    issues.slice(0, 8).map(x => `- ${x.msg}`).join('<br>') +
     (issues.length > 8 ? `<br><em>...and ${issues.length - 8} more</em>` : '');
   errEl.classList.remove('hidden');
   errEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -3294,12 +3518,20 @@ function getSourceMeta() {
   const abbr   = document.getElementById('sourceAbbr').value.trim().toUpperCase()
                    || name.split(/\s+/).map(w => w[0]).join('').toUpperCase() || 'HB';
   const author = document.getElementById('sourceAuthor').value.trim() || 'Homebrew';
-  const yearRaw = document.getElementById('sourceYear')?.value.trim() || '';
+  const yearEl = document.getElementById('sourceYear');
+  const yearRaw = yearEl?.value.trim() || '';
   const year = parsePublicationYear(yearRaw) || inferPublicationYear(name) || 0;
   const slug   = name.toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g, '') || 'homebrew';
   const prefix = 'ID_' + abbr.replace(/[^A-Z0-9]/g,'_');
-  const ruleset = year >= 2024 ? '2024' : '2014';
-  return { name, abbr, author, year, ruleset, slug, prefix };
+  const evidence = getRulesetEvidence(yearEl);
+  if (year >= 2024) evidence.unshift(`Publication year ${year}`);
+  const uniqueEvidence = Array.from(new Set(evidence.filter(Boolean)));
+  const ruleset = (year >= 2024 || uniqueEvidence.length) ? '2024' : '2014';
+  const rulesetConfidence = year >= 2024 ? 'explicit-year' : (uniqueEvidence.length ? '5.5e-signal' : 'default');
+  const rulesetDecision = ruleset === '2024'
+    ? `2024 ruleset (${uniqueEvidence.join('; ') || 'publication year'})`
+    : '2014 ruleset (default: no 2024 publication year or 5.5e-only signal detected)';
+  return { name, abbr, author, year, ruleset, rulesetConfidence, rulesetEvidence: uniqueEvidence, rulesetDecision, slug, prefix };
 }
 
 function parsePublicationYear(text) {
@@ -3334,10 +3566,30 @@ const MODERN_RULESET_SIGNALS = [
   { pattern: /\bbastion (?:facilit(?:y|ies)|turn|points?|defender|order|event)s?\b/i, label: 'Bastion rules' }
 ];
 
-function detectModernRulesetSignal(text) {
+function detectModernRulesetSignals(text) {
   const src = String(text || '');
-  const hit = MODERN_RULESET_SIGNALS.find(signal => signal.pattern.test(src));
-  return hit ? hit.label : '';
+  const hits = [];
+  for (const signal of MODERN_RULESET_SIGNALS) {
+    if (signal.pattern.test(src) && !hits.includes(signal.label)) hits.push(signal.label);
+  }
+  return hits;
+}
+
+function detectModernRulesetSignal(text) {
+  return detectModernRulesetSignals(text)[0] || '';
+}
+
+function getRulesetEvidence(yearEl) {
+  return String(yearEl?.dataset?.rulesetEvidence || '')
+    .split('|')
+    .map(part => part.trim())
+    .filter(Boolean);
+}
+
+function updateSourceRulesetDecisionDisplay() {
+  const el = document.getElementById('sourceRulesetDecision');
+  if (!el) return;
+  el.textContent = getSourceMeta().rulesetDecision;
 }
 
 function isModernRuleset(meta) {
@@ -5109,6 +5361,7 @@ function ordinal(n) {
 
 function resetAll() {
   extractedData = {};
+  generatedBaselineData = {};
   discoveredPageRanges = {};
   skippedItems = [];
   pdfFile = null;
@@ -5130,6 +5383,7 @@ function resetAll() {
   document.getElementById('sourceYear').value = '';
   delete document.getElementById('sourceYear').dataset.rulesetEvidence;
   document.getElementById('pageRange').value = '';
+  updateSourceRulesetDecisionDisplay();
   clearChanged();
   checkExtractReady();
 }
@@ -5143,6 +5397,14 @@ window.AuroraXMLHelper = {
   parseSpellsFromText,
   parseItemsFromText,
   parseMagicItemsFromText,
+  getSourceMeta,
+  detectModernRulesetSignal,
+  detectModernRulesetSignals,
+  captureGeneratedBaseline,
+  applyRememberedOverridesToExtractedData,
+  rememberOverride,
+  forgetOverride,
+  revertToGenerated,
   generateXml,
   buildZipXmlDocuments,
   validateAll

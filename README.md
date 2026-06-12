@@ -64,6 +64,12 @@ Extracted elements appear in tabs. Expand each entry to review and edit fields.
 Validation warnings are shown before download when required Aurora fields or
 shape rules are missing.
 
+Edits are one-off by default and affect only the current export. Use
+**Remember Correction** on an edited element when you want that correction to be
+applied automatically the next time the same generated element appears. Use
+**Forget** to stop reusing a remembered correction without reverting the current
+edit.
+
 You can also click **Manual Author** to start without a parsed PDF result, add a
 blank element for any supported type, or paste a missed section into the review
 screen. Pasted text is first sent through the deterministic parser for the
@@ -106,7 +112,20 @@ Run parser and generator regression tests with:
 npm test
 ```
 
-The tests use Node's built-in modules only, so no package install is required.
+Tests run with Vitest and require Node 20 or newer. `npm test` uses
+`scripts/run-vitest.js`, which prefers `AURORA_NODE`, then a local Node install
+under `%LOCALAPPDATA%\Programs\nodejs-lts`, then `node` on `PATH`.
+
+Run local corpus comparisons with:
+
+```powershell
+npm run corpus:local
+```
+
+`npm run corpus:local` uses the same local Node selection strategy and can read
+text, Markdown, and selectable-text PDFs. Copy
+`tests/fixtures/local-corpus.example.json` to
+`tests/fixtures/local-corpus.json` for machine-local benchmark entries.
 
 ---
 

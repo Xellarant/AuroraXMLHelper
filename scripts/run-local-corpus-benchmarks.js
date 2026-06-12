@@ -56,7 +56,13 @@ function exactPercent(result) {
   return result.matchedCount ? (result.exactShapeMatches / result.matchedCount) * 100 : 0;
 }
 
-function runBenchmark(entry) {
+function shouldSkipEntry(entry) {
+  if (entry.enabled === false) return 'disabled in manifest';
+  if (entry.optional && !fs.existsSync(expandLocalPath(entry.source))) return 'optional source missing';
+  return '';
+}
+
+async function runBenchmark(entry) {
   const sourceMeta = entry.sourceMeta || {};
   return benchmark({
     source: expandLocalPath(entry.source),
@@ -74,6 +80,24 @@ function runBenchmark(entry) {
 function checkThresholds(entry, result) {
   const thresholds = entry.thresholds || {};
   const failures = [];
+  const extractedTotal = Object.values(result.extractedCounts || {}).reduce((sum, count) => sum + count, 0);
+  if (Number.isFinite(thresholds.minGenerated) && result.generatedCount < thresholds.minGenerated) {
+    failures.push(`generated ${result.generatedCount} < ${thresholds.minGenerated}`);
+  }
+  if (Number.isFinite(thresholds.minMatched) && result.matchedCount < thresholds.minMatched) {
+    failures.push(`matched ${result.matchedCount} < ${thresholds.minMatched}`);
+  }
+  if (Number.isFinite(thresholds.minExtractedTotal) && extractedTotal < thresholds.minExtractedTotal) {
+    failures.push(`extracted ${extractedTotal} < ${thresholds.minExtractedTotal}`);
+  }
+  if (thresholds.minExtracted && typeof thresholds.minExtracted === 'object') {
+    for (const [type, minimum] of Object.entries(thresholds.minExtracted)) {
+      const count = result.extractedCounts?.[type] || 0;
+      if (Number.isFinite(minimum) && count < minimum) {
+        failures.push(`${type} extracted ${count} < ${minimum}`);
+      }
+    }
+  }
   if (Number.isFinite(thresholds.minExactPercent) && exactPercent(result) < thresholds.minExactPercent) {
     failures.push(`exact ${exactPercent(result).toFixed(1)}% < ${thresholds.minExactPercent}%`);
   }
@@ -83,10 +107,13 @@ function checkThresholds(entry, result) {
   if (Number.isFinite(thresholds.maxDifferent) && result.differentMatches > thresholds.maxDifferent) {
     failures.push(`different ${result.differentMatches} > ${thresholds.maxDifferent}`);
   }
+  if (Number.isFinite(thresholds.maxHighSeverity) && result.highSeverityMatches > thresholds.maxHighSeverity) {
+    failures.push(`high severity ${result.highSeverityMatches} > ${thresholds.maxHighSeverity}`);
+  }
   return failures;
 }
 
-function main() {
+async function main() {
   try {
     const args = parseArgs(process.argv.slice(2));
     const manifestPath = path.resolve(args.manifest);
@@ -100,10 +127,15 @@ function main() {
     if (!entries.length) throw new Error('Manifest has no benchmarks.');
     let failed = false;
     for (const entry of entries) {
-      const result = runBenchmark(entry);
+      const skipReason = shouldSkipEntry(entry);
+      const name = entry.name || entry.source;
+      if (skipReason) {
+        console.log(`${name}: skipped (${skipReason})`);
+        continue;
+      }
+      const result = await runBenchmark(entry);
       const pct = exactPercent(result).toFixed(1);
-      const name = entry.name || result.source;
-      console.log(`${name}: ${result.exactShapeMatches}/${result.matchedCount} exact (${pct}%), unmatched=${result.unmatchedCount}, different=${result.differentMatches}`);
+      console.log(`${name}: ${result.exactShapeMatches}/${result.matchedCount} exact (${pct}%), unmatched=${result.unmatchedCount}, different=${result.differentMatches}, high=${result.highSeverityMatches}`);
       if (args.verbose) {
         console.log(renderMarkdown(result));
       }
