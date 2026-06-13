@@ -8,6 +8,8 @@ This directory keeps regression fixtures small and source-safe.
 - Set `"enabled": false` on source candidates you want documented but not run yet.
 - Use `minExtracted`, `minExtractedTotal`, `minGenerated`, or `minMatched` to prevent vacuous passes when a source extracts nothing.
 - Use `maxHighSeverity` in local thresholds to fail on missing canonical IDs, grants, choices, or stats even when the exact-match percentage still looks healthy.
+- Add a `sourceValidation` block when a local fixture should also validate source interpretation before XML generation. It can declare expected entities, minimum parsed counts, required descriptions, and required feature names.
+- Use `sourceValidation.types` when the source gate should parse a broader set of element types than the XML benchmark currently compares. This is useful for proving source coverage before a generator category has reached first-party-like XML shape.
 
 Run the committed fixtures with:
 
@@ -19,6 +21,12 @@ Run local real-world corpus checks with:
 
 ```powershell
 npm run corpus:local
+```
+
+Run the source interpretation gate for a local fixture with:
+
+```powershell
+npm run source:fixture -- --manifest tests/fixtures/local-corpus.json --name "Eberron: Forge of the Artificer" --out-dir reports/efa
 ```
 
 Run the Aurora XML shape validator in required mode with:

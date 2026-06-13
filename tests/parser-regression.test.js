@@ -136,6 +136,82 @@ test('leveled class and subclass features are not parsed as feats', () => {
   assert.ok(classes[0].features.some(feature => /spellcasting/i.test(feature.name)));
 });
 
+test('2024 Artificer class XML mirrors canonical table-derived shape', () => {
+  const context = loadApp();
+  runInApp(context, `document.getElementById('sourceYear').value = '2025';`);
+  const text = [
+    '## Artificer',
+    '### Core Artificer Traits',
+    '| Trait | Details |',
+    '| --- | --- |',
+    '| Primary Ability | Intelligence |',
+    '| Hit Point Die | D8 per Artificer level |',
+    '| Saving Throw Proficiencies | Constitution and Intelligence |',
+    '| Skill Proficiencies | Choose 2: Arcana, History, Investigation, Medicine, Nature, Perception, or Sleight of Hand |',
+    '| Weapon Proficiencies | Simple weapons |',
+    "| Tool Proficiencies | Thieves' Tools, Tinker's Tools, and one type of Artisan's Tools of your choice |",
+    '| Armor Training | Light and Medium armor and Shields |',
+    "| Starting Equipment | Choose A or B: (A) Studded Leather Armor, Dagger, Thieves' Tools, Tinker's Tools, Dungeoneer's Pack, and 16 GP; or (B) 150 GP |",
+    '### Class Features',
+    '| Level | PB | Features | Plans Known | Magic Items | Cantrips | Prepared Spells | 1st | 2nd | 3rd | 4th | 5th |',
+    '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |',
+    "| 1 | +2 | Spellcasting, Tinker's Magic | - | - | 2 | 2 | 2 | - | - | - | - |",
+    '| 2 | +2 | Replicate Magic Item | 4 | 2 | 2 | 3 | 2 | - | - | - | - |',
+    '| 3 | +2 | Artificer Subclass | 4 | 2 | 2 | 4 | 3 | - | - | - | - |',
+    '| 4 | +2 | Ability Score Improvement | 4 | 2 | 2 | 5 | 3 | - | - | - | - |',
+    '| 5 | +3 | Subclass Feature | 4 | 2 | 2 | 6 | 4 | 2 | - | - | - |',
+    '| 6 | +3 | Magic Item Tinker | 5 | 3 | 2 | 6 | 4 | 2 | - | - | - |',
+    '| 10 | +4 | Magic Item Adept | 6 | 4 | 3 | 9 | 4 | 3 | 2 | - | - |',
+    '| 11 | +4 | Spell-Storing Item | 6 | 4 | 3 | 10 | 4 | 3 | 3 | - | - |',
+    '| 14 | +5 | Advanced Artifice | 7 | 5 | 4 | 11 | 4 | 3 | 3 | 1 | - |',
+    '| 18 | +6 | Magic Item Master | 8 | 6 | 4 | 14 | 4 | 3 | 3 | 3 | 1 |',
+    '| 19 | +6 | Epic Boon | 8 | 6 | 4 | 15 | 4 | 3 | 3 | 3 | 2 |',
+    '| 20 | +6 | Soul of Artifice | 8 | 6 | 4 | 15 | 4 | 3 | 3 | 3 | 2 |',
+    '#### Spellcasting (Level 1)',
+    'Intelligence is your spellcasting ability for your Artificer spells. You know two Artificer cantrips of your choice.',
+    "#### Tinker's Magic (Level 1)",
+    "You know the Mending cantrip. As a Magic action while holding Tinker's Tools, you can create one item.",
+    '#### Replicate Magic Item (Level 2)',
+    'You have learned arcane plans that you use to make magic items.',
+    '#### Artificer Subclass (Level 3)',
+    'You gain an Artificer subclass of your choice.',
+    '#### Ability Score Improvement (Level 4)',
+    'You gain the Ability Score Improvement feat or another feat of your choice for which you qualify.',
+    '#### Magic Item Tinker (Level 6)',
+    'Your Replicate Magic Item feature gains additional options.',
+    '#### Magic Item Adept (Level 10)',
+    'You can now attune to up to four magic items at once.',
+    '#### Spell-Storing Item (Level 11)',
+    'The spell stays in the object until used a number of times equal to twice your Intelligence modifier.',
+    '#### Advanced Artifice (Level 14)',
+    'You can now attune to up to five magic items at once.',
+    '#### Magic Item Master (Level 18)',
+    'You can now attune to up to six magic items at once.',
+    '#### Epic Boon (Level 19)',
+    'You gain an Epic Boon feat or another feat of your choice for which you qualify.',
+    '#### Soul of Artifice (Level 20)',
+    'You gain the following benefits.'
+  ].join('\n');
+
+  const classes = context.parseClassesFromText(text);
+  setExtractedData(context, { spell: [], archetype: [], item: [], feat: [], magic: [], race: [], background: [], class: classes, other: [] });
+  const xml = runInApp(context, 'generateXml()');
+
+  assert.equal(classes[0].hitDie, 8);
+  assert.deepEqual(JSON.parse(JSON.stringify(classes[0].toolProficiencies)), ["Thieves' Tools", "Tinker's Tools", "one type of Artisan's Tools of your choice"]);
+  assert.ok(xml.includes('<grant type="Class Feature" id="ID_VSS_CLASS_FEATURE_ARTIFICER_SUBCLASS" level="3" />'));
+  assert.ok(!xml.includes('ID_VSS_CLASS_FEATURE_ARTIFICER_ARTIFICER_SUBCLASS'));
+  assert.ok(!xml.includes('ID_VSS_CLASS_FEATURE_ARTIFICER_" level='));
+  assert.ok(!xml.includes('<element name="Subclass Feature" type="Class Feature"'));
+  assert.ok(xml.includes('<grant type="Proficiency" id="ID_PROFICIENCY_TOOL_PROFICIENCY_TINKERS_TOOLS" requirements="!ID_VSS_MULTICLASS_ARTIFICER" />'));
+  assert.ok(xml.includes('<select type="Proficiency" name="Artisan\'s Tool (Artificer)" supports="Artisan tools" requirements="!ID_VSS_MULTICLASS_ARTIFICER" />'));
+  assert.ok(xml.includes('<multiclass id="ID_VSS_MULTICLASS_ARTIFICER">'));
+  assert.ok(xml.includes('<stat name="artificer:spellcasting:slots:2" value="2" level="5" />'));
+  assert.ok(xml.includes('<stat name="replicate:plans:known" value="4" level="2" />'));
+  assert.ok(xml.includes('<select type="Feat" name="Feat (Artificer)" />'));
+  assert.ok(xml.includes('<select type="Feat" name="Epic Boon (Artificer)" supports="Epic Boon" />'));
+});
+
 test('browser namespace exposes parser and generator API', () => {
   const context = loadApp();
 
@@ -231,6 +307,153 @@ test('2024 background blocks with feat rows are not parsed as feats', () => {
   assert.equal(backgrounds.length, 2);
   assert.equal(backgrounds[0].feat, 'Mark of Handling');
   assert.equal(backgrounds[1].feat, 'Alert');
+});
+
+test('long non-feat sections do not use loose prose feat starts', () => {
+  const context = loadApp();
+  const source = [
+    'Chapter 1',
+    'Guilds of the City',
+    ...Array.from({ length: 90 }, (_, i) => `Background lore line ${i + 1}`),
+    'Celebrated',
+    'You have earned a reputation among your peers.',
+    'This paragraph describes social standing, not a feat benefit.'
+  ].join('\n');
+  const manualSnippet = [
+    'Celebrated',
+    'You have earned a reputation among your peers.'
+  ].join('\n');
+
+  assert.equal(context.parseFeatsFromText(source).length, 0);
+  assert.equal(context.parseFeatsFromText(manualSnippet).length, 1);
+});
+
+test('magic parser rejects non-item rarity blocks but keeps item categories', () => {
+  const context = loadApp();
+  const text = [
+    'Magic Items',
+    'Echo of Dragonsight',
+    'Supernatural Gift, rare',
+    'You receive a draconic blessing.',
+    'Flail of Tiamat',
+    'Weapon (flail), legendary (requires attunement)',
+    'This magic flail has five heads.'
+  ].join('\n');
+
+  const items = context.parseMagicItemsFromText(text);
+
+  assert.equal(items.length, 1);
+  assert.equal(items[0].name, 'Flail of Tiamat');
+  assert.equal(items[0].type, 'Weapon (Flail)');
+});
+
+test('background parser rejects TOC rows and prose fragments', () => {
+  const context = loadApp();
+  const text = [
+    'Backgrounds',
+    'Background: Azorius Functionary .................. 33',
+    'You might be a true believer, inspired by the example of',
+    'Skill Proficiencies: Religion and Persuasion',
+    'Equipment: A uniform and 10 gp',
+    'Rakdos Cultist',
+    'Skill Proficiencies: Acrobatics and Performance',
+    "Tool Proficiencies: one Musical Instrument",
+    'Languages: Abyssal or Giant',
+    'Equipment: A costume and 10 gp'
+  ].join('\n');
+
+  const backgrounds = context.parseBackgroundsFromText(text);
+
+  assert.equal(backgrounds.length, 1);
+  assert.equal(backgrounds[0].name, 'Rakdos Cultist');
+});
+
+test('background metadata ignores feature body tables and uses canonical feature ids', () => {
+  const context = loadApp();
+  const text = [
+    'Boros Legionnaire',
+    'Skill Proficiencies: Athletics and Intimidation',
+    'Tool Proficiencies: one type of gaming set',
+    'Languages: one of your choice',
+    'Feature: Legion Station',
+    'Cantrip fire bolt, sacred flame',
+    'Languages: Goblin, Celestial, and Draconic'
+  ].join('\n');
+
+  const backgrounds = context.parseBackgroundsFromText(text);
+  assert.equal(backgrounds.length, 1);
+  assert.deepEqual(JSON.parse(JSON.stringify(backgrounds[0].languages)), []);
+  assert.equal(backgrounds[0].languageChoices, 1);
+  assert.equal(backgrounds[0].features[0].name, 'Legion Station');
+
+  setExtractedData(context, {
+    spell: [],
+    archetype: [],
+    item: [],
+    feat: [],
+    magic: [],
+    race: [],
+    background: backgrounds,
+    class: [],
+    other: []
+  });
+  const xml = runInApp(context, `generateXml()`);
+
+  assert.ok(xml.includes('<element name="Feature: Legion Station" type="Background Feature"'));
+  assert.ok(xml.includes('<supports>Background Feature</supports>'));
+  assert.ok(xml.includes('ID_VSS_BACKGROUND_FEATURE_BOROS_LEGIONNAIRE_LEGION_STATION'));
+  assert.ok(!xml.includes('ID_VSS_BACKGROUND_BOROS_LEGIONNAIRE_FEATURE_LEGION_STATION'));
+});
+
+test('background feature headings strip same-line OCR prose tails', () => {
+  const context = loadApp();
+  const text = [
+    'House Agent',
+    'Skill Proficiencies: Investigation and Persuasion',
+    'Feature: HOUSE CONNECTIONS about secret societies and hidden demons.',
+    'You have contacts in your house.'
+  ].join('\n');
+
+  const backgrounds = context.parseBackgroundsFromText(text);
+
+  assert.equal(backgrounds.length, 1);
+  assert.equal(backgrounds[0].features[0].name, 'House Connections');
+});
+
+test('archetype parser rejects prose fragments inside subclass chapters', () => {
+  const context = loadApp();
+  const text = [
+    'Paladin Subclasses',
+    'If you are a paladin who swears the Oath of Devotion,',
+    'Paladin subclass features are described in the Player Handbook.',
+    'Oath of the Signal',
+    'Paladin subclass',
+    'Level 3: Signal Spells',
+    'You learn special spells.'
+  ].join('\n');
+
+  const archetypes = context.parseArchetypesFromText(text);
+
+  assert.equal(archetypes.length, 1);
+  assert.equal(archetypes[0].name, 'Oath of the Signal');
+});
+
+test('magic parser rejects prose headings even before valid item detail lines', () => {
+  const context = loadApp();
+  const text = [
+    'Magic Items',
+    'For example, you might communicate fear caused by',
+    'Wondrous Item, rare',
+    'This sentence is part of a paragraph, not an item.',
+    'Mizzium Mortar',
+    'Wondrous Item, rare',
+    'This item has 4 charges.'
+  ].join('\n');
+
+  const items = context.parseMagicItemsFromText(text);
+
+  assert.equal(items.length, 1);
+  assert.equal(items[0].name, 'Mizzium Mortar');
 });
 
 test('Markdown-style DDB blocks parse headings and compact possessive ids', () => {
@@ -424,6 +647,35 @@ test('DDB-style species parse from title plus inline trait paragraphs', () => {
   assert.equal(races[0].traits.map(trait => trait.name).join('|'), 'Changeling Instincts|Shape-Shifter');
 });
 
+test('2024 species parse compact creature type size speed metadata', () => {
+  const context = loadApp();
+  const text = [
+    '## Species Descriptions',
+    '### Changeling',
+    'With ever-changing appearances, changelings reside in many societies undetected.',
+    '*Creature Type: Humanoid; Size: Small or Medium; Speed: 30 ft.*',
+    '**Changeling Instincts.**',
+    'Thanks to your connection to the fey realm, you gain proficiency in two skills.',
+    '**Shape-Shifter.**',
+    'As an action, you can shape-shift to change your appearance and your voice.',
+    '### Kalashtar',
+    'Kalashtar are linked to quori spirits.',
+    '*Creature Type: Humanoid; Size: Medium; Speed: 30 ft.*',
+    '**Dual Mind.**',
+    'You have Advantage on Wisdom and Charisma saving throws.'
+  ].join('\n');
+
+  const races = context.parseRacesFromText(text);
+
+  assert.equal(races.length, 2);
+  assert.equal(races[0].name, 'Changeling');
+  assert.equal(races[0].size, 'Small');
+  assert.equal(races[0].speed, 30);
+  assert.equal(races[0].traits.map(trait => trait.name).join('|'), 'Changeling Instincts|Shape-Shifter');
+  assert.equal(races[1].name, 'Kalashtar');
+  assert.equal(races[1].traits.map(trait => trait.name).join('|'), 'Dual Mind');
+});
+
 test('race ability score rules are gated against background ASI', () => {
   const context = loadApp();
   setExtractedData(context, {
@@ -452,6 +704,62 @@ test('race ability score rules are gated against background ASI', () => {
   assert.ok(xml.includes('<!-- Source rule: Increase strength by 2 unless a background provides ability scores. -->'));
   assert.ok(xml.includes('<stat name="strength" value="2" requirements="!ID_INTERNAL_GRANTS_BACKGROUND_ASI" />'));
   assert.ok(xml.includes('<stat name="charisma" value="1" requirements="!ID_INTERNAL_GRANTS_BACKGROUND_ASI" />'));
+  assert.ok(!xml.includes('ID_INTERNAL_GRANT_RACE_TESTBORN'));
+});
+
+test('2024 species XML mirrors canonical Aurora race trait shape', () => {
+  const context = loadApp();
+  runInApp(context, `document.getElementById('sourceYear').value = '2025';`);
+  const text = [
+    '## Species Descriptions',
+    '### Changeling',
+    '*Creature Type: Humanoid; Size: Small or Medium; Speed: 30 ft.*',
+    '**Changeling Instincts.**',
+    'You gain proficiency in two of the following skills of your choice: Deception, Insight, Intimidation, Performance, or Persuasion.',
+    '**Shape-Shifter.**',
+    'As an action, you can change your appearance.',
+    '### Khoravar',
+    '*Creature Type: Humanoid; Size: Small or Medium; Speed: 30 ft.*',
+    '**Darkvision.**',
+    'You have Darkvision with a range of 60 feet.',
+    '**Fey Gift.**',
+    'You know the Friends cantrip. Intelligence, Wisdom, or Charisma is your spellcasting ability for it.',
+    '**Skill Versatility.**',
+    'You gain proficiency in one skill or with one tool of your choice.',
+    '### Shifter',
+    '*Creature Type: Humanoid; Size: Small or Medium; Speed: 30 ft.*',
+    '**Bestial Instincts.**',
+    'You gain proficiency in one of the following skills of your choice: Acrobatics, Athletics, Intimidation, or Survival.',
+    '**Shifting.**',
+    'When you shift, you gain Temporary Hit Points equal to 2 times your Proficiency Bonus. Choose Beasthide: You gain more temporary hit points. Longtooth: You can bite. Swiftstride: Your speed increases. Wildhunt: You focus your senses.',
+    '### Warforged',
+    '*Creature Type: Humanoid; Size: Small or Medium; Speed: 30 ft.*',
+    '**Construct Resilience.**',
+    'You have Resistance to Poison damage.',
+    '**Integrated Protection.**',
+    'You gain a +1 bonus to your Armor Class.',
+    '**Specialized Design.**',
+    'You gain one skill proficiency and one tool proficiency of your choice.'
+  ].join('\n');
+
+  const races = context.parseRacesFromText(text);
+  setExtractedData(context, { spell: [], archetype: [], item: [], feat: [], magic: [], race: races, background: [], class: [], other: [] });
+  const xml = runInApp(context, 'generateXml()');
+
+  assert.ok(xml.includes('<select type="Racial Trait" name="Size (Changeling)" supports="ID_INTERNAL_RACIAL_TRAIT_SMALL|ID_INTERNAL_RACIAL_TRAIT_MEDIUM" />'));
+  assert.ok(xml.includes('<grant type="Racial Trait" id="ID_VSS_RACIAL_TRAIT_CHANGELING_INSTINCTS" />'));
+  assert.ok(!xml.includes('ID_VSS_RACIAL_TRAIT_CHANGELING_CHANGELING_INSTINCTS'));
+  assert.ok(xml.includes('<select type="Proficiency" name="Changeling Instincts" number="2" supports="Skill,(Deception||Insight||Intimidation||Performance||Persuasion)" />'));
+  assert.ok(xml.includes('<grant type="Grants" id="ID_INTERNAL_GRANT_RACE_HALF_ELF" />'));
+  assert.ok(xml.includes('<grant type="Spell" id="ID_WOTC_PHB24_SPELL_FRIENDS" />'));
+  assert.ok(xml.includes('<select type="Racial Trait" name="Spellcasting Ability (Khoravar)" supports="Khoravar Spellcasting Ability" />'));
+  assert.ok(xml.includes('<element name="Intelligence (Khoravar)" type="Racial Trait" source="Validator Sample Source" id="ID_VSS_RACIAL_TRAIT_KHORAVAR_INTELLIGENCE">'));
+  assert.ok(xml.includes('<select type="Racial Trait" name="Shifting Form (Shifter)" supports="VSS Shifter Form" />'));
+  assert.ok(xml.includes('<element name="Beasthide" type="Racial Trait" source="Validator Sample Source" id="ID_VSS_RACIAL_TRAIT_SHIFTER_BEASTHIDE">'));
+  assert.ok(xml.includes('<grant type="Condition" id="ID_INTERNAL_CONDITION_DAMAGE_RESISTANCE_POISON" />'));
+  assert.ok(xml.includes('<stat name="ac:misc" value="1" />'));
+  assert.ok(xml.includes('<select type="Proficiency" name="Skill Proficiency (Warforged)" supports="Skill" />'));
+  assert.ok(xml.includes('<select type="Proficiency" name="Tool Proficiency (Warforged)" supports="Tool" />'));
 });
 
 test('2024-style backgrounds do not require background feature blocks', () => {

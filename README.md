@@ -127,6 +127,17 @@ text, Markdown, and selectable-text PDFs. Copy
 `tests/fixtures/local-corpus.example.json` to
 `tests/fixtures/local-corpus.json` for machine-local benchmark entries.
 
+Run a source interpretation gate for a local fixture with:
+
+```powershell
+npm run source:fixture -- --manifest tests/fixtures/local-corpus.json --name "Eberron: Forge of the Artificer" --out-dir reports/efa
+```
+
+This writes `normalized-source.json`, `source-coverage-report.md`, and
+`source-coverage-summary.json`. The source gate validates the parsed source
+model before XML shape comparison, so parser/OCR omissions can be separated
+from Aurora XML generation issues.
+
 ---
 
 ## Installation into Aurora Builder

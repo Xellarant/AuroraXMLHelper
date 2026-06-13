@@ -781,13 +781,24 @@ function inferClasses(text) {
 function parseFeatsFromText(text) {
   const lines = normalizeTextLines(text);
   const feats = [];
+  const hasFeatSections = lines.some(isFeatSectionHeading);
+  const allowLooseFeatStarts = hasFeatSections || lines.length < 80;
+  let inFeatSection = allowLooseFeatStarts && !hasFeatSections;
   for (let i = 0; i < lines.length; i++) {
-    const start = featStartInfo(lines, i);
+    if (isFeatSectionHeading(lines[i])) {
+      inFeatSection = true;
+      continue;
+    }
+    if (isSectionHeading(lines[i])) {
+      inFeatSection = false;
+      continue;
+    }
+    const start = featStartInfo(lines, i, { inFeatSection });
     if (!start) continue;
     let bodyStart = start.bodyStart;
     while (bodyStart < lines.length && isFeatMetaLine(lines[bodyStart])) bodyStart++;
     let j = bodyStart;
-    while (j < lines.length && !isElementStart(lines, j) && !isSectionHeading(lines[j])) j++;
+    while (j < lines.length && !featStartInfo(lines, j, { inFeatSection }) && !isElementStart(lines, j) && !isSectionHeading(lines[j])) j++;
     const fullText = lines.slice(bodyStart, j).filter(line => !isFeatMetaLine(line)).join('\n');
     const parsed = parseFeatFullText({ name: start.name, prerequisite: start.prerequisite, fullText });
     if (parsed.description || parsed.benefits?.length) feats.push(parsed);
@@ -796,7 +807,7 @@ function parseFeatsFromText(text) {
   return uniqueByName(feats);
 }
 
-function featStartInfo(lines, i) {
+function featStartInfo(lines, i, options = {}) {
   const line = lines[i] || '';
   const next = lines[i + 1] || '';
   if (isLeveledFeatureHeading(line)) return null;
@@ -816,11 +827,17 @@ function featStartInfo(lines, i) {
     const prerequisite = (featKind[1]?.match(/Prerequisite:\s*(.+)$/i) || [])[1]?.trim() || '';
     return { name: normalizeExtractedName(line), prerequisite, bodyStart: i + 2 };
   }
-  if (/^Prerequisite:|^You gain|^You have|^Increase your/i.test(next)) {
+  if (options.inFeatSection && /^Prerequisite:|^You gain|^You have|^Increase your/i.test(next)) {
     const prerequisite = /^Prerequisite:/i.test(next) ? next.replace(/^Prerequisite:\s*/i, '').trim() : '';
     return { name: normalizeExtractedName(line), prerequisite, bodyStart: i + 1 + (prerequisite ? 1 : 0) };
   }
   return null;
+}
+
+function isFeatSectionHeading(line) {
+  const clean = cleanExtractedTitle(line);
+  return /^(?:General|Origin|Epic Boon|Fighting Style|Dragonmark)?\s*Feats?$/i.test(clean)
+    || /^(?:Epic Boon)\s+Feat$/i.test(clean);
 }
 
 function looksLikeBackgroundStatBlockAhead(lines, i) {
@@ -857,10 +874,24 @@ function parseMagicItemsFromText(text) {
   const lines = normalizeTextLines(text);
   const items = [];
   const rarityWords = 'common|uncommon|rare|very rare|legendary|artifact|varies';
+  const hasMagicItemSections = lines.some(isMagicItemSectionHeading);
+  const allowLooseMagicItems = hasMagicItemSections || lines.length < 120;
+  let inMagicItemSection = allowLooseMagicItems && !hasMagicItemSections;
   for (let i = 0; i < lines.length - 1; i++) {
+    if (isMagicItemSectionHeading(lines[i])) {
+      inMagicItemSection = true;
+      continue;
+    }
+    if (isSectionHeading(lines[i]) && !isMagicItemSectionHeading(lines[i])) {
+      inMagicItemSection = false;
+      continue;
+    }
+    if (!inMagicItemSection) continue;
     if (!looksLikeTitle(lines[i])) continue;
+    if (isProseFragmentTitle(lines[i])) continue;
     const detail = lines[i + 1].match(new RegExp(`^(.+?),\\s*(${rarityWords})(?:\\s*\\((requires attunement.*?)\\))?$`, 'i'));
     if (!detail) continue;
+    if (!isMagicItemType(detail[1])) continue;
     let j = i + 2;
     while (j < lines.length && !isElementStart(lines, j) && !isSectionHeading(lines[j])) j++;
     const description = lines.slice(i + 2, j).join('\n').trim();
@@ -876,6 +907,33 @@ function parseMagicItemsFromText(text) {
     i = Math.max(i, j - 1);
   }
   return uniqueByName(items);
+}
+
+function isMagicItemSectionHeading(line) {
+  const clean = cleanExtractedTitle(line);
+  return /^magic items?$/i.test(clean)
+    || /^magic item descriptions$/i.test(clean)
+    || /^magic items? a[-–—]z$/i.test(clean);
+}
+
+function isMagicItemType(value) {
+  const clean = cleanExtractedTitle(value).replace(/\s+/g, ' ');
+  return /^(Armor|Potion|Ring|Rod|Scroll|Staff|Wand|Weapon(?:\s*\([^)]+\))?|W\s*ondrous Item|Wondrous Item)$/i.test(clean);
+}
+
+function isTableOfContentsLine(line) {
+  return /\.{2,}\s*\d+\s*$/i.test(String(line || '').trim());
+}
+
+function isProseFragmentTitle(line) {
+  const clean = cleanExtractedTitle(line);
+  if (!clean) return false;
+  if (isTableOfContentsLine(clean)) return true;
+  if (/[,;:\-–—]$/.test(clean)) return true;
+  if (/^\d+\s+\S/.test(clean)) return true;
+  const words = clean.split(/\s+/).filter(Boolean);
+  if (words.length > 10) return true;
+  return words.length > 4 && /^(if|when|whenever|while|for|as|you|your|this|these|those)\b/i.test(clean);
 }
 
 function parseItemsFromText(text) {
@@ -1003,8 +1061,10 @@ function parseBackgroundBlock(name, block) {
     features: []
   };
   let firstField = block.length;
-  for (let i = 0; i < block.length; i++) {
-    const line = block[i];
+  const metadataEnd = findNextIndex(block, 0, line => /^(?:Background\s+)?Feature:/i.test(line));
+  const metadataBlock = block.slice(0, metadataEnd);
+  for (let i = 0; i < metadataBlock.length; i++) {
+    const line = metadataBlock[i];
     if (isAbilityScoreFieldLine(line)) {
       background.abilityScores = parseAbilitiesFromText(line);
       firstField = Math.min(firstField, i);
@@ -1033,8 +1093,9 @@ function parseBackgroundBlock(name, block) {
     const feature = block[i].match(/^(?:Background\s+)?Feature:\s*(.+)$/i);
     if (!feature) continue;
     const next = findNextIndex(block, i + 1, line => /^(?:Background\s+)?Feature:/i.test(line));
+    const name = normalizeBackgroundFeatureName(feature[1]);
     background.features.push({
-      name: feature[1].trim(),
+      name,
       description: block.slice(i + 1, next).filter(line => !isBackgroundMetaLine(line)).join('\n').trim()
     });
     i = next - 1;
@@ -1044,6 +1105,16 @@ function parseBackgroundBlock(name, block) {
     // named background feature blocks, so avoid inventing features from prose.
   }
   return background;
+}
+
+function normalizeBackgroundFeatureName(value) {
+  let text = String(value || '').trim();
+  const loudHeading = text.match(/^([A-Z][A-Z' -]{2,}?)(?:\s+(?=[a-z])|[.?!]\s+)/);
+  if (loudHeading) text = loudHeading[1];
+  return normalizeExtractedName(text)
+    .replace(/\bCantrip\b.*$/i, '')
+    .replace(/\b\d+(?:st|nd|rd|th)\b.*$/i, '')
+    .trim();
 }
 
 function parseRaceBlock(name, block) {
@@ -1061,13 +1132,16 @@ function parseRaceBlock(name, block) {
   let firstField = block.length;
   for (let i = 0; i < block.length; i++) {
     const line = block[i];
-    if (/^Size:/i.test(line)) {
+    if (/\bSize:/i.test(line)) {
       race.size = parseSize(line);
+      race.sizeOptions = parseSizeOptions(line);
       firstField = Math.min(firstField, i);
-    } else if (/^Speed:/i.test(line)) {
+    }
+    if (/\bSpeed:/i.test(line)) {
       race.speed = parseSpeed(line);
       firstField = Math.min(firstField, i);
-    } else if (/^Languages:/i.test(line)) {
+    }
+    if (/^Languages:/i.test(line)) {
       const languageInfo = parseLanguageInfo(afterColon(line));
       race.languages = languageInfo.languages;
       race.languageChoices = languageInfo.choices;
@@ -1093,6 +1167,100 @@ function parseRaceBlock(name, block) {
   return race;
 }
 
+function parseOptionalTableNumber(value) {
+  const match = String(value || '').match(/\d+/);
+  return match ? parseInt(match[0], 10) : null;
+}
+
+function parseCoreClassTraitRows(lines) {
+  const traits = {};
+  for (const line of lines) {
+    const cells = markdownTableCells(line);
+    if (cells.length < 2 || isMarkdownTableSeparator(cells)) continue;
+    const label = cleanExtractedTitle(cells[0]).toLowerCase();
+    if (/^(trait|details)$/.test(label)) continue;
+    if (/^(primary ability|hit point die|hit dice|saving throw proficiencies|saving throws|skill proficiencies|skills|weapon proficiencies|weapons|tool proficiencies|tools|armor training|armor|starting equipment|equipment)$/.test(label)) {
+      traits[label] = cells.slice(1).join(' | ').trim();
+    }
+  }
+  return traits;
+}
+
+function classTableHeaderKey(value) {
+  const clean = cleanExtractedTitle(value).toLowerCase();
+  if (/^level$/.test(clean)) return 'level';
+  if (/^features?$/.test(clean)) return 'features';
+  if (/^plans/.test(clean)) return 'plansKnown';
+  if (/^magic items?$/.test(clean)) return 'magicItems';
+  if (/^cantrips?$/.test(clean)) return 'cantrips';
+  if (/^prepared/.test(clean)) return 'prepared';
+  if (/^1st$/.test(clean)) return 'slots1';
+  if (/^2nd$/.test(clean)) return 'slots2';
+  if (/^3rd$/.test(clean)) return 'slots3';
+  if (/^4th$/.test(clean)) return 'slots4';
+  if (/^5th$/.test(clean)) return 'slots5';
+  return '';
+}
+
+function parseClassProgressionRows(lines) {
+  const rows = [];
+  for (let i = 0; i < lines.length; i++) {
+    const headerCells = markdownTableCells(lines[i]);
+    const keys = headerCells.map(classTableHeaderKey);
+    if (!keys.includes('level') || !keys.includes('features')) continue;
+    let j = i + 1;
+    if (isMarkdownTableSeparator(markdownTableCells(lines[j] || ''))) j++;
+    for (; j < lines.length; j++) {
+      const cells = markdownTableCells(lines[j]);
+      if (cells.length < headerCells.length || isMarkdownTableSeparator(cells)) break;
+      const row = {
+        level: 0,
+        features: [],
+        plansKnown: null,
+        magicItems: null,
+        cantrips: null,
+        prepared: null,
+        slots: []
+      };
+      keys.forEach((key, index) => {
+        const value = cells[index] || '';
+        if (!key) return;
+        if (key === 'level') row.level = parseOptionalTableNumber(value) || 0;
+        else if (key === 'features') {
+          row.features = splitListValue(value)
+            .map(feature => normalizeExtractedName(feature))
+            .filter(feature => feature && /[A-Za-z0-9]/.test(feature));
+        } else if (/^slots/.test(key)) {
+          const slotLevel = parseInt(key.replace('slots', ''), 10);
+          row.slots[slotLevel] = parseOptionalTableNumber(value);
+        } else {
+          row[key] = parseOptionalTableNumber(value);
+        }
+      });
+      if (row.level) rows.push(row);
+    }
+    i = Math.max(i, j - 1);
+  }
+  return rows;
+}
+
+function applyCoreClassTraits(cls, traits) {
+  const hitDieText = traits['hit point die'] || traits['hit dice'];
+  if (hitDieText && !cls.hitDie) cls.hitDie = parseHitDie(hitDieText);
+  const saveText = traits['saving throw proficiencies'] || traits['saving throws'];
+  if (saveText && !cls.savingThrows.length) cls.savingThrows = parseAbilitiesFromText(saveText);
+  const skillText = traits['skill proficiencies'] || traits.skills;
+  if (skillText && !cls.skillChoices.count) cls.skillChoices = parseSkillChoice(skillText);
+  const weaponText = traits['weapon proficiencies'] || traits.weapons;
+  if (weaponText && !cls.weaponProficiencies.length) cls.weaponProficiencies = splitListValue(weaponText);
+  const toolText = traits['tool proficiencies'] || traits.tools;
+  if (toolText && !cls.toolProficiencies.length) cls.toolProficiencies = splitListValue(toolText);
+  const armorText = traits['armor training'] || traits.armor;
+  if (armorText && !cls.armorProficiencies.length) cls.armorProficiencies = splitListValue(armorText);
+  const equipmentText = traits['starting equipment'] || traits.equipment;
+  if (equipmentText && !cls.startingEquipment) cls.startingEquipment = equipmentText.replace(/^Choose A or B:\s*/i, 'Choose A or B: ');
+}
+
 function parseClassBlock(name, block) {
   const cls = {
     name,
@@ -1101,6 +1269,7 @@ function parseClassBlock(name, block) {
     savingThrows: [],
     armorProficiencies: [],
     weaponProficiencies: [],
+    toolProficiencies: [],
     skillChoices: { count: 0, from: [] },
     startingEquipment: '',
     archetypeLevel: 0,
@@ -1110,8 +1279,11 @@ function parseClassBlock(name, block) {
     spellcastingList: '',
     spellcastingPrepare: '',
     ritualCasting: false,
+    progression: [],
     features: []
   };
+  applyCoreClassTraits(cls, parseCoreClassTraitRows(block));
+  cls.progression = parseClassProgressionRows(block);
   let firstField = block.length;
   for (let i = 0; i < block.length; i++) {
     const line = block[i];
@@ -1126,6 +1298,9 @@ function parseClassBlock(name, block) {
       firstField = Math.min(firstField, i);
     } else if (/^Weapon(?:s| Proficiencies)?/i.test(line)) {
       cls.weaponProficiencies = splitListValue(stripLeadingFieldLabel(line, /^Weapon(?:s| Proficiencies)?/i));
+      firstField = Math.min(firstField, i);
+    } else if (/^Tool(?:\s+Proficienc(?:y|ies)|s?\s*:)/i.test(line)) {
+      cls.toolProficiencies = splitListValue(stripLeadingFieldLabel(line, /^Tool(?:\s+Proficienc(?:y|ies)|s?\s*:)/i));
       firstField = Math.min(firstField, i);
     } else if (/^Skill(?:s| Proficiencies)?/i.test(line)) {
       cls.skillChoices = parseSkillChoice(line);
@@ -1155,16 +1330,22 @@ function parseClassBlock(name, block) {
   const archetypeFeature = cls.features.find(f => /\b(subclass|archetype|path|college|domain|circle|oath|patron|tradition)\b/i.test(f.name || ''))
     || cls.features.find(f => /\b(subclass|archetype|path|college|domain|circle|oath|patron|tradition)\b/i.test(`${f.name} ${f.description}`));
   if (archetypeFeature) cls.archetypeLevel = parseInt(archetypeFeature.level, 10) || cls.archetypeLevel;
+  cls.features = cls.features.filter(feature => !isPlaceholderClassFeature(feature));
   return cls;
 }
 
 function backgroundStartName(lines, i) {
   if (isKnownFieldLine(lines[i])) return '';
   if (/^ARTIST:/i.test(lines[i]) || isVisualNoiseTitle(lines[i])) return '';
+  if (isProseFragmentTitle(lines[i])) return '';
+  if (/^Can\s*t?\s*rip\b|^Cantrip\b/i.test(cleanExtractedTitle(lines[i]))) return '';
   if (/^species descriptions\b/i.test(cleanExtractedTitle(lines[i])) || isGenericRaceHeading(lines[i])) return '';
   if (/^backgrounds\b/i.test(cleanExtractedTitle(lines[i]))) return '';
   const prefixed = lines[i].match(/^Background:\s*(.+)$/i);
-  if (prefixed) return normalizeExtractedName(prefixed[1]);
+  if (prefixed) {
+    if (isTableOfContentsLine(lines[i])) return '';
+    return normalizeExtractedName(prefixed[1]);
+  }
   const window = lines.slice(i + 1, i + 14).join('\n');
   const hasBackgroundFields = /^Skill\s+Pro/im.test(window)
     || (/(?:^|\n)(?:Ability Scores?|Abili)\b/im.test(window) && /(?:^|\n)(?:Equipment|Choose\s*A\s+or\s+B)\b/im.test(window));
@@ -1177,13 +1358,13 @@ function raceStartName(lines, i) {
   if (/^ARTIST:/i.test(lines[i]) || isVisualNoiseTitle(lines[i])) return '';
   if (/^species descriptions\b/i.test(cleanExtractedTitle(lines[i]))) return '';
   const previous = cleanExtractedTitle(lines[i - 1] || '');
-  if (looksLikeTitle(previous) && !isKnownFieldLine(previous) && !isGenericRaceHeading(previous)) return '';
+  if (looksLikeTitle(previous) && !isProseFragmentTitle(previous) && !isKnownFieldLine(previous) && !isGenericRaceHeading(previous) && !/^species descriptions\b/i.test(previous)) return '';
   if (backgroundStartName(lines, i) || classStartName(lines, i)) return '';
   const prefixed = lines[i].match(/^(?:Race|Species):\s*(.+)$/i);
   if (prefixed) return normalizeExtractedName(prefixed[1]).replace(/\s+Traits$/i, '');
   if (isGenericRaceHeading(lines[i])) return '';
   const next = lines.slice(i + 1, i + 50).join('\n');
-  const markers = [/^Size:/im, /^Speed:/im, /^Languages:/im, /^Creature Type:/im].filter(re => re.test(next)).length;
+  const markers = [/\bSize:/im, /\bSpeed:/im, /^Languages:/im, /\bCreature Type:/im].filter(re => re.test(next)).length;
   if (looksLikeTitle(lines[i]) && !isGenericRaceHeading(lines[i]) && markers >= 2) return normalizeExtractedName(lines[i]).replace(/\s+Traits$/i, '');
   return '';
 }
@@ -1191,6 +1372,7 @@ function raceStartName(lines, i) {
 function archetypeStartInfo(lines, i, subclassSectionClass = '') {
   if (isKnownFieldLine(lines[i])) return null;
   if (isLeveledFeatureHeading(lines[i])) return null;
+  if (isProseFragmentTitle(lines[i])) return null;
   if (isGenericArchetypeHeading(lines[i])) return null;
   if (backgroundStartName(lines, i) || raceStartName(lines, i) || classStartName(lines, i)) return null;
   const prefixed = lines[i].match(/^(?:Subclass|Archetype):\s*(.+)$/i);
@@ -1305,6 +1487,20 @@ function splitListValue(text) {
     .filter(Boolean);
 }
 
+function markdownTableCells(line) {
+  const text = String(line || '').trim();
+  if (!text.includes('|')) return [];
+  return text
+    .replace(/^\|/, '')
+    .replace(/\|$/, '')
+    .split('|')
+    .map(cell => cell.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
+}
+
+function isMarkdownTableSeparator(cells) {
+  return cells.length > 0 && cells.every(cell => /^:?-{3,}:?$/.test(cell));
+}
+
 const SKILL_NAMES = [
   'Acrobatics','Animal Handling','Arcana','Athletics','Deception','History','Insight','Intimidation',
   'Investigation','Medicine','Nature','Perception','Performance','Persuasion','Religion','Sleight of Hand',
@@ -1385,8 +1581,17 @@ function parseSize(text) {
   return m ? titleCase(m[1]) : '';
 }
 
+function parseSizeOptions(text) {
+  const sizes = [];
+  for (const match of String(text || '').matchAll(/\b(Tiny|Small|Medium|Large|Huge|Gargantuan)\b/gi)) {
+    const size = titleCase(match[1]);
+    if (!sizes.includes(size)) sizes.push(size);
+  }
+  return sizes;
+}
+
 function parseSpeed(text) {
-  const m = String(text || '').match(/(\d+)\s*feet/i);
+  const m = String(text || '').match(/(\d+)\s*(?:feet|ft\.?)/i);
   return m ? parseInt(m[1], 10) : 0;
 }
 
@@ -1421,8 +1626,10 @@ function parseInlineTraitBlocks(lines) {
 }
 
 function inlineTraitStart(line) {
+  const raw = String(line || '').trim();
   const text = cleanExtractedTitle(line);
-  const match = text.match(/^([A-Z][A-Za-z'’ -]{2,45})\.\s+(.+)$/);
+  const match = text.match(/^([A-Z][A-Za-z'’ -]{2,45})\.\s+(.+)$/)
+    || (/[.!?]\s*$/.test(raw) ? text.match(/^([A-Z][A-Za-z'’ -]{2,45})$/) : null);
   if (!match) return null;
   const name = match[1].trim();
   if (/^ARTIST:/i.test(name) || isVisualNoiseTitle(name) || /^(Action|Actions|Reaction|Reactions|Trait|Traits)$/i.test(name)) return null;
@@ -1430,7 +1637,7 @@ function inlineTraitStart(line) {
   if (name.split(/\s+/).some(word => /^[a-z]/.test(word) && !/^(of|the|and|or|in|with|from)$/i.test(word))) return null;
   if (/^(As a|The|This|Whenever|When|While|Once|In addition|Choose|Your|You)\b/i.test(name)) return null;
   if (isRaceMetaLine(name) || isGenericRaceHeading(name)) return null;
-  return { name, description: match[2].trim() };
+  return { name, description: (match[2] || '').trim() };
 }
 
 function parseNamedBlocks(lines, isStart) {
@@ -3680,9 +3887,9 @@ function dispatchGen(item, type, source, prefix, meta) {
   if (type === 'item')      return genItemXml(item, source, prefix);
   if (type === 'feat')      return genFeatXml(item, source, prefix, meta);
   if (type === 'magic')     return genMagicXml(item, source, prefix);
-  if (type === 'race')       return genRaceXml(item, source, prefix);
+  if (type === 'race')       return genRaceXml(item, source, prefix, meta);
   if (type === 'background') return genBackgroundXml(item, source, prefix, meta);
-  if (type === 'class')      return genClassXml(item, source, prefix);
+  if (type === 'class')      return genClassXml(item, source, prefix, meta);
   // 'other' uses the element's own type field (e.g. 'Race', 'Class') for the XML type attribute
   const resolvedType = (type === 'other' && item.type) ? item.type : type;
   return genGenericXml(item, resolvedType, source, prefix);
@@ -4852,6 +5059,8 @@ const TOOL_PROFICIENCY_IDS = {
   'smiths tools': 'ID_PROFICIENCY_TOOL_PROFICIENCY_SMITHS_TOOLS',
   "thieves' tools": 'ID_PROFICIENCY_TOOL_PROFICIENCY_THIEVES_TOOLS',
   'thieves tools': 'ID_PROFICIENCY_TOOL_PROFICIENCY_THIEVES_TOOLS',
+  "tinker's tools": 'ID_PROFICIENCY_TOOL_PROFICIENCY_TINKERS_TOOLS',
+  'tinkers tools': 'ID_PROFICIENCY_TOOL_PROFICIENCY_TINKERS_TOOLS',
   "woodcarver's tools": 'ID_PROFICIENCY_TOOL_PROFICIENCY_WOODCARVERS_TOOLS',
   'woodcarvers tools': 'ID_PROFICIENCY_TOOL_PROFICIENCY_WOODCARVERS_TOOLS'
 };
@@ -4885,14 +5094,230 @@ function magicCategoryFromType(type) {
   return 'Magic Items';
 }
 
-function genRaceXml(race, source, prefix) {
+function racialTraitId(race, trait, prefix) {
+  const raceSegment = idify(race.name);
+  const traitSegment = idify(trait.name);
+  const suffix = traitSegment.startsWith(`${raceSegment}_`) ? traitSegment : `${raceSegment}_${traitSegment}`;
+  return `${prefix}_RACIAL_TRAIT_${suffix}`;
+}
+
+function racialTraitDisplayName(race, trait) {
+  const name = normalizeExtractedName(trait?.name || '');
+  if (/^Darkvision$/i.test(name)) return `${name} (${normalizeExtractedName(race?.name || '')})`;
+  return name;
+}
+
+const KNOWN_INTERNAL_RACE_GRANTS = new Set([
+  'AARAKOCRA', 'AASIMAR', 'AIR_GENASI', 'BUGBEAR', 'CENTAUR', 'CHANGELING',
+  'DARK_ELF', 'DEEP_GNOME', 'DHAMPIR', 'DRAGONBORN', 'DUERGAR', 'DWARF',
+  'EARTH_GENASI', 'ELADRIN', 'ELF', 'FAIRY', 'FIRBOLG', 'FIRE_GENASI',
+  'GENASI', 'GITH', 'GITHYANKI', 'GITHZERAI', 'GNOME', 'GOBLIN', 'GOBLINOID',
+  'GOLIATH', 'HALF_ELF', 'HALF_ORC', 'HALFLING', 'HARENGON', 'HIGH_ELF',
+  'HOBGOBLIN', 'HUMAN', 'KALASHTAR', 'KENKU', 'KOBOLD', 'LIZARDFOLK',
+  'MINOTAUR', 'ORC', 'OWLIN', 'SATYR', 'SEA_ELF', 'SHADAR_KAI', 'SHIFTER',
+  'TABAXI', 'TIEFLING', 'TORTLE', 'TRITON', 'WARFORGED', 'WATER_GENASI',
+  'WOOD_ELF', 'YUAN_TI'
+]);
+
+function raceInternalGrantId(race) {
+  const name = normalizeExtractedName(race?.name || '');
+  const segment = /^Khoravar$/i.test(name) ? 'HALF_ELF' : idify(name);
+  return KNOWN_INTERNAL_RACE_GRANTS.has(segment) ? `ID_INTERNAL_GRANT_RACE_${segment}` : '';
+}
+
+function raceSizeRule(race) {
+  const options = (race.sizeOptions && race.sizeOptions.length ? race.sizeOptions : [race.size]).filter(Boolean);
+  const hasSmall = options.some(size => /^Small$/i.test(size));
+  const hasMedium = options.some(size => /^Medium$/i.test(size));
+  if (hasSmall && hasMedium) {
+    return rule(
+      `\t\t\t<select type="Racial Trait" name="Size (${escAttrXml(race.name)})" supports="ID_INTERNAL_RACIAL_TRAIT_SMALL|ID_INTERNAL_RACIAL_TRAIT_MEDIUM" />`,
+      `Choose Small or Medium size for ${race.name}.`,
+      `Size: ${options.join(' or ')}`
+    );
+  }
+  const size = options[0] || race.size;
+  if (!size) return null;
+  return rule(
+    `\t\t\t<grant type="Size" id="ID_SIZE_${idify(size)}" />`,
+    `Set size to ${size}.`,
+    `Size: ${size}`
+  );
+}
+
+function defaultRaceLanguages(race, meta) {
+  const languages = [];
+  const name = normalizeExtractedName(race?.name || '');
+  (race.languages || []).filter(lang => !isChoiceLanguage(lang)).forEach(lang => languages.push(lang));
+  if (isModernRuleset(meta) && !languages.some(lang => /^Common$/i.test(lang))) languages.push('Common');
+  if (/^Khoravar$/i.test(name) && !languages.some(lang => /^Elvish$/i.test(lang))) languages.push('Elvish');
+  return uniqueStrings(languages);
+}
+
+function defaultRaceLanguageChoices(race, meta) {
+  const explicit = (parseInt(race.languageChoices, 10) || 0) + choiceCountFromValues(race.languages);
+  if (explicit) return explicit;
+  const name = normalizeExtractedName(race?.name || '');
+  if (isModernRuleset(meta) && /^(Changeling|Kalashtar)$/i.test(name)) return 1;
+  return 0;
+}
+
+function racialTraitSelectName(race, trait) {
+  const traitName = normalizeExtractedName(trait?.name || '');
+  const raceName = normalizeExtractedName(race?.name || '');
+  if (/^(Bestial Instincts)$/i.test(traitName)) return `${traitName} (${raceName})`;
+  return traitName;
+}
+
+function skillChoiceRuleFromText(race, trait) {
+  const text = String(trait?.description || '');
+  if (!/\bgain proficiency in\b/i.test(text)) return null;
+  const skills = parseSkillsFromText(text);
+  if (!skills.length) return null;
+  const countMatch = text.match(/\b(?:two|2|one|1)\s+of the following skills?\b/i)
+    || text.match(/\b(?:one|1)\s+skill\b/i);
+  const count = countMatch ? parseCountWord(countMatch[0].match(/\b(two|2|one|1)\b/i)?.[1] || 'one') : 1;
+  const numberAttr = count > 1 ? ` number="${count}"` : '';
+  return rule(
+    `\t\t\t<select type="Proficiency" name="${escAttrXml(racialTraitSelectName(race, trait))}"${numberAttr} supports="Skill,(${escAttrXml(skills.join('||'))})" />`,
+    `Choose ${count} skill proficienc${count === 1 ? 'y' : 'ies'} for ${trait.name}.`,
+    text
+  );
+}
+
+function inferRacialTraitRules(race, trait, meta) {
+  const rules = [];
+  const text = String(trait?.description || '');
+  const lower = text.toLowerCase();
+  const traitName = normalizeExtractedName(trait?.name || '');
+  const raceName = normalizeExtractedName(race?.name || '');
+  const skillChoice = skillChoiceRuleFromText(race, trait);
+  if (skillChoice) rules.push(skillChoice);
+
+  [
+    'acid', 'bludgeoning', 'cold', 'fire', 'force', 'lightning', 'necrotic',
+    'piercing', 'poison', 'psychic', 'radiant', 'slashing', 'thunder'
+  ].forEach(type => {
+    if (new RegExp(`\\bresistance to [^.]{0,120}\\b${type} damage\\b|\\b${type} damage resistance\\b`, 'i').test(lower)) {
+      rules.push(rule(
+        `\t\t\t<grant type="Condition" id="ID_INTERNAL_CONDITION_DAMAGE_RESISTANCE_${idify(type)}" />`,
+        `Gain resistance to ${type} damage.`,
+        text
+      ));
+    }
+  });
+
+  if (/\bdarkvision\b/i.test(text)) {
+    rules.push(rule(
+      `\t\t\t<grant type="Vision" id="ID_VISION_DARKVISION" />`,
+      'Gain Darkvision.',
+      text
+    ));
+  }
+
+  if (/^Fey Gift$/i.test(traitName) && /\bFriends cantrip\b/i.test(text)) {
+    rules.push(rule(
+      `\t\t\t<grant type="Spell" id="${canonicalSpellId('Friends', meta)}" />`,
+      'Know the Friends cantrip.',
+      text
+    ));
+    rules.push(rule(
+      `\t\t\t<select type="Racial Trait" name="Spellcasting Ability (${escAttrXml(raceName)})" supports="${escAttrXml(raceName)} Spellcasting Ability" />`,
+      `Choose the spellcasting ability for ${raceName}.`,
+      text
+    ));
+  }
+
+  if (/^Skill Versatility$/i.test(traitName) && /\bone skill or with one tool\b/i.test(text)) {
+    rules.push(rule(
+      `\t\t\t<select type="Proficiency" name="Skill or Tool Versatility (${escAttrXml(raceName)})" supports="Skill||Tool" />`,
+      'Choose one skill or tool proficiency.',
+      text
+    ));
+  }
+
+  if (/^Shifting$/i.test(traitName)) {
+    if (/\bTemporary Hit Points equal to 2 times your Proficiency Bonus\b/i.test(text)) {
+      rules.push(rule(
+        `\t\t\t<stat name="shifting:temp hp" value="proficiency:2" />`,
+        'Set Shifting temporary hit points to twice proficiency bonus.',
+        text
+      ));
+    }
+    if (/\bBeasthide\b|\bLongtooth\b|\bSwiftstride\b|\bWildhunt\b/i.test(text)) {
+      rules.push(rule(
+        `\t\t\t<select type="Racial Trait" name="Shifting Form (${escAttrXml(raceName)})" supports="${escAttrXml((meta?.abbr || 'SRC').replace(/[^A-Z0-9]/g, '_'))} Shifter Form" />`,
+        'Choose a Shifter form.',
+        text
+      ));
+    }
+  }
+
+  if (/^Integrated Protection$/i.test(traitName) && /\+1 bonus to your Armor Class/i.test(text)) {
+    rules.push(rule(
+      `\t\t\t<stat name="ac:misc" value="1" />`,
+      'Gain a +1 bonus to Armor Class.',
+      text
+    ));
+  }
+
+  if (/^Specialized Design$/i.test(traitName) && /\bone skill proficiency and one tool proficiency\b/i.test(text)) {
+    rules.push(rule(
+      `\t\t\t<select type="Proficiency" name="Skill Proficiency (${escAttrXml(raceName)})" supports="Skill" />`,
+      'Choose one skill proficiency.',
+      text
+    ));
+    rules.push(rule(
+      `\t\t\t<select type="Proficiency" name="Tool Proficiency (${escAttrXml(raceName)})" supports="Tool" />`,
+      'Choose one tool proficiency.',
+      text
+    ));
+  }
+
+  return dedupeRules(rules);
+}
+
+function extraRacialTraitElements(race, source, prefix, meta) {
+  const lines = [];
+  const raceName = normalizeExtractedName(race?.name || '');
+  if (/^Khoravar$/i.test(raceName) && (race.traits || []).some(trait => /^Fey Gift$/i.test(trait.name || ''))) {
+    ['Intelligence', 'Wisdom', 'Charisma'].forEach(ability => {
+      const id = `${prefix}_RACIAL_TRAIT_KHORAVAR_${idify(ability)}`;
+      lines.push(`\t<element name="${ability} (Khoravar)" type="Racial Trait" source="${escAttrXml(source)}" id="${id}">`);
+      lines.push(`\t\t<supports>Khoravar Spellcasting Ability</supports>`);
+      lines.push(`\t\t<compendium display="false" />`);
+      lines.push(`\t\t<description><p>Your spellcasting ability for Khoravar spells is ${ability}.</p></description>`);
+      lines.push(`\t\t<sheet display="false" />`);
+      lines.push(`\t\t<rules><stat name="khoravar:spellcasting ability" value="${ability}" inline="true" /></rules>`);
+      lines.push(`\t</element>`);
+    });
+  }
+  const shifting = (race.traits || []).find(trait => /^Shifting$/i.test(trait.name || ''));
+  if (/^Shifter$/i.test(raceName) && shifting) {
+    for (const option of ['Beasthide', 'Longtooth', 'Swiftstride', 'Wildhunt']) {
+      const match = String(shifting.description || '').match(new RegExp(`\\b${option}\\b[:.]?\\s*([^\\n]+)`, 'i'));
+      if (!match) continue;
+      const id = `${prefix}_RACIAL_TRAIT_SHIFTER_${idify(option)}`;
+      lines.push(`\t<element name="${option}" type="Racial Trait" source="${escAttrXml(source)}" id="${id}">`);
+      lines.push(`\t\t<supports>${escXml((meta?.abbr || 'SRC').replace(/[^A-Z0-9]/g, '_'))} Shifter Form</supports>`);
+      lines.push(`\t\t<compendium display="false" />`);
+      lines.push(`\t\t<description><p><b>${option}.</b> ${escXml(match[1].trim())}</p></description>`);
+      lines.push(`\t\t<sheet display="false" />`);
+      lines.push(`\t\t<rules></rules>`);
+      lines.push(`\t</element>`);
+    }
+  }
+  return lines;
+}
+
+function genRaceXml(race, source, prefix, meta) {
   const raceId = `${prefix}_RACE_${idify(race.name)}`;
   const lines = [];
   lines.push(`\t<element name="${escAttrXml(race.name)}" type="Race" source="${escAttrXml(source)}" id="${raceId}">`);
   lines.push(`\t\t<description>`);
   lines.push(`\t\t\t<p>${escXml(race.description||'')}</p>`);
   (race.traits||[]).forEach(t => {
-    const tid = `${raceId}_TRAIT_${idify(t.name)}`;
+    const tid = racialTraitId(race, t, prefix);
     lines.push(`\t\t\t<div element="${tid}" />`);
   });
   lines.push(`\t\t</description>`);
@@ -4914,6 +5339,8 @@ function genRaceXml(race, source, prefix) {
       }
     }
   }
+  const sizeRule = raceSizeRule(race);
+  if (sizeRule) raceRules.push(sizeRule);
   if (race.speed) {
     raceRules.push(rule(
       `\t\t\t<stat name="innate speed" value="${race.speed}" bonus="base" />`,
@@ -4921,23 +5348,22 @@ function genRaceXml(race, source, prefix) {
       `Speed: ${race.speed}`
     ));
   }
-  if (race.size) {
+  const internalGrantId = raceInternalGrantId(race);
+  if (internalGrantId) {
     raceRules.push(rule(
-      `\t\t\t<grant type="Size" id="ID_SIZE_${idify(race.size)}" />`,
-      `Set size to ${race.size}.`,
-      `Size: ${race.size}`
+      `\t\t\t<grant type="Grants" id="${internalGrantId}" />`,
+      `Apply the internal ${race.name} race grant.`,
+      race.name
     ));
   }
-  if (race.languages) {
-    race.languages.filter(lang => !isChoiceLanguage(lang)).forEach(lang => {
-      raceRules.push(rule(
-        `\t\t\t<grant type="Language" id="ID_LANGUAGE_${idify(lang)}" />`,
-        `Know ${lang}.`,
-        `Languages: ${(race.languages || []).join(', ')}`
-      ));
-    });
-  }
-  const raceLanguageChoices = (parseInt(race.languageChoices, 10) || 0) + choiceCountFromValues(race.languages);
+  defaultRaceLanguages(race, meta).forEach(lang => {
+    raceRules.push(rule(
+      `\t\t\t<grant type="Language" id="ID_LANGUAGE_${idify(lang)}" />`,
+      `Know ${lang}.`,
+      `Languages: ${lang}`
+    ));
+  });
+  const raceLanguageChoices = defaultRaceLanguageChoices(race, meta);
   const raceLanguageSelect = languageChoiceSelect(race.name, raceLanguageChoices);
   if (raceLanguageSelect) {
     raceRules.push(rule(
@@ -4947,7 +5373,7 @@ function genRaceXml(race, source, prefix) {
     ));
   }
   (race.traits||[]).forEach(t => {
-    const tid = `${raceId}_TRAIT_${idify(t.name)}`;
+    const tid = racialTraitId(race, t, prefix);
     raceRules.push(rule(
       `\t\t\t<grant type="Racial Trait" id="${tid}" />`,
       `Grant racial trait ${t.name}.`,
@@ -4967,16 +5393,29 @@ function genRaceXml(race, source, prefix) {
 
   // Racial Trait child elements
   (race.traits||[]).forEach(t => {
-    const tid = `${raceId}_TRAIT_${idify(t.name)}`;
-    lines.push(`\t<element name="${escAttrXml(t.name)}" type="Racial Trait" source="${escAttrXml(source)}" id="${tid}">`);
+    const tid = racialTraitId(race, t, prefix);
+    const traitRules = inferRacialTraitRules(race, t, meta);
+    lines.push(`\t<element name="${escAttrXml(racialTraitDisplayName(race, t))}" type="Racial Trait" source="${escAttrXml(source)}" id="${tid}">`);
     lines.push(`\t\t<compendium display="false" />`);
     lines.push(`\t\t<description><p>${escXml(t.description||'')}</p></description>`);
     lines.push(`\t\t<sheet><description>${escXml(t.description||'')}</description></sheet>`);
-    lines.push(`\t\t<rules></rules>`);
+    lines.push(`\t\t<rules>`);
+    renderRuleLines(lines, traitRules);
+    lines.push(`\t\t</rules>`);
     lines.push(`\t</element>`);
   });
+  lines.push(...extraRacialTraitElements(race, source, prefix, meta));
 
   return lines;
+}
+
+function backgroundFeatureId(bg, feature, prefix) {
+  return `${prefix}_BACKGROUND_FEATURE_${idify(bg.name)}_${idify(feature.name)}`;
+}
+
+function backgroundFeatureDisplayName(feature) {
+  const name = String(feature?.name || '').trim();
+  return /^Feature:/i.test(name) ? name : `Feature: ${name}`;
 }
 
 function genBackgroundXml(bg, source, prefix, meta) {
@@ -5006,7 +5445,7 @@ function genBackgroundXml(bg, source, prefix, meta) {
     lines.push(`\t\t\t</div>`);
   }
   (bg.features||[]).forEach(f => {
-    const fid = `${bgId}_FEATURE_${idify(f.name)}`;
+    const fid = backgroundFeatureId(bg, f, prefix);
     lines.push(`\t\t\t<div element="${fid}" />`);
   });
   lines.push(`\t\t</description>`);
@@ -5105,9 +5544,9 @@ function genBackgroundXml(bg, source, prefix, meta) {
     ));
   }
   (bg.features||[]).forEach(f => {
-    const fid = `${bgId}_FEATURE_${idify(f.name)}`;
+    const fid = backgroundFeatureId(bg, f, prefix);
     backgroundRules.push(rule(
-      `\t\t\t<grant type="Background Feature" id="${fid}" />`,
+      `\t\t\t<grant type="Background Feature" id="${fid}" requirements="!ID_INTERNAL_GRANT_OPTIONAL_BACKGROUND_FEATURE" />`,
       `Grant background feature ${f.name}.`,
       f.description || f.name
     ));
@@ -5118,10 +5557,10 @@ function genBackgroundXml(bg, source, prefix, meta) {
 
   // Background Feature child elements
   (bg.features||[]).forEach(f => {
-    const fid = `${bgId}_FEATURE_${idify(f.name)}`;
-    lines.push(`\t<element name="${escAttrXml(f.name)}" type="Background Feature" source="${escAttrXml(source)}" id="${fid}">`);
+    const fid = backgroundFeatureId(bg, f, prefix);
+    lines.push(`\t<element name="${escAttrXml(backgroundFeatureDisplayName(f))}" type="Background Feature" source="${escAttrXml(source)}" id="${fid}">`);
     lines.push(`\t\t<compendium display="false" />`);
-    lines.push(`\t\t<supports>${escXml(bg.name)}</supports>`);
+    lines.push(`\t\t<supports>Background Feature</supports>`);
     lines.push(`\t\t<description><p>${escXml(f.description||'')}</p></description>`);
     lines.push(`\t\t<sheet><description>${escXml(f.description||'')}</description></sheet>`);
     lines.push(`\t\t<rules></rules>`);
@@ -5152,96 +5591,390 @@ function isArchetypeSelectionFeature(feature, cls) {
   );
 }
 
-function genClassXml(cls, source, prefix) {
+function isPlaceholderClassFeature(feature) {
+  return /^Subclass Feature$/i.test(String(feature?.name || ''));
+}
+
+function classFeatureIdSegment(name) {
+  if (/^Ability Score Improvement$/i.test(name || '')) return 'ASI';
+  return idify(name || '');
+}
+
+function classFeatureId(cls, featureName, prefix) {
+  const classSegment = idify(cls.name);
+  const featureSegment = classFeatureIdSegment(featureName);
+  const suffix = featureSegment.startsWith(`${classSegment}_`) ? featureSegment.slice(classSegment.length + 1) : featureSegment;
+  return `${prefix}_CLASS_FEATURE_${classSegment}_${suffix}`;
+}
+
+function classFeatureElements(cls) {
+  return (cls.features || []).filter(feature => !isPlaceholderClassFeature(feature));
+}
+
+function classProgressionFeatureGrants(cls) {
+  const progression = cls.progression || [];
+  if (!progression.length) {
+    return classFeatureElements(cls).map(feature => ({ name: feature.name, level: feature.level || 1 }));
+  }
+  const grants = [];
+  progression.forEach(row => {
+    (row.features || []).forEach(name => {
+      if (!name || isPlaceholderClassFeature({ name })) return;
+      grants.push({ name, level: row.level });
+    });
+  });
+  return grants;
+}
+
+function progressionDeltas(rows, accessor) {
+  const deltas = [];
+  let previous = 0;
+  (rows || []).forEach(row => {
+    const value = accessor(row);
+    if (!Number.isFinite(value)) return;
+    if (value > previous) deltas.push({ level: row.level, value: value - previous });
+    previous = value;
+  });
+  return deltas;
+}
+
+function classSkillSupports(skills) {
+  const list = (skills || []).filter(Boolean);
+  return list.length ? `Skill,(${list.join('||')})` : 'Skill';
+}
+
+function normalizeArmorProficiencyName(value) {
+  const clean = normalizeExtractedName(value);
+  if (/^(Light|Medium|Heavy)$/i.test(clean)) return `${clean} armor`;
+  if (/^Light Armor$/i.test(clean)) return 'Light armor';
+  if (/^Medium Armor$/i.test(clean)) return 'Medium armor';
+  if (/^Heavy Armor$/i.test(clean)) return 'Heavy armor';
+  return clean;
+}
+
+function normalizeWeaponProficiencyName(value) {
+  const clean = normalizeExtractedName(value);
+  if (/^Simple Weapons$/i.test(clean)) return 'Simple weapons';
+  if (/^Martial Weapons$/i.test(clean)) return 'Martial weapons';
+  return clean;
+}
+
+function classProficienciesSummary(cls) {
+  return [
+    ...(cls.weaponProficiencies || []).map(normalizeWeaponProficiencyName),
+    ...(cls.toolProficiencies || []).map(cleanExtractedTitle),
+    ...(cls.armorProficiencies || []).map(normalizeArmorProficiencyName)
+  ].filter(Boolean).join(', ');
+}
+
+function classShortDescription(cls) {
+  if (/^Artificer$/i.test(cls.name || '')) return 'An inventor who harnesses magic through tools and crafted objects.';
+  return String(cls.description || '').replace(/\|[^|]+\|/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
+}
+
+function multiclassId(cls, prefix) {
+  return `${prefix}_MULTICLASS_${idify(cls.name)}`;
+}
+
+function classAbilityRequirement(ability) {
+  const key = abilityStatName(ability);
+  const short = abilityShortName(key).toLowerCase();
+  return short ? `[${short}:13]` : '';
+}
+
+function classSavingThrowProficiencyId(ability) {
+  const stat = abilityStatName(ability);
+  return stat ? `ID_PROFICIENCY_SAVINGTHROW_${idify(stat)}` : '';
+}
+
+function classArmorProficiencyId(value) {
+  const key = normalizeArmorProficiencyName(value).toLowerCase();
+  return {
+    'light armor': 'ID_PROFICIENCY_ARMOR_PROFICIENCY_LIGHT_ARMOR',
+    'medium armor': 'ID_PROFICIENCY_ARMOR_PROFICIENCY_MEDIUM_ARMOR',
+    'heavy armor': 'ID_PROFICIENCY_ARMOR_PROFICIENCY_HEAVY_ARMOR',
+    shields: 'ID_PROFICIENCY_ARMOR_PROFICIENCY_SHIELDS'
+  }[key] || '';
+}
+
+function classWeaponProficiencyId(value) {
+  const key = normalizeWeaponProficiencyName(value).toLowerCase();
+  return {
+    'simple weapons': 'ID_PROFICIENCY_WEAPON_PROFICIENCY_SIMPLE_WEAPONS',
+    'martial weapons': 'ID_PROFICIENCY_WEAPON_PROFICIENCY_MARTIAL_WEAPONS'
+  }[key] || '';
+}
+
+function classToolProficiencyRule(tool, cls, requirements = '') {
+  const xml = toolProficiencyRule(tool, cls.name);
+  if (!xml) return '';
+  return requirements ? xml.replace(/\s*\/>$/, ` requirements="${escAttrXml(requirements)}" />`) : xml;
+}
+
+function multiclassProficienciesSummary(cls) {
+  if (/^Artificer$/i.test(cls.name || '')) {
+    return "Light armor, medium armor, shields, Tinker's Tools, one skill from the Artificer skill list";
+  }
+  return [
+    ...(cls.armorProficiencies || []).map(normalizeArmorProficiencyName),
+    ...(cls.toolProficiencies || []).filter(tool => !/\bchoice\b|\bone type\b|\bchoose\b/i.test(tool)).map(normalizeExtractedName),
+    cls.skillChoices?.count ? `one skill from the ${cls.name} skill list` : ''
+  ].filter(Boolean).join(', ') || '-';
+}
+
+function renderMulticlassRuleLines(lines, cls) {
+  const pushGrant = id => lines.push(`\t\t\t\t<grant type="Proficiency" id="${id}" />`);
+  if (/^Artificer$/i.test(cls.name || '')) {
+    pushGrant('ID_PROFICIENCY_TOOL_PROFICIENCY_TINKERS_TOOLS');
+    pushGrant('ID_PROFICIENCY_ARMOR_PROFICIENCY_LIGHT_ARMOR');
+    pushGrant('ID_PROFICIENCY_ARMOR_PROFICIENCY_MEDIUM_ARMOR');
+    pushGrant('ID_PROFICIENCY_ARMOR_PROFICIENCY_SHIELDS');
+    lines.push(`\t\t\t\t<select type="Proficiency" name="Skill Proficiency (${escAttrXml(cls.name)} Multiclass)" supports="${escAttrXml(classSkillSupports(cls.skillChoices?.from || []))}" />`);
+    return;
+  }
+  (cls.armorProficiencies || []).forEach(armor => {
+    const id = classArmorProficiencyId(armor);
+    if (id) pushGrant(id);
+  });
+  (cls.toolProficiencies || []).forEach(tool => {
+    if (/\bchoice\b|\bone type\b|\bchoose\b/i.test(tool)) return;
+    const xml = toolProficiencyRule(tool, cls.name);
+    if (xml && /^<grant\b/i.test(xml)) lines.push(`\t\t\t\t${xml}`);
+  });
+  if (cls.skillChoices?.count) {
+    lines.push(`\t\t\t\t<select type="Proficiency" name="Skill Proficiency (${escAttrXml(cls.name)} Multiclass)" supports="${escAttrXml(classSkillSupports(cls.skillChoices.from || []))}" />`);
+  }
+}
+
+function classSpellcastingRules(cls) {
+  const rows = cls.progression || [];
+  const rules = [];
+  const classKey = String(cls.name || '').toLowerCase();
+  const spellcastingName = escAttrXml(cls.name);
+  rules.push(rule(
+    `\t\t\t<grant type="Grants" id="ID_INTERNAL_GRANT_MULTICLASS_SPELLCASTING_SLOTS_HALF_UP" requirements="ID_INTERNAL_GRANT_MULTICLASS" />`,
+    'Multiclass Artificer levels count as half levels rounded up for spell slots.',
+    cls.name
+  ));
+  for (let slotLevel = 1; slotLevel <= 5; slotLevel++) {
+    progressionDeltas(rows, row => row.slots?.[slotLevel]).forEach(delta => {
+      rules.push(rule(
+        `\t\t\t<stat name="${classKey}:spellcasting:slots:${slotLevel}" value="${delta.value}" level="${delta.level}" />`,
+        `Increase level ${slotLevel} spell slots by ${delta.value} at ${cls.name} level ${delta.level}.`,
+        'Artificer Features table'
+      ));
+    });
+  }
+  progressionDeltas(rows, row => row.cantrips).forEach(delta => {
+    rules.push(rule(
+      `\t\t\t<stat name="${classKey}:cantrips:known" value="${delta.value}" level="${delta.level}" />`,
+      `Increase known cantrips by ${delta.value} at ${cls.name} level ${delta.level}.`,
+      'Cantrips column'
+    ));
+  });
+  progressionDeltas(rows, row => row.prepared).forEach(delta => {
+    rules.push(rule(
+      `\t\t\t<stat name="${classKey}:spellcasting:prepare" value="${delta.value}" level="${delta.level}" />`,
+      `Increase prepared spells by ${delta.value} at ${cls.name} level ${delta.level}.`,
+      'Prepared Spells column'
+    ));
+  });
+  const initialCantrips = progressionDeltas(rows, row => row.cantrips);
+  if (initialCantrips.length) {
+    const first = initialCantrips[0];
+    const numberAttr = first.value > 1 ? ` number="${first.value}"` : '';
+    rules.push(rule(
+      `\t\t\t<select type="Spell" name="Cantrip (${spellcastingName})" supports="$(spellcasting:list), 0"${numberAttr} spellcasting="${spellcastingName}" />`,
+      `Choose ${first.value} ${cls.name} cantrips.`,
+      'Cantrips column'
+    ));
+    initialCantrips.slice(1).forEach(delta => {
+      rules.push(rule(
+        `\t\t\t<select type="Spell" name="Cantrip (${spellcastingName})" supports="$(spellcasting:list), 0" level="${delta.level}" spellcasting="${spellcastingName}" />`,
+        `Choose another ${cls.name} cantrip at level ${delta.level}.`,
+        'Cantrips column'
+      ));
+    });
+  }
+  return rules;
+}
+
+function replicateMagicItemRules(cls) {
+  const rules = [];
+  progressionDeltas(cls.progression || [], row => row.plansKnown).forEach(delta => {
+    rules.push(rule(
+      `\t\t\t<stat name="replicate:plans:known" value="${delta.value}" level="${delta.level}" />`,
+      `Increase Replicate Magic Item plans known by ${delta.value} at level ${delta.level}.`,
+      'Plans Known column'
+    ));
+  });
+  progressionDeltas(cls.progression || [], row => row.magicItems).forEach(delta => {
+    rules.push(rule(
+      `\t\t\t<stat name="replicate:items:max" value="${delta.value}" level="${delta.level}" />`,
+      `Increase Replicate Magic Item creations by ${delta.value} at level ${delta.level}.`,
+      'Magic Items column'
+    ));
+  });
+  return rules;
+}
+
+function inferClassFeatureRules(cls, feature, meta) {
+  const rules = [];
+  const name = normalizeExtractedName(feature?.name || '');
+  const text = String(feature?.description || '');
+  if (/^Spellcasting$/i.test(name)) {
+    rules.push(...classSpellcastingRules(cls));
+  }
+  if (/^Tinker's Magic$/i.test(name)) {
+    if (/\bMending cantrip\b/i.test(text)) {
+      rules.push(rule(
+        `\t\t\t<grant type="Spell" id="${canonicalSpellId('Mending', meta)}" spellcasting="${escAttrXml(cls.name)}" prepared="true" />`,
+        'Know the Mending cantrip.',
+        text
+      ));
+    }
+    rules.push(rule(`\t\t\t<stat name="intelligence:modifier:min1" value="1" bonus="base" />`, 'Minimum Intelligence modifier for uses is 1.', text));
+    rules.push(rule(`\t\t\t<stat name="intelligence:modifier:min1" value="intelligence:modifier" bonus="base" />`, 'Use Intelligence modifier for uses.', text));
+  }
+  if (/^Replicate Magic Item$/i.test(name)) rules.push(...replicateMagicItemRules(cls));
+  if (isArchetypeSelectionFeature(feature, cls)) {
+    rules.push(rule(
+      `\t\t\t<select type="Archetype" name="${escAttrXml(cls.archetypeLabel || 'Archetype')}" supports="${escAttrXml(cls.archetypeSupports || cls.name)}" level="${cls.archetypeLevel}" />`,
+      `Choose a ${cls.name} subclass.`,
+      text
+    ));
+  }
+  if (/^Ability Score Improvement$/i.test(name)) {
+    rules.push(rule(
+      `\t\t\t<select type="Feat" name="Feat (${escAttrXml(cls.name)})" />`,
+      `Choose the Ability Score Improvement feat or another feat.`,
+      text
+    ));
+  }
+  if (/^Magic Item Adept$/i.test(name)) {
+    rules.push(rule(`\t\t\t<stat name="attunement:max" value="1" bonus="magic item adept" />`, 'Increase maximum attuned magic items to four.', text));
+  }
+  if (/^Spell-Storing Item$/i.test(name)) {
+    rules.push(rule(`\t\t\t<stat name="intelligence:modifier:min1:x2" value="2" bonus="base" />`, 'Minimum stored-spell uses are twice 1.', text));
+    rules.push(rule(`\t\t\t<stat name="intelligence:modifier:min1:x2" value="intelligence:modifier:x2" bonus="base" />`, 'Stored-spell uses equal twice Intelligence modifier.', text));
+  }
+  if (/^Advanced Artifice$/i.test(name)) {
+    rules.push(rule(`\t\t\t<stat name="attunement:max" value="1" bonus="advanced artifice" />`, 'Increase maximum attuned magic items to five.', text));
+  }
+  if (/^Magic Item Master$/i.test(name)) {
+    rules.push(rule(`\t\t\t<stat name="attunement:max" value="1" bonus="magic item master" />`, 'Increase maximum attuned magic items to six.', text));
+  }
+  if (/^Epic Boon$/i.test(name)) {
+    rules.push(rule(
+      `\t\t\t<select type="Feat" name="Epic Boon (${escAttrXml(cls.name)})" supports="Epic Boon" />`,
+      'Choose an Epic Boon feat.',
+      text
+    ));
+  }
+  return dedupeRules(rules);
+}
+
+function genClassXml(cls, source, prefix, meta) {
   const classId = `${prefix}_CLASS_${idify(cls.name)}`;
-  const classHasSpellcasting = hasClassSpellcasting(cls);
-  const hasArchetypeFeature = (cls.features || []).some(f => isArchetypeSelectionFeature(f, cls));
+  const mcId = multiclassId(cls, prefix);
+  const requirementNotMulticlass = `!${mcId}`;
+  const featureElements = classFeatureElements(cls);
   const lines = [];
 
   // Primary class element
   lines.push(`\t<element name="${escAttrXml(cls.name)}" type="Class" source="${escAttrXml(source)}" id="${classId}">`);
   lines.push(`\t\t<description>`);
   lines.push(`\t\t\t<p>${escXml(cls.description||'')}</p>`);
-  (cls.features||[]).forEach(f => {
-    const fid = `${classId}_FEATURE_${idify(f.name)}`;
+  featureElements.forEach(f => {
+    const fid = classFeatureId(cls, f.name, prefix);
     lines.push(`\t\t\t<div element="${fid}" />`);
   });
   lines.push(`\t\t</description>`);
-  lines.push(`\t\t<sheet>`);
-  lines.push(`\t\t\t<description>${escXml(cls.description||'')}</description>`);
-  lines.push(`\t\t</sheet>`);
+  lines.push(`\t\t<sheet display="false" />`);
   lines.push(`\t\t<setters>`);
+  const short = classShortDescription(cls);
+  if (short) lines.push(`\t\t\t<set name="short">${escXml(short)}</set>`);
   lines.push(`\t\t\t<set name="hd">d${cls.hitDie||8}</set>`);
-  if (cls.description) lines.push(`\t\t\t<set name="short">${escXml(cls.description).slice(0,120)}</set>`);
+  lines.push(`\t\t\t<set name="hp">${cls.hitDie||8}</set>`);
+  const proficiencies = classProficienciesSummary(cls);
+  if (proficiencies) lines.push(`\t\t\t<set name="proficiencies">${escXml(proficiencies)}</set>`);
   if (cls.startingEquipment) lines.push(`\t\t\t<set name="equipment">${escXml(cls.startingEquipment)}</set>`);
   lines.push(`\t\t</setters>`);
-  if (classHasSpellcasting) {
-    const list = cls.spellcastingList || cls.name;
-    const ability = cls.spellcastingAbility ? ` ability="${escAttrXml(cls.spellcastingAbility)}"` : '';
-    const prepare = spellcastingPrepareAttribute(cls);
-    lines.push(`\t\t<spellcasting name="${escAttrXml(cls.name)}"${ability}${prepare}>`);
-    lines.push(`\t\t\t<list>${escXml(list)}</list>`);
-    lines.push(`\t\t</spellcasting>`);
-  }
   lines.push(`\t\t<rules>`);
-  if (classHasSpellcasting) {
-    lines.push(`\t\t\t<grant type="Grants" id="ID_INTERNAL_GRANTS_SPELLCASTING_FEATURE" />`);
-    if (cls.ritualCasting) lines.push(`\t\t\t<grant type="Grants" id="ID_INTERNAL_RITUAL_CASTING" />`);
-  }
+  const classRules = [];
   // Saving throw proficiencies
-  const savingThrowMap = {
-    strength:'ID_PROFICIENCY_SAVINGTHROW_STRENGTH', dexterity:'ID_PROFICIENCY_SAVINGTHROW_DEXTERITY',
-    constitution:'ID_PROFICIENCY_SAVINGTHROW_CONSTITUTION', intelligence:'ID_PROFICIENCY_SAVINGTHROW_INTELLIGENCE',
-    wisdom:'ID_PROFICIENCY_SAVINGTHROW_WISDOM', charisma:'ID_PROFICIENCY_SAVINGTHROW_CHARISMA',
-  };
   (cls.savingThrows||[]).forEach(st => {
-    const sid = savingThrowMap[st.toLowerCase()];
-    if (sid) lines.push(`\t\t\t<grant type="Proficiency" id="${sid}" />`);
+    const sid = classSavingThrowProficiencyId(st);
+    if (sid) classRules.push(rule(
+      `\t\t\t<grant type="Proficiency" id="${sid}" requirements="${escAttrXml(requirementNotMulticlass)}" />`,
+      `Gain ${st} saving throw proficiency.`,
+      `Saving Throws: ${(cls.savingThrows || []).join(', ')}`
+    ));
   });
   // Armor & weapon proficiencies
   (cls.armorProficiencies||[]).forEach(a => {
-    const armorMap = {'light':'ID_PROFICIENCY_ARMOR_PROFICIENCY_LIGHT_ARMOR','light armor':'ID_PROFICIENCY_ARMOR_PROFICIENCY_LIGHT_ARMOR','medium':'ID_PROFICIENCY_ARMOR_PROFICIENCY_MEDIUM_ARMOR','medium armor':'ID_PROFICIENCY_ARMOR_PROFICIENCY_MEDIUM_ARMOR','heavy':'ID_PROFICIENCY_ARMOR_PROFICIENCY_HEAVY_ARMOR','heavy armor':'ID_PROFICIENCY_ARMOR_PROFICIENCY_HEAVY_ARMOR','shields':'ID_PROFICIENCY_ARMOR_PROFICIENCY_SHIELDS'};
-    const aid = armorMap[a.toLowerCase()];
-    if (aid) lines.push(`\t\t\t<grant type="Proficiency" id="${aid}" />`);
+    const aid = classArmorProficiencyId(a);
+    if (aid) classRules.push(rule(
+      `\t\t\t<grant type="Proficiency" id="${aid}" requirements="${escAttrXml(requirementNotMulticlass)}" />`,
+      `Gain ${normalizeArmorProficiencyName(a)} training.`,
+      `Armor: ${(cls.armorProficiencies || []).join(', ')}`
+    ));
   });
   (cls.weaponProficiencies||[]).forEach(w => {
-    const weapMap = {'simple weapons':'ID_PROFICIENCY_WEAPON_PROFICIENCY_SIMPLE_WEAPONS','martial weapons':'ID_PROFICIENCY_WEAPON_PROFICIENCY_MARTIAL_WEAPONS'};
-    const wid = weapMap[w.toLowerCase()];
-    if (wid) lines.push(`\t\t\t<grant type="Proficiency" id="${wid}" />`);
+    const wid = classWeaponProficiencyId(w);
+    if (wid) classRules.push(rule(
+      `\t\t\t<grant type="Proficiency" id="${wid}" requirements="${escAttrXml(requirementNotMulticlass)}" />`,
+      `Gain ${normalizeWeaponProficiencyName(w)} proficiency.`,
+      `Weapons: ${(cls.weaponProficiencies || []).join(', ')}`
+    ));
+  });
+  (cls.toolProficiencies||[]).forEach(tool => {
+    const xml = classToolProficiencyRule(tool, cls, requirementNotMulticlass);
+    if (xml) classRules.push(rule(
+      `\t\t\t${xml}`,
+      `Gain ${normalizeExtractedName(tool)} proficiency.`,
+      `Tools: ${(cls.toolProficiencies || []).join(', ')}`
+    ));
   });
   // Skill choices
   if (cls.skillChoices && cls.skillChoices.count) {
-    lines.push(`\t\t\t<select type="Proficiency" name="Skill Proficiency (${escAttrXml(cls.name)})" number="${cls.skillChoices.count}" supports="Skill,${escAttrXml((cls.skillChoices.from||[]).join(','))}" />`);
+    classRules.push(rule(
+      `\t\t\t<select type="Proficiency" name="Skill Proficiency (${escAttrXml(cls.name)})" number="${cls.skillChoices.count}" supports="${escAttrXml(classSkillSupports(cls.skillChoices.from))}" requirements="${escAttrXml(requirementNotMulticlass)}" />`,
+      `Choose ${cls.skillChoices.count} class skill proficiencies.`,
+      `Skills: ${(cls.skillChoices.from || []).join(', ')}`
+    ));
   }
   // Class features granted per level
-  (cls.features||[]).forEach(f => {
-    const fid = `${classId}_FEATURE_${idify(f.name)}`;
-    lines.push(`\t\t\t<grant type="Class Feature" id="${fid}" level="${f.level||1}" />`);
+  classProgressionFeatureGrants(cls).forEach(f => {
+    const fid = classFeatureId(cls, f.name, prefix);
+    classRules.push(rule(
+      `\t\t\t<grant type="Class Feature" id="${fid}" level="${f.level||1}" />`,
+      `Grant ${f.name} at ${cls.name} level ${f.level || 1}.`,
+      f.name
+    ));
   });
-  // Archetype selection
-  if (cls.archetypeLevel && !hasArchetypeFeature) {
-    lines.push(`\t\t\t<select type="Archetype" name="${escAttrXml(cls.archetypeLabel||'Archetype')} (${escAttrXml(cls.name)})" supports="${escAttrXml(cls.archetypeSupports||cls.name)}" level="${cls.archetypeLevel}" />`);
-  }
+  renderRuleLines(lines, classRules);
   lines.push(`\t\t</rules>`);
-  if (cls.multiclassPrerequisite || cls.multiclassRequirements || cls.multiclassProficiencies) {
-    lines.push(`\t\t<multiclass id="${classId}_MULTICLASS">`);
-    if (cls.multiclassPrerequisite) lines.push(`\t\t\t<prerequisite>${escXml(cls.multiclassPrerequisite)}</prerequisite>`);
-    if (cls.multiclassRequirements) lines.push(`\t\t\t<requirements>${escXml(cls.multiclassRequirements)}</requirements>`);
-    if (cls.multiclassProficiencies) {
-      lines.push(`\t\t\t<setters>`);
-      lines.push(`\t\t\t\t<set name="multiclass proficiencies">${escXml(cls.multiclassProficiencies)}</set>`);
-      lines.push(`\t\t\t</setters>`);
-    }
+  if (cls.spellcastingAbility || cls.skillChoices?.count || cls.armorProficiencies?.length || cls.toolProficiencies?.length) {
+    const prerequisite = cls.spellcastingAbility ? `${cls.spellcastingAbility} 13` : '';
+    const requirements = classAbilityRequirement(cls.spellcastingAbility);
+    lines.push(`\t\t<multiclass id="${mcId}">`);
+    if (prerequisite) lines.push(`\t\t\t<prerequisite>${escXml(prerequisite)}</prerequisite>`);
+    if (requirements) lines.push(`\t\t\t<requirements>${escXml(requirements)}</requirements>`);
+    lines.push(`\t\t\t<setters>`);
+    lines.push(`\t\t\t\t<set name="multiclass proficiencies">${escXml(multiclassProficienciesSummary(cls))}</set>`);
+    lines.push(`\t\t\t</setters>`);
     lines.push(`\t\t\t<rules>`);
     lines.push(`\t\t\t\t<grant type="Grants" id="ID_INTERNAL_GRANT_MULTICLASS" />`);
+    renderMulticlassRuleLines(lines, cls);
     lines.push(`\t\t\t</rules>`);
     lines.push(`\t\t</multiclass>`);
   }
   lines.push(`\t</element>`);
 
   // Class Feature child elements
-  (cls.features||[]).forEach(f => {
-    const fid = `${classId}_FEATURE_${idify(f.name)}`;
+  featureElements.forEach(f => {
+    const fid = classFeatureId(cls, f.name, prefix);
     lines.push(`\t<element name="${escAttrXml(f.name)}" type="Class Feature" source="${escAttrXml(source)}" id="${fid}">`);
     lines.push(`\t\t<compendium display="false" />`);
     lines.push(`\t\t<description>`);
@@ -5258,10 +5991,21 @@ function genClassXml(cls, source, prefix) {
     const archetypeSelect = isArchetypeSelectionFeature(f, cls);
     if (archetypeSelect) {
       lines.push(`\t\t<rules>`);
-      lines.push(`\t\t\t<select type="Archetype" name="${escAttrXml(cls.archetypeLabel||'Archetype')}" supports="${escAttrXml(cls.archetypeSupports||cls.name)}" level="${cls.archetypeLevel}" />`);
+      renderRuleLines(lines, inferClassFeatureRules(cls, f, meta));
       lines.push(`\t\t</rules>`);
     } else {
-      lines.push(`\t\t<rules></rules>`);
+      if (/^Spellcasting$/i.test(f.name || '') && hasClassSpellcasting(cls)) {
+        const list = cls.spellcastingList || cls.name;
+        const ability = cls.spellcastingAbility ? ` ability="${escAttrXml(cls.spellcastingAbility)}"` : '';
+        const prepare = spellcastingPrepareAttribute(cls);
+        lines.push(`\t\t<spellcasting name="${escAttrXml(cls.name)}"${ability}${prepare}>`);
+        lines.push(`\t\t\t<list known="true">${escXml(list)}</list>`);
+        lines.push(`\t\t</spellcasting>`);
+      }
+      const featureRules = inferClassFeatureRules(cls, f, meta);
+      lines.push(`\t\t<rules>`);
+      renderRuleLines(lines, featureRules);
+      lines.push(`\t\t</rules>`);
     }
     lines.push(`\t</element>`);
   });

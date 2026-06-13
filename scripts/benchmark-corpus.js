@@ -388,6 +388,51 @@ function summarizeExtractedData(data) {
     .map(([type, items]) => [type, items.length]));
 }
 
+function normalizeSearchText(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function sourceLineRecords(pages) {
+  const records = [];
+  for (const page of pages) {
+    String(page.text || '').split(/\r?\n/).forEach((text, index) => {
+      const line = text.trim();
+      if (line) records.push({ page: page.page, line: index + 1, text: line });
+    });
+  }
+  return records;
+}
+
+function sourceContextForName(records, name) {
+  const normalizedName = normalizeSearchText(name);
+  if (!normalizedName) return null;
+  const words = normalizedName.split(' ').filter(Boolean);
+  const needles = [
+    normalizedName,
+    words.slice(0, 6).join(' '),
+    words.slice(0, 4).join(' ')
+  ].filter(needle => needle.length >= 8);
+
+  let matchIndex = -1;
+  for (const needle of needles) {
+    matchIndex = records.findIndex(record => normalizeSearchText(record.text).includes(needle));
+    if (matchIndex !== -1) break;
+  }
+  if (matchIndex === -1) return null;
+  const match = records[matchIndex];
+  return {
+    page: match.page,
+    line: match.line,
+    before: records.slice(Math.max(0, matchIndex - 2), matchIndex).map(record => record.text),
+    text: match.text,
+    after: records.slice(matchIndex + 1, matchIndex + 3).map(record => record.text)
+  };
+}
+
 function textItemsToLines(items) {
   const rows = [];
   for (const item of items) {
@@ -477,6 +522,7 @@ async function benchmark(args) {
 
   const generated = generateBenchmarkXml(context, sourceText, args.types);
   const generatedElements = parseElements(generated.xml, sourcePath).filter(element => element.type !== 'Source');
+  const sourceRecords = sourceLineRecords(source.pages);
   const canonicalFiles = args.canonical.flatMap(listXmlFiles);
   const canonicalElements = [];
   for (const file of canonicalFiles) {
@@ -526,10 +572,11 @@ async function benchmark(args) {
     highSeverityMatches: severityCounts.high,
     unmatchedCount: unmatched.length,
     unmatched: unmatched.slice(0, 40).map(element => ({
-      type: element.type,
-      name: element.name,
-      id: element.id
-    })),
+        type: element.type,
+        name: element.name,
+        id: element.id,
+        sourceContext: sourceContextForName(sourceRecords, element.name)
+      })),
     matches: matches
       .filter(match => match.different)
       .slice(0, 40)
@@ -545,7 +592,8 @@ async function benchmark(args) {
         supports: match.supportsDiff,
         setters: match.setterDiffs.slice(0, 12),
         missingRules: match.rules.missing.slice(0, 12),
-        extraRules: match.rules.extra.slice(0, 12)
+        extraRules: match.rules.extra.slice(0, 12),
+        sourceContext: sourceContextForName(sourceRecords, match.generated.name)
       }))
   };
 }
@@ -595,6 +643,9 @@ function renderMarkdown(result) {
       }
       for (const rule of match.missingRules) lines.push(`- Missing rule: \`${rule}\``);
       for (const rule of match.extraRules) lines.push(`- Extra rule: \`${rule}\``);
+      if (match.sourceContext) {
+        lines.push(`- Source context: page ${match.sourceContext.page}, line ${match.sourceContext.line}: \`${match.sourceContext.text}\``);
+      }
       lines.push('');
     }
   }
@@ -603,6 +654,9 @@ function renderMarkdown(result) {
     lines.push('');
     for (const element of result.unmatched) {
       lines.push(`- ${element.type}: ${element.name} (\`${element.id}\`)`);
+      if (element.sourceContext) {
+        lines.push(`  Source context: page ${element.sourceContext.page}, line ${element.sourceContext.line}: \`${element.sourceContext.text}\``);
+      }
     }
     lines.push('');
   }
@@ -636,5 +690,14 @@ module.exports = {
   benchmark,
   renderMarkdown,
   compareSupports,
-  summarizeSemanticDiffs
+  summarizeSemanticDiffs,
+  loadApp,
+  runInApp,
+  readSource,
+  generateBenchmarkXml,
+  sourceLineRecords,
+  sourceContextForName,
+  summarizeExtractedData,
+  parseElements,
+  listXmlFiles
 };

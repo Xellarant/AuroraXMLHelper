@@ -79,6 +79,8 @@ test('benchmark extracts selectable text from PDF sources', async () => {
   assert.equal(result.pageCount, 1);
   assert.equal(result.extractedCounts.spell, 1);
   assert.equal(result.unmatched[0].name, 'Memory Spark');
+  assert.equal(result.unmatched[0].sourceContext.page, 1);
+  assert.equal(result.unmatched[0].sourceContext.text, 'Memory Spark');
 });
 
 test('benchmark classifies missing canonical rules as high severity', async () => {
