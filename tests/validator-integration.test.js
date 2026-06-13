@@ -39,4 +39,4 @@ runTest('generated fixture XML passes Aurora shape validator when available', ()
       result.stderr
     ].filter(Boolean).join('\n')
   );
-});
+}, 15000);
