@@ -100,7 +100,7 @@
     z-index: 1;
   }
 
-  /* â”€â”€ Cards â”€â”€ */
+  /* Cards */
   .card {
     background: #fff;
     border: 1px solid var(--border-light);
@@ -130,7 +130,7 @@
     margin-bottom: 1rem;
   }
 
-  /* â”€â”€ Forms â”€â”€ */
+  /* Forms */
   label {
     display: block;
     font-size: 0.8rem;
@@ -169,7 +169,7 @@
 
   textarea { resize: vertical; min-height: 80px; }
 
-  /* â”€â”€ Buttons â”€â”€ */
+  /* Buttons */
   .btn {
     font-family: 'Cinzel', serif;
     font-size: 0.8rem;
@@ -214,7 +214,7 @@
   }
   .btn-success:hover { opacity: 0.88; }
 
-  /* â”€â”€ Upload zone â”€â”€ */
+  /* Upload zone */
   .upload-zone {
     border: 2px dashed var(--border);
     border-radius: 4px;
@@ -233,7 +233,9 @@
   .upload-zone input { display: none; }
 
   .upload-icon {
-    font-size: 2.5rem;
+    font-family: 'Cinzel', serif;
+    font-size: 2.1rem;
+    letter-spacing: 0.12em;
     margin-bottom: 0.75rem;
     display: block;
     color: var(--gold);
@@ -242,7 +244,7 @@
   .upload-zone p { color: var(--muted); font-style: italic; }
   .upload-zone strong { color: var(--gold); font-style: normal; }
 
-  /* â”€â”€ Element type checkboxes â”€â”€ */
+  /* Element type checkboxes */
   .type-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
@@ -288,7 +290,7 @@
   .type-check.disabled .type-name { grid-column: 2; grid-row: 1; }
   .type-check.disabled .type-note { grid-column: 2; grid-row: 2; }
 
-  /* â”€â”€ Tabs â”€â”€ */
+  /* Tabs */
   .tabs {
     display: flex;
     border-bottom: 2px solid var(--border);
@@ -382,7 +384,7 @@
     margin-bottom: 0;
   }
 
-  /* â”€â”€ Element cards in review â”€â”€ */
+  /* Element cards in review */
   .element-card {
     border: 1px solid var(--border-light);
     border-radius: 3px;
@@ -440,7 +442,7 @@
 
   .field-full { grid-column: 1 / -1; }
 
-  /* â”€â”€ Status / alerts â”€â”€ */
+  /* Status / alerts */
   .alert {
     padding: 0.75rem 1rem;
     border-radius: 3px;
@@ -456,7 +458,7 @@
   .alert-error { background: #fdf0f0; border: 1px solid #e0a0a0; color: var(--red); }
   .alert-warning { background: #fff8e8; border: 1px solid #e0c870; color: #6b4d10; }
 
-  /* â”€â”€ Progress â”€â”€ */
+  /* Progress */
   .progress-wrap {
     background: var(--parchment-mid);
     border-radius: 20px;
@@ -472,7 +474,7 @@
     transition: width 0.4s ease;
   }
 
-  /* â”€â”€ Spinner â”€â”€ */
+  /* Spinner */
   .spinner {
     display: inline-block;
     width: 16px; height: 16px;
@@ -485,7 +487,7 @@
 
   @keyframes spin { to { transform: rotate(360deg); } }
 
-  /* â”€â”€ XML preview â”€â”€ */
+  /* XML preview */
   .xml-preview {
     background: #1a1a1a;
     color: #d4c9a8;
@@ -506,14 +508,14 @@
   .xml-preview .xml-val { color: #a8d4a0; }
   .xml-preview .xml-comment { color: #666; font-style: italic; }
 
-  /* â”€â”€ Divider â”€â”€ */
+  /* Divider */
   .divider {
     border: none;
     border-top: 1px solid var(--border-light);
     margin: 1.25rem 0;
   }
 
-  /* â”€â”€ Misc â”€â”€ */
+  /* Misc */
   .row { display: flex; gap: 1rem; align-items: flex-start; flex-wrap: wrap; }
   .row > * { flex: 1; min-width: 0; }
   .text-muted { color: var(--muted); font-style: italic; font-size: 0.9rem; }
@@ -547,14 +549,14 @@
   .checkbox-inline input { accent-color: var(--gold); }
 
 
-  /* â”€â”€ Edit confirmation flash â”€â”€ */
+  /* Edit confirmation flash */
   .field-saved {
     border-color: var(--success) !important;
     box-shadow: 0 0 0 3px rgba(45,106,79,0.18) !important;
     transition: border-color 0.15s, box-shadow 0.15s;
   }
 
-  /* â”€â”€ Changes pending badge â”€â”€ */
+  /* Changes pending badge */
   .btn-pending { position: relative; display: inline-block; }
   .pending-badge {
     display: none;
@@ -573,7 +575,7 @@
   }
   .btn-pending.has-changes .pending-badge { display: block; }
 
-  /* â”€â”€ Validation â”€â”€ */
+  /* Validation */
   .validation-error {
     border-color: var(--red-light) !important;
     box-shadow: 0 0 0 3px rgba(192,57,43,0.15) !important;
@@ -588,6 +590,28 @@
     margin-left: 6px;
     font-family: 'Crimson Pro', serif;
   }
+  .override-controls {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.75rem;
+    padding: 0.65rem 0.75rem;
+    border: 1px solid var(--border-light);
+    border-radius: 3px;
+    background: var(--parchment);
+  }
+  .override-status {
+    color: var(--muted);
+    font-size: 0.82rem;
+    font-style: italic;
+  }
+  .override-actions {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
   /* key indicator */
   .key-set { color: var(--success); font-size: 0.8rem; }
   .key-unset { color: var(--red-light); font-size: 0.8rem; }
@@ -598,7 +622,7 @@
 <header>
   <div>
     <div class="logo">Aurora <span>XML Helper</span></div>
-    <div class="header-sub">D&amp;D Supplement â†’ Aurora Builder XML</div>
+    <div class="header-sub">D&amp;D Supplement &rarr; Aurora Builder XML</div>
   </div>
   <div id="keyStatus" class="key-set">Deterministic mode</div>
 </header>
@@ -607,7 +631,7 @@
 
   <!-- Step 1: Parser mode -->
   <div class="card" id="stepKey">
-    <div class="card-title">â‘  Deterministic Parser</div>
+    <div class="card-title">1. Deterministic Parser</div>
     <p class="text-muted" style="margin-bottom:0.75rem;">PDF text is read locally in the browser and matched with repeatable D&amp;D layout rules. No API key, model, or network extraction step is required.</p>
     <p class="text-muted" style="font-size:0.85rem; margin-bottom:0;">This first deterministic pass is intentionally conservative: it prefers fewer high-confidence elements over guessed content. Anything it finds still flows through the existing review, validation, XML preview, and ZIP export tools.</p>
     <div id="geminiSection" class="hidden"></div>
@@ -621,11 +645,11 @@
 
   <!-- Step 2: Upload -->
   <div class="card" id="stepUpload">
-    <div class="card-title">â‘¡ Upload Supplement PDF</div>
+    <div class="card-title">2. Upload Supplement PDF</div>
 
     <div class="upload-zone" id="uploadZone" onclick="document.getElementById('pdfFile').click()" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event)">
       <input type="file" id="pdfFile" accept=".pdf" onchange="handleFileSelect(event)" />
-      <span class="upload-icon">ðŸ“œ</span>
+      <span class="upload-icon" aria-hidden="true">PDF</span>
       <p><strong>Click to browse</strong> or drag &amp; drop a PDF here</p>
       <p style="font-size:0.85rem; margin-top:4px;">Reads selectable PDF text locally</p>
       <p style="font-size:0.8rem; margin-top:6px; color:var(--muted);">Best results come from text-based PDFs with standard D&amp;D headings, spell blocks, feat blocks, item rarity lines, and equipment rows.</p>
@@ -633,7 +657,7 @@
 
     <div id="fileSizeWarning" class="hidden" style="margin-top:0.75rem; margin-bottom:0;"></div>
     <div id="fileInfo" class="alert alert-success hidden" style="margin-top:0.75rem; margin-bottom:0;">
-      <span>ðŸ“„</span>
+      <span aria-hidden="true">PDF</span>
       <div>
         <strong id="fileName"></strong>
         <span id="fileSize" style="color:var(--muted); margin-left:8px;"></span>
@@ -644,13 +668,13 @@
 
   <!-- Step 3: Options -->
   <div class="card" id="stepOptions">
-    <div class="card-title">â‘¢ Extraction Options</div>
+    <div class="card-title">3. Extraction Options</div>
 
-    <div class="section-label" style="margin-top:0;">Source Details <span style="font-weight:400; text-transform:none; font-style:italic; font-size:0.8rem;">(auto-filled from PDF â€” override if needed)</span></div>
+    <div class="section-label" style="margin-top:0;">Source Details <span style="font-weight:400; text-transform:none; font-style:italic; font-size:0.8rem;">(auto-filled from PDF - override if needed)</span></div>
     <div class="field-row">
       <div>
         <label>Source Name</label>
-        <input type="text" id="sourceName" placeholder="Auto-filled on upload" oninput="autoFillAbbr(this.value)" />
+        <input type="text" id="sourceName" placeholder="Auto-filled on upload" oninput="autoFillAbbr(this.value); updateSourceRulesetDecisionDisplay()" />
       </div>
       <div>
         <label>Abbreviation <span style="font-weight:400;text-transform:none;font-style:italic;">(used in element IDs)</span></label>
@@ -662,7 +686,12 @@
         <label>Author</label>
         <input type="text" id="sourceAuthor" placeholder="Auto-detected during extraction" />
       </div>
+      <div>
+        <label>Publication Year <span style="font-weight:400;text-transform:none;font-style:italic;">(2024+ uses 2024 wording)</span></label>
+        <input type="text" id="sourceYear" placeholder="Blank defaults to 2014 rules" oninput="updateSourceRulesetDecisionDisplay()" />
+      </div>
     </div>
+    <p id="sourceRulesetDecision" class="text-muted" style="margin-top:-0.5rem; margin-bottom:1rem;"></p>
 
     <label>Element Types to Extract</label>
     <div class="type-grid" id="typeGrid">
@@ -711,7 +740,7 @@
 
   <!-- Step 4: Review -->
   <div class="card hidden" id="stepReview">
-    <div class="card-title">â‘£ Review &amp; Edit Extracted Elements</div>
+    <div class="card-title">4. Review &amp; Edit Extracted Elements</div>
 
     <div id="extractProgress" class="hidden">
       <div class="alert alert-info" id="progressAlert">
@@ -756,14 +785,14 @@
       <hr class="divider" />
       <div style="display:flex; gap:1rem; flex-wrap:wrap; align-items:center;">
         <div class="btn-pending" id="downloadBtnWrap">
-          <button class="btn btn-success" onclick="downloadZip()">â¬‡ Download ZIP</button>
-          <span class="pending-badge">â— changes pending</span>
+          <button class="btn btn-success" onclick="downloadZip()">&#8595; Download ZIP</button>
+          <span class="pending-badge">&bull; changes pending</span>
         </div>
         <div class="btn-pending" id="downloadSingleWrap">
-          <button class="btn btn-secondary" onclick="generateAndDownloadRefreshPreview()">â¬‡ Single XML</button>
-          <span class="pending-badge">â— changes pending</span>
+          <button class="btn btn-secondary" onclick="generateAndDownloadRefreshPreview()">&#8595; Single XML</button>
+          <span class="pending-badge">&bull; changes pending</span>
         </div>
-        <div class="btn-pending" id="previewBtnWrap"><button class="btn btn-secondary" onclick="showXmlPreview()">Preview XML</button><span class="pending-badge">â— changes pending</span></div>
+        <div class="btn-pending" id="previewBtnWrap"><button class="btn btn-secondary" onclick="showXmlPreview()">Preview XML</button><span class="pending-badge">&bull; changes pending</span></div>
         <button class="btn btn-secondary" onclick="resetAll()">Start Over</button>
       </div>
 

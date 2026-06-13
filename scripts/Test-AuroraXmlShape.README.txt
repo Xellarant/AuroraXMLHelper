@@ -57,6 +57,12 @@ Checks included
 - Duplicate element IDs.
 - Class elements with missing hd setters.
 - Multiclass nodes with missing id attributes.
+- Damage resistance grants that incorrectly use Condition Immunity instead of Condition.
+- Backgrounds that mix direct ability score stat grants with 2024-style PHB patterns.
+- 2024-style background ASI grants missing ID_INTERNAL_GRANTS_BACKGROUND_ASI.
+- Spell supports entries that include numeric level tokens.
+- Level multiplier stat expressions that should be emitted as repeated stat entries.
+- Documents that mix PHB24 IDs with legacy PHB spell/feat IDs.
 - Local custom ID prefix references.
 - Optional AuroraLegacy/external ID references.
 - Optional raw GitHub target checks.

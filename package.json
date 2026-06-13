@@ -4,6 +4,19 @@
   "private": true,
   "description": "Deterministic D&D PDF to Aurora Builder XML helper.",
   "scripts": {
-    "test": "node tests/parser-regression.test.js"
+    "test": "node scripts/run-vitest.js run",
+    "test:regression": "node scripts/run-vitest.js run tests/parser-regression.test.js",
+    "test:fixtures": "node scripts/run-vitest.js run tests/golden-fixtures.test.js",
+    "test:benchmark": "node scripts/run-vitest.js run tests/benchmark-corpus.test.js",
+    "test:validator": "node scripts/run-vitest.js run tests/validator-integration.test.js",
+    "test:validator:required": "node tests/validator-integration.test.js --required",
+    "benchmark:corpus": "node scripts/run-node20.js scripts/benchmark-corpus.js",
+    "source:fixture": "node scripts/run-node20.js scripts/source-fixture-report.js",
+    "corpus:local": "node scripts/run-node20.js scripts/run-local-corpus-benchmarks.js"
+  },
+  "devDependencies": {
+    "pdfjs-dist": "^3.11.174",
+    "pdfjs-dist": "^3.11.174",
+    "vitest": "^4.1.8"
   }
 }

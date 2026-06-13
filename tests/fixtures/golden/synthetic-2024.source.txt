@@ -1,0 +1,120 @@
+# Synthetic 2024 Shape Fixture
+
+This synthetic fixture references the 2024 rules and Magic action wording. It is intentionally original test prose, not sourcebook text.
+
+## Spell
+
+This new spell appears on the Artificer's spell list.
+
+### Clockwork Helper
+
+*Level 2 Conjuration (ritual)*
+
+**Casting Time:** 1 hour (ritual)
+**Range:** 10 feet
+**Components:** V, S, M (a polished gear worth 100+ GP)
+**Duration:** Instant
+
+You summon a tiny construct helper in an unoccupied space within range.
+
+**Using a Higher-Level Spell Slot.** Use the spell slot's level for the helper's level.
+
+------
+
+## Artificer Subclasses
+
+### Alchemist (Artificer Subclass)
+
+*Craft test elixirs*
+
+#### Experimental Elixir (Level 3)
+
+You magically produce two elixirs. You can make a total of three at level 5, four at level 9, and five at level 15.
+
+### Artillerist (Artificer Subclass)
+
+*Craft test cannons*
+
+#### Eldritch Cannon (Level 3)
+
+You create an Eldritch Cannon.
+
+### Battle Smith (Artificer Subclass)
+
+*Command a construct guardian*
+
+#### Steel Defender (Level 3)
+
+Your tinkering has borne you a companion, a Steel Defender.
+
+### Cartographer (Artificer Subclass)
+
+*Chart test routes*
+
+#### Adventurer's Atlas (Level 3)
+
+You create maps up to a maximum number of creatures equal to 1 plus your Intelligence modifier.
+
+#### Superior Atlas (Level 15)
+
+The creature's Hit Points instead change to a number equal to twice your Artificer level.
+
+------
+
+## Feats
+
+### Dragonmark Feats
+
+### Mark of Storm
+
+*Prerequisite: Eberron campaign; can't already have a Dragonmark feat*
+
+You gain the following benefits.
+
+**Storm's Boon.** You have Resistance to Lightning damage.
+
+**Storm Magic.** You know the Thunderclap cantrip. When you reach character level 3, you also always have the Gust of Wind spell prepared.
+
+**Spells of the Mark.** If you have the Spellcasting or Pact Magic class feature, the spells on the Mark of Storm Spells table are added to that feature's spell list.
+
+| Spell Level | Spells |
+| --- | --- |
+| 1 | Feather Fall, Fog Cloud |
+
+### General Feats
+
+### Greater Mark of Handling
+
+*Prerequisite: mark of handling; Level 4*
+
+**Ability Score Increase.** Increase one ability score of your choice by 1, to a maximum of 20.
+
+You gain the following benefits.
+
+**Subdue Animal.** The target must succeed on a Wisdom saving throw (DC 8 plus your Wisdom modifier and Proficiency Bonus).
+
+### Epic Boon Feat
+
+### Boon of Siberys
+
+*Prerequisite: Level 19; Eberron campaign*
+
+**Ability Score Increase.** Increase one ability score of your choice by 1, to a maximum of 20.
+
+You gain the following benefits.
+
+**Aberrant Magic.** Choose a level 8 or lower spell from the Sorcerer spell list.
+
+------
+
+## Backgrounds
+
+### House Agent
+
+**Ability Scores:** Strength, Intelligence, Charisma
+**Feat:** Lucky
+**Skill Proficiencies:** Investigation and Persuasion
+**Tool Proficiency:** Choose one kind of Artisan's Tools
+**Equipment:** Choose A or B
+
+You work for a powerful patron and carry useful credentials.

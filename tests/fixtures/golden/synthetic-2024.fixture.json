@@ -1,0 +1,57 @@
+{
+  "name": "synthetic-2024-canonical-shapes",
+  "source": "synthetic-2024.source.txt",
+  "sourceMeta": {
+    "name": "Synthetic 2024 Shape Fixture",
+    "abbr": "FXT",
+    "author": "Codex Fixture",
+    "year": "2025"
+  },
+  "types": ["spell", "archetype", "feat", "background"],
+  "expected": {
+    "ruleset": "2024",
+    "rulesetConfidence": "explicit-year",
+    "rulesetEvidence": ["Publication year 2025", "Epic Boon feat", "Magic action", "2024 upcast wording"],
+    "counts": {
+      "spell": 1,
+      "archetype": 4,
+      "feat": 3,
+      "background": 1
+    },
+    "snippets": [
+      "<element name=\"Clockwork Helper\" type=\"Spell\" source=\"Synthetic 2024 Shape Fixture\" id=\"ID_FXT_SPELL_CLOCKWORK_HELPER\">",
+      "<set name=\"isRitual\">true</set>",
+      "<set name=\"keywords\">upcasting, higher-level spell slot</set>",
+      "<stat name=\"alchemist:elixirs:max\" value=\"2\" level=\"3\" />",
+      "<stat name=\"alchemist:elixirs:max\" value=\"1\" level=\"15\" />",
+      "<select type=\"Companion\" name=\"Steel Defender\" supports=\"FXT Steel Defender\" default=\"ID_FXT_COMPANION_ARTIFICER_STEEL_DEFENDER\" />",
+      "<stat name=\"atlas:targets\" value=\"intelligence:modifier\" />",
+      "<supports>Dragonmark</supports>",
+      "<grant type=\"Spell\" id=\"ID_WOTC_PHB24_SPELL_THUNDERCLAP\" prepared=\"true\" />",
+      "<grant type=\"Spell\" id=\"ID_WOTC_PHB24_SPELL_GUST_OF_WIND\" prepared=\"true\" level=\"3\" />",
+      "<select type=\"Feat Feature\" name=\"Spellcasting Ability (Mark of Storm)\" supports=\"ID_FXT_FEAT_FEATURE_DRAGONMARK_INTELLIGENCE|ID_FXT_FEAT_FEATURE_DRAGONMARK_WISDOM|ID_FXT_FEAT_FEATURE_DRAGONMARK_CHARISMA\" />",
+      "<grant type=\"Feat Feature\" id=\"ID_FXT_FEAT_FEATURE_MARK_OF_STORM_SPELLS_OF_THE_MARK\" />",
+      "<element name=\"Spells of the Mark\" type=\"Feat Feature\" source=\"Synthetic 2024 Shape Fixture\" id=\"ID_FXT_FEAT_FEATURE_MARK_OF_STORM_SPELLS_OF_THE_MARK\">",
+      "<extend>ID_WOTC_PHB24_SPELL_FEATHER_FALL</extend>",
+      "<supports>Epic Boon</supports>",
+      "<select type=\"Ability Score Improvement\" name=\"Ability Score Increase (Boon of Siberys)\" supports=\"Ability Score Increase, 30\" />",
+      "<set name=\"short\">Strength, Intelligence, Charisma, Lucky Feat, Investigation and Persuasion Skills, one Artisan's Tool</set>",
+      "<select type=\"Proficiency\" name=\"Artisan's Tool (House Agent)\" supports=\"Artisan tools\" />"
+    ],
+    "notIncludes": [
+      "ID_PHB_SPELL_THUNDERCLAP",
+      "<set name=\"isConcentration\">false</set>",
+      "ID_FXT_ARCHETYPE_FEATURE_ALCHEMIST_ALCHEMIST"
+    ],
+    "regexCounts": [
+      {
+        "pattern": "<stat name=\"cannon:hp\" value=\"level:artificer\" />",
+        "count": 5
+      },
+      {
+        "pattern": "<stat name=\"atlas:safe haven:hp\" value=\"level:artificer\" />",
+        "count": 2
+      }
+    ]
+  }
+}

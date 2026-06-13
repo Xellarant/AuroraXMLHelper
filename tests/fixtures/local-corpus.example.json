@@ -1,0 +1,165 @@
+{
+  "benchmarks": [
+    {
+      "name": "Eberron: Forge of the Artificer",
+      "source": "{USERPROFILE}\\Documents\\DnD\\books and docs\\Eberron_ Forge of the Artificer.md",
+      "canonical": "{USERPROFILE}\\source\\repos\\The Book Of Xellarant\\Eberron Forge of the Artificer",
+      "sourceMeta": {
+        "name": "Eberron: Forge of the Artificer",
+        "abbr": "EFA",
+        "author": "Wizards of the Coast"
+      },
+      "types": ["spell", "archetype", "feat", "race", "background", "class"],
+      "sourceValidation": {
+        "types": ["spell", "archetype", "feat", "race", "background", "class"],
+        "minCounts": {
+          "spell": 1,
+          "archetype": 5,
+          "feat": 28,
+          "race": 5,
+          "background": 17,
+          "class": 1
+        },
+        "expected": {
+          "spell": ["Homunculus Servant"],
+          "class": ["Artificer"],
+          "archetype": ["Alchemist", "Armorer", "Artillerist", "Battle Smith", "Cartographer"],
+          "race": ["Changeling", "Kalashtar", "Khoravar", "Shifter", "Warforged"],
+          "background": [
+            "Aberrant Heir",
+            "Archaeologist",
+            "House Agent",
+            "House Cannith Heir",
+            "House Deneith Heir",
+            "House Ghallanda Heir",
+            "House Jorasco Heir",
+            "House Kundarak Heir",
+            "House Lyrandar Heir",
+            "House Medani Heir",
+            "House Orien Heir",
+            "House Phiarlan Heir",
+            "House Sivis Heir",
+            "House Tharashk Heir",
+            "House Thuranni Heir",
+            "House Vadalis Heir",
+            "Inquisitive"
+          ],
+          "feat": [
+            "Aberrant Dragonmark",
+            "Mark of Detection",
+            "Mark of Finding",
+            "Mark of Handling",
+            "Mark of Healing",
+            "Mark of Hospitality",
+            "Mark of Making",
+            "Mark of Passage",
+            "Mark of Scribing",
+            "Mark of Sentinel",
+            "Mark of Shadow",
+            "Mark of Storm",
+            "Mark of Warding",
+            "Greater Aberrant Mark",
+            "Greater Mark of Detection",
+            "Greater Mark of Finding",
+            "Greater Mark of Handling",
+            "Greater Mark of Healing",
+            "Greater Mark of Hospitality",
+            "Greater Mark of Making",
+            "Greater Mark of Passage",
+            "Greater Mark of Scribing",
+            "Greater Mark of Sentinel",
+            "Greater Mark of Shadow",
+            "Greater Mark of Storm",
+            "Greater Mark of Warding",
+            "Potent Dragonmark",
+            "Boon of Siberys"
+          ]
+        },
+        "requireTextTypes": ["spell", "archetype", "feat", "race", "background", "class"],
+        "requireFeaturesForTypes": ["class", "archetype", "race"],
+        "requireFeatureTextTypes": ["class", "archetype", "race"],
+        "requiredFeatures": {
+          "class": {
+            "Artificer": ["Spellcasting", "Replicate Magic Item", "Artificer Subclass", "Soul of Artifice"]
+          },
+          "archetype": {
+            "Alchemist": ["Experimental Elixir"],
+            "Armorer": ["Arcane Armor", "Armor Model"],
+            "Artillerist": ["Eldritch Cannon"],
+            "Battle Smith": ["Steel Defender"],
+            "Cartographer": ["Adventurer's Atlas", "Superior Atlas"]
+          },
+          "race": {
+            "Changeling": ["Changeling Instincts", "Shape-Shifter"],
+            "Kalashtar": ["Dual Mind", "Mind Link"],
+            "Shifter": ["Shifting"],
+            "Warforged": ["Construct Resilience", "Integrated Protection"]
+          }
+        }
+      },
+      "thresholds": {
+        "minExtractedTotal": 50,
+        "minMatched": 100,
+        "minExactPercent": 99,
+        "maxUnmatched": 0,
+        "maxHighSeverity": 0
+      }
+    },
+    {
+      "name": "Eberron: Rising from the Last War",
+      "enabled": false,
+      "source": "{USERPROFILE}\\Documents\\DnD\\books and docs\\Eberron -Rising from the Last War.pdf",
+      "canonical": "{USERPROFILE}\\Documents\\5e Character Builder\\custom\\supplements\\eberron-rising-from-the-last-war",
+      "sourceMeta": {
+        "name": "Eberron: Rising from the Last War",
+        "abbr": "WOTC_ERLW",
+        "author": "Wizards of the Coast",
+        "year": "2019"
+      },
+      "thresholds": {
+        "minExtractedTotal": 1,
+        "minMatched": 1,
+        "maxHighSeverity": 0
+      }
+    },
+    {
+      "name": "Fizban's Treasury of Dragons",
+      "enabled": false,
+      "source": "{USERPROFILE}\\Documents\\DnD\\books and docs\\Fizban's Treasury of Dragons [HQ] [OCR] [Bookmarked].pdf",
+      "canonical": "{USERPROFILE}\\Documents\\5e Character Builder\\custom\\supplements\\fizbans-treasury-of-dragons",
+      "sourceMeta": {
+        "name": "Fizban's Treasury of Dragons",
+        "abbr": "WOTC_FTOD",
+        "author": "Wizards of the Coast",
+        "year": "2021"
+      },
+      "thresholds": {
+        "minExtracted": {
+          "spell": 1,
+          "magic": 1
+        },
+        "minMatched": 2,
+        "maxUnmatched": 4,
+        "maxDifferent": 2,
+        "maxHighSeverity": 0
+      }
+    },
+    {
+      "name": "Guildmasters' Guide to Ravnica",
+      "enabled": false,
+      "source": "{USERPROFILE}\\Documents\\DnD\\books and docs\\Guildmasters_ Guide to Ravnica.pdf",
+      "canonical": "{USERPROFILE}\\Documents\\5e Character Builder\\custom\\supplements\\guildmasters-guide-to-ravnica",
+      "sourceMeta": {
+        "name": "Guildmasters' Guide to Ravnica",
+        "abbr": "WOTC_GGTR",
+        "author": "Wizards of the Coast",
+        "year": "2018"
+      },
+      "thresholds": {
+        "minExtractedTotal": 1,
+        "minMatched": 1,
+        "maxHighSeverity": 0
+      }
+    }
+  ]
+}

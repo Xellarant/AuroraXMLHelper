@@ -111,6 +111,13 @@ function Get-TextContent {
     return [string]$raw
 }
 
+function Get-ReferenceScanText {
+    param([string]$Path)
+
+    $text = Get-TextContent $Path
+    return [System.Text.RegularExpressions.Regex]::Replace($text, "<!--[\s\S]*?-->", "")
+}
+
 function Get-XmlAttribute {
     param(
         [System.Xml.XmlNode]$Node,
@@ -181,6 +188,96 @@ function Add-IdLocation {
 
     $Table[$Id].Add($File) | Out-Null
     [void]$script:RepoDefinedIds.Add($Id)
+}
+
+function Format-IdList {
+    param(
+        [string[]]$Ids,
+        [int]$Limit = 5
+    )
+
+    $uniqueIds = @($Ids | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)
+    if ($uniqueIds.Count -le $Limit) {
+        return ($uniqueIds -join ", ")
+    }
+
+    $head = @($uniqueIds | Select-Object -First $Limit)
+    return (($head -join ", ") + " and $($uniqueIds.Count - $Limit) more")
+}
+
+function Test-AbilityScoreName {
+    param([string]$Name)
+
+    return @("strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma") -contains $Name
+}
+
+function Test-ElementAuroraContentRules {
+    param(
+        [System.Xml.XmlNode]$Element,
+        [string]$DisplayPath
+    )
+
+    $id = Get-XmlAttribute $Element "id"
+    $name = Get-XmlAttribute $Element "name"
+    $type = Get-XmlAttribute $Element "type"
+    $label = if (-not [string]::IsNullOrWhiteSpace($id)) { $id } elseif (-not [string]::IsNullOrWhiteSpace($name)) { $name } else { "<unnamed>" }
+
+    $grantNodes = @($Element.SelectNodes("./rules/grant"))
+    foreach ($grant in $grantNodes) {
+        $grantType = Get-XmlAttribute $grant "type"
+        $grantId = Get-XmlAttribute $grant "id"
+
+        if ($grantType -eq "Condition Immunity" -and $grantId -like "ID_INTERNAL_CONDITION_DAMAGE_RESISTANCE_*") {
+            Add-Finding "Error" $DisplayPath "DamageResistanceGrant" "Element '$label' grants damage resistance '$grantId' as Condition Immunity; use grant type 'Condition' for damage resistance."
+        }
+    }
+
+    foreach ($stat in @($Element.SelectNodes("./rules/stat"))) {
+        $value = Get-XmlAttribute $stat "value"
+        if ($value -match "^level:[A-Za-z0-9_-]+:\d+$") {
+            Add-Finding "Warning" $DisplayPath "LevelMultiplierStat" "Element '$label' uses stat value '$value'. Aurora generation should emit repeated level stat entries for level multipliers."
+        }
+    }
+
+    if ($type -eq "Spell") {
+        foreach ($supportsNode in @($Element.SelectNodes("./supports"))) {
+            $tokens = @($supportsNode.InnerText -split "," | ForEach-Object { $_.Trim() })
+            $numericTokens = @($tokens | Where-Object { $_ -match "^\d+$" })
+            if ($numericTokens.Count -gt 0) {
+                Add-Finding "Warning" $DisplayPath "SpellSupportsLevel" "Spell '$label' has numeric supports token(s) '$($numericTokens -join ", ")'. Put spell level in setters/rules rather than supports."
+            }
+        }
+    }
+
+    if ($type -eq "Background") {
+        $directAbilityStats = @($Element.SelectNodes("./rules/stat") | Where-Object {
+            $statName = Get-XmlAttribute $_ "name"
+            Test-AbilityScoreName $statName
+        })
+
+        $asiGrantNodes = @($grantNodes | Where-Object {
+            (Get-XmlAttribute $_ "type") -eq "Ability Score Improvement" -and
+            (Get-XmlAttribute $_ "id") -like "ID_INTERNAL_ABILITY_SCORE_IMPROVEMENT_COMBINATION_*"
+        })
+
+        $backgroundAsiGrantNodes = @($grantNodes | Where-Object {
+            (Get-XmlAttribute $_ "id") -eq "ID_INTERNAL_GRANTS_BACKGROUND_ASI"
+        })
+
+        $phb24FeatGrantNodes = @($grantNodes | Where-Object {
+            (Get-XmlAttribute $_ "id") -like "ID_WOTC_PHB24_FEAT_*"
+        })
+
+        if ($asiGrantNodes.Count -gt 0 -and $backgroundAsiGrantNodes.Count -eq 0) {
+            Add-Finding "Error" $DisplayPath "BackgroundAsiGrant" "Background '$label' grants a 2024-style ability score choice but is missing ID_INTERNAL_GRANTS_BACKGROUND_ASI."
+        }
+
+        if ($directAbilityStats.Count -gt 0) {
+            $statNames = @($directAbilityStats | ForEach-Object { Get-XmlAttribute $_ "name" } | Sort-Object -Unique)
+            $severity = if ($phb24FeatGrantNodes.Count -gt 0 -or $asiGrantNodes.Count -gt 0) { "Error" } else { "Warning" }
+            Add-Finding $severity $DisplayPath "BackgroundAbilityStats" "Background '$label' uses direct ability stat grant(s) '$($statNames -join ", ")'. 2024-style backgrounds should grant an Ability Score Improvement combination and ID_INTERNAL_GRANTS_BACKGROUND_ASI."
+        }
+    }
 }
 
 function Test-FileNode {
@@ -297,6 +394,8 @@ function Test-ElementsDocument {
                 }
             }
         }
+
+        Test-ElementAuroraContentRules $element $DisplayPath
     }
 }
 
@@ -366,7 +465,7 @@ function Add-LegacyKnownIds {
         Where-Object { $_.Extension -in @(".xml", ".index") }
 
     foreach ($file in $legacyFiles) {
-        $text = Get-TextContent $file.FullName
+        $text = Get-ReferenceScanText $file.FullName
         foreach ($match in [regex]::Matches($text, "ID_[A-Z0-9_]+")) {
             [void]$script:RepoDefinedIds.Add($match.Value)
         }
@@ -381,10 +480,16 @@ function Test-IdReferences {
     }
 
     foreach ($document in $Documents) {
-        $text = Get-TextContent $document.FullPath
+        $text = Get-ReferenceScanText $document.FullPath
         $ids = [regex]::Matches($text, "ID_[A-Z0-9_]+") |
             ForEach-Object { $_.Value } |
             Sort-Object -Unique
+
+        $hasPhb24Ids = @($ids | Where-Object { $_.StartsWith("ID_WOTC_PHB24_", [System.StringComparison]::OrdinalIgnoreCase) })
+        $legacyPhbSpellFeatIds = @($ids | Where-Object { $_ -match "^ID_PHB_(SPELL|FEAT)_" })
+        if ($hasPhb24Ids.Count -gt 0 -and $legacyPhbSpellFeatIds.Count -gt 0) {
+            Add-Finding "Warning" $document.DisplayPath "SourceEditionIds" "Document mixes 2024 PHB ids with legacy PHB spell/feat ids: $(Format-IdList $legacyPhbSpellFeatIds). Verify the intended source edition."
+        }
 
         foreach ($id in $ids) {
             if ($script:AllowedUnresolvedIds.Contains($id)) {
