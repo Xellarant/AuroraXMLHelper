@@ -2116,7 +2116,7 @@ async function startExtraction() {
   document.getElementById('extractBtn').disabled = false;
 
   const deterministicBannerParts = [];
-  if (errors.length) deterministicBannerParts.push(...errors.map(e => '- ' + e));
+  if (errors.length) deterministicBannerParts.push(...errors.map(e => '- ' + escHtml(String(e))));
   if (skippedItems.length) {
     deterministicBannerParts.push(`- ${skippedItems.length} element(s) skipped - below 80% complete (see skipped-elements.txt in ZIP)`);
   }
@@ -3709,7 +3709,7 @@ function showValidationResult(issues) {
   errEl.className = 'alert alert-error';
   errEl.dataset.validationMessage = '1';
   errEl.innerHTML = `<strong>Warning: ${issues.length} issue${issues.length > 1 ? 's' : ''} found - review before downloading:</strong><br>` +
-    issues.slice(0, 8).map(x => `- ${x.msg}`).join('<br>') +
+    issues.slice(0, 8).map(x => `- ${escHtml(x.msg)}`).join('<br>') +
     (issues.length > 8 ? `<br><em>...and ${issues.length - 8} more</em>` : '');
   errEl.classList.remove('hidden');
   errEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -6085,7 +6085,7 @@ function generateAndDownloadRefreshPreview() {
 function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
-function escAttr(s) { return String(s||'').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+function escAttr(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 function stripInvalidXmlChars(s) {
   return String(s || '').replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '');
 }

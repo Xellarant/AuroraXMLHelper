@@ -16,7 +16,6 @@
   },
   "devDependencies": {
     "pdfjs-dist": "^3.11.174",
-    "pdfjs-dist": "^3.11.174",
     "vitest": "^4.1.8"
   }
 }
