@@ -270,7 +270,7 @@ function artifactFindings(text) {
   const value = String(text || '');
   const findings = [];
   const checks = [
-    { pattern: /\uFFFD|�|Â|Ã|â€|□/, label: 'encoding artifact' },
+    { pattern: /\uFFFD|\u00c2|\u00c3|\u00e2\u20ac|\u25a1/, label: 'encoding artifact' },
     { pattern: /\bCant rip\b/i, label: 'OCR split for Cantrip' },
     { pattern: /<\/?[A-Za-z][^>]*>/, label: 'raw tag artifact' }
   ];

@@ -1,6 +1,6 @@
-﻿// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+﻿// ---------------------------------------------
 // State
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ---------------------------------------------
 let pdfFile = null;
 let extractedData = {}; // { spell: [...], archetype: [...], item: [...], feat: [...], magic: [...] }
 let skippedItems = []; // items filtered out for being < 80% complete
@@ -27,9 +27,9 @@ const TYPE_LABELS = {
 const ELEMENT_TYPES = ['spell', 'archetype', 'item', 'feat', 'magic', 'race', 'background', 'class', 'other'];
 const MANUAL_AUTHOR_TYPES = ELEMENT_TYPES;
 
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ---------------------------------------------
 // Init
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ---------------------------------------------
 window.addEventListener('DOMContentLoaded', () => {
   apiKey = '';
   useOllama = false;
@@ -43,9 +43,9 @@ window.addEventListener('DOMContentLoaded', () => {
 });
 
 
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ---------------------------------------------
 // Ollama provider
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ---------------------------------------------
 
 function toggleOllama(on) {
   if (!LEGACY_AI_EXTRACTION_ENABLED) {
@@ -104,9 +104,9 @@ async function testOllama() {
   }
 }
 
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ---------------------------------------------
 // PDF text extraction via PDF.js (for Ollama mode)
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ---------------------------------------------
 const MAX_WORDS = 12000;
 
 async function extractTextFromChunk(uint8Array) {
@@ -135,9 +135,9 @@ async function extractTextFromChunk(uint8Array) {
   }
 }
 
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ---------------------------------------------
 // Ollama raw call - mirrors geminiRaw shape
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ---------------------------------------------
 async function ollamaRaw(textContent, promptText) {
   if (!LEGACY_AI_EXTRACTION_ENABLED) {
     throw new Error(legacyAiDisabledMessage());
@@ -178,9 +178,9 @@ async function ollamaRaw(textContent, promptText) {
 }
 
 
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ---------------------------------------------
 // API Key
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ---------------------------------------------
 function toggleKeyVisibility() {
   const input = document.getElementById('apiKeyInput');
   const btn = document.getElementById('keyVisBtn');
@@ -265,9 +265,9 @@ function showLegacyAiDisabled(elementId) {
   el.classList.remove('hidden');
 }
 
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ---------------------------------------------
 // File handling
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ---------------------------------------------
 function handleDragOver(e) { e.preventDefault(); document.getElementById('uploadZone').classList.add('drag-over'); }
 function handleDragLeave() { document.getElementById('uploadZone').classList.remove('drag-over'); }
 function handleDrop(e) {
@@ -327,9 +327,9 @@ function clearFile() {
   checkExtractReady();
 }
 
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ---------------------------------------------
 // Type checkboxes
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ---------------------------------------------
 function updateTypeCheck(cb) {
   if (cb) cb.closest('.type-check').classList.toggle('checked', cb.checked);
   checkExtractReady();
@@ -344,9 +344,9 @@ function checkExtractReady() {
   document.getElementById('extractBtn').disabled = !ready;
 }
 
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ---------------------------------------------
 // Prompts per element type
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ---------------------------------------------
 const PROMPTS = {
   spell: `Extract ALL spells from this PDF. Return a JSON array where every element has:
 name, school, level (integer 0-9), castingTime, range,
@@ -358,13 +358,13 @@ higherLevels (At Higher Levels text, empty string if none).
 Include every spell. Do not truncate descriptions.`,
 
   archetype: `Extract ALL subclasses and archetypes from this PDF. Return a JSON array where every element has:
-name, class (parent class name e.g. Barbarian), supports (Aurora category â€” use exactly:
+name, class (parent class name e.g. Barbarian), supports (Aurora category - use exactly:
 Primal Path, Bard College, Divine Domain, Druid Circle, Martial Archetype, Monastic Tradition,
 Sacred Oath, Ranger Archetype, Roguish Archetype, Sorcerous Origin, Otherworldly Patron, Arcane Tradition),
 description (flavour text only),
 features (array of objects with: name, level (integer), action (e.g. Bonus Action, or empty string),
 usage (e.g. 1/Short Rest, or empty string), description (COMPLETE mechanical text of the feature
-including every bullet point, every condition, every number â€” do not summarise or truncate)).
+including every bullet point, every condition, every number - do not summarise or truncate)).
 Include every subclass and every one of its features.`,
 
   item: `Extract ALL equipment, weapons, armor, tools, and gear from this PDF.
@@ -372,19 +372,19 @@ Return a JSON array where every element has:
 name, category (Weapons/Armor/Tools/Gear),
 cost (number only e.g. "50"), currency (gp/sp/cp),
 weight (number only e.g. "2"),
-description (the full descriptive text for this item â€” include special rules, usage instructions,
+description (the full descriptive text for this item - include special rules, usage instructions,
 and any mechanics not captured in other fields. Do NOT repeat the item name, cost, weight,
 damage dice, or properties list in this field as those are stored separately),
 damage (e.g. 2d6 piercing, empty if not a weapon),
 damageType (empty if not a weapon),
 properties (comma-separated weapon/armor properties e.g. "reload 6, two-handed, burst fire", empty if none).
 Include every item listed in equipment tables and descriptions.
-Keep descriptions focused â€” omit flavour text that simply restates the item category or reiterates stats.`,
+Keep descriptions focused - omit flavour text that simply restates the item category or reiterates stats.`,
   feat: `Extract ALL feats from this PDF.
 Return a JSON array where every element has:
 name (string),
 prerequisite (string, empty if none),
-fullText (string â€” the COMPLETE text of the feat exactly as it appears in the PDF,
+fullText (string - the COMPLETE text of the feat exactly as it appears in the PDF,
 including the opening sentence AND every bullet point. Do not omit anything.).
 Include every feat.`,
 
@@ -399,42 +399,42 @@ Include every magic item.`,
 
   race: `Extract ALL races and species from this PDF.
 Return a JSON array where every element has:
-name (string), description (string â€” flavour text only),
-size (string â€” e.g. "Medium"), speed (integer â€” base walking speed),
-abilityScores (object â€” e.g. {"strength":2,"dexterity":1}, omit if none),
+name (string), description (string - flavour text only),
+size (string - e.g. "Medium"), speed (integer - base walking speed),
+abilityScores (object - e.g. {"strength":2,"dexterity":1}, omit if none),
 languages (array of strings),
-traits (array of objects with: name (string), description (string â€” complete mechanical text)),
-subraces (array of objects with: name (string), description (string)) â€” empty if none.
+traits (array of objects with: name (string), description (string - complete mechanical text)),
+subraces (array of objects with: name (string), description (string)) - empty if none.
 Include every race. Do not truncate trait descriptions.`,
 
   background: `Extract ALL backgrounds from this PDF.
 Return a JSON array where every element has:
-name (string), description (string â€” flavour text only),
+name (string), description (string - flavour text only),
 skillProficiencies (array of skill name strings e.g. ["Arcana","History"]),
 toolProficiencies (array of strings, empty if none),
 languages (array of strings, use "Any" if player chooses),
-equipment (string â€” starting equipment list),
-features (array of objects with: name (string), description (string â€” complete text)).`,
+equipment (string - starting equipment list),
+features (array of objects with: name (string), description (string - complete text)).`,
 
   class: `Extract ALL classes from this PDF.
 Return a JSON array where every element has:
-name (string), description (string â€” flavour text only),
-hitDie (integer â€” e.g. 8 for d8),
+name (string), description (string - flavour text only),
+hitDie (integer - e.g. 8 for d8),
 savingThrows (array of ability name strings e.g. ["Wisdom","Charisma"]),
-armorProficiencies (array â€” e.g. ["Light Armor","Shields"]),
-weaponProficiencies (array â€” e.g. ["Simple Weapons"]),
+armorProficiencies (array - e.g. ["Light Armor","Shields"]),
+weaponProficiencies (array - e.g. ["Simple Weapons"]),
 skillChoices (object with: count (integer), from (array of skill names)),
 startingEquipment (string),
-archetypeLevel (integer â€” level at which archetype is chosen, e.g. 3),
-archetypeLabel (string â€” e.g. "Primal Path"),
-archetypeSupports (string â€” the supports tag value for archetype selection),
-features (array of objects with: name (string), level (integer), action (string), usage (string), description (string â€” COMPLETE mechanical text)).
+archetypeLevel (integer - level at which archetype is chosen, e.g. 3),
+archetypeLabel (string - e.g. "Primal Path"),
+archetypeSupports (string - the supports tag value for archetype selection),
+features (array of objects with: name (string), level (integer), action (string), usage (string), description (string - COMPLETE mechanical text)).
 Include every class and all its features. Do not truncate.`,
 
   other: `Extract ALL elements from this PDF that do not fit into spells, subclasses, equipment, feats, or magic items. This includes things like races, classes, backgrounds, companions, vehicles, monsters, or any other custom content.
 Return a JSON array where every element has:
 name (string),
-type (string â€” the specific element type, e.g. "Race", "Class", "Background", "Monster"),
+type (string - the specific element type, e.g. "Race", "Class", "Background", "Monster"),
 description (complete full text of the element including all traits, features, and mechanics).
 Include every such element. If nothing of this kind exists in the PDF, return an empty array.`
 };
@@ -442,9 +442,9 @@ Include every such element. If nothing of this kind exists in the PDF, return an
 
 
 
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ---------------------------------------------
 // PDF chunking via pdf-lib
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ---------------------------------------------
 const PAGES_PER_CHUNK = 50;   // ~13K tokens/chunk, safely under 1M context limit
 const INLINE_LIMIT_MB = 19;   // still used for TOC/meta calls on small files
 
@@ -489,9 +489,9 @@ function uint8ToBase64(uint8) {
 
 
 
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ---------------------------------------------
 // TOC-guided extraction
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ---------------------------------------------
 
 // Holds page ranges discovered from the TOC, keyed by element type
 let discoveredPageRanges = {};
@@ -583,9 +583,9 @@ async function detectSourceMeta(base64, isUri) {
   }
 }
 
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ---------------------------------------------
 // Deterministic PDF parsing
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ---------------------------------------------
 const DETERMINISTIC_PARSERS = {
   spell: parseSpellsFromText,
   archetype: parseArchetypesFromText,
@@ -665,9 +665,9 @@ function selectPages(pages, rangeText) {
 }
 
 function detectSourceMetaFromText(pages) {
-  const firstLines = (pages[0]?.text || '').split('\n').map(s => s.trim()).filter(Boolean);
-  const allText = pages.map(page => page.text || '').join('\n');
-  const title = firstLines.find(line => /^[A-Z0-9][A-Za-z0-9:'â€™\-\s]{8,70}$/.test(line) && !/^(chapter|contents|table of contents)$/i.test(line));
+  const firstLines = (pages[0]?.text || '').split('\n').map(s => normalizeTextLine(normalizeEncodingArtifacts(s))).filter(Boolean);
+  const allText = pages.map(page => normalizeEncodingArtifacts(page.text || '')).join('\n');
+  const title = firstLines.find(line => /^[A-Z0-9][A-Za-z0-9:'\u2019\-\s]{8,70}$/.test(line) && !/^(chapter|contents|table of contents)$/i.test(line));
   if (title && !document.getElementById('sourceName').value.trim()) {
     document.getElementById('sourceName').value = title;
     autoFillAbbr(title);
@@ -686,13 +686,19 @@ function detectSourceMetaFromText(pages) {
   updateSourceRulesetDecisionDisplay();
 }
 
-function normalizeTextLines(text) {
-  return text
+function normalizeEncodingArtifacts(text) {
+  return String(text || '')
     .replace(/\u00a0/g, ' ')
-    .replace(/[“”]/g, '"')
-    .replace(/[‘’]/g, "'")
-    .replace(/[â€œâ€]/g, '"')
-    .replace(/[â€˜â€™]/g, "'")
+    .replace(/[\u201c\u201d]/g, '"')
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/\u00e2\u20ac[\u0153\u009d]/g, '"')
+    .replace(/\u00e2\u20ac[\u02dc\u2122]/g, "'")
+    .replace(/\u00e2\u20ac[\u201c\u201d]/g, '-')
+    .replace(/\u00e2\u20ac\u00a0/g, '');
+}
+
+function normalizeTextLines(text) {
+  return normalizeEncodingArtifacts(text)
     .split(/\r?\n/)
     .map(normalizeTextLine)
     .filter(Boolean);
@@ -905,7 +911,7 @@ function isRejectedFeatTitle(title) {
 
 function isFeatMetaLine(line) {
   return /^ARTIST:/i.test(line)
-    || /^['â€™]?TIS\b/i.test(line)
+    || /^'?TIS\b/i.test(line)
     || /^(?:(?:General|Origin|Epic Boon|Fighting Style|Dragonmark)\s+)?Feat\b/i.test(line);
 }
 
@@ -1578,7 +1584,7 @@ function parseLanguageInfo(text) {
   if (!src || /^none$/i.test(src)) return { languages: [], choices: 0 };
   const lower = src.toLowerCase();
   const languages = KNOWN_LANGUAGE_NAMES.filter(lang => {
-    const escaped = lang.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/'/g, "['â€™]");
+    const escaped = lang.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/'/g, "['\\u2019]");
     return new RegExp(`\\b${escaped}\\b`, 'i').test(src);
   });
   let choices = 0;
@@ -1757,11 +1763,10 @@ function isLeveledFeatureHeading(line) {
 }
 
 function cleanExtractedTitle(text) {
-  return String(text || '')
-    .replace(/[‘’]/g, "'")
+  return normalizeEncodingArtifacts(text)
     .replace(/^['"`]+/, '')
     .replace(/\s+/g, ' ')
-    .replace(/[.!?â€ ]+$/i, '')
+    .replace(/[.!?]+$/i, '')
     .trim();
 }
 
@@ -1934,7 +1939,7 @@ function looksLikeTitle(line) {
   if (!line || line.length < 3 || line.length > 80) return false;
   if (/[.!?]$/.test(line)) return false;
   if (/^(chapter|part|appendix|table|page|\d+)$/i.test(line)) return false;
-  return /^[A-Z0-9][A-Za-z0-9:'(),&â€™\-\s]+$/.test(line);
+  return /^[A-Z0-9][A-Za-z0-9:'(),&\u2019\-\s]+$/.test(line);
 }
 
 function isSectionHeading(line) {
@@ -1997,9 +2002,9 @@ function parseRecharge(text) {
   return m ? m[0] : '';
 }
 
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ---------------------------------------------
 // Extraction
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ---------------------------------------------
 function ensureExtractedDataBuckets() {
   if (!extractedData || typeof extractedData !== 'object') extractedData = {};
   ELEMENT_TYPES.forEach(type => {
@@ -2468,9 +2473,9 @@ function setProgress(pct, msg) {
   if (msg) document.getElementById('progressMsg').textContent = msg;
 }
 
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ---------------------------------------------
 // Review UI builder
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ---------------------------------------------
 function buildReviewUI(preferredType = '') {
   ensureExtractedDataBuckets();
   const total = Object.values(extractedData)
@@ -2608,9 +2613,9 @@ function toggleCard(type, i) {
   body.classList.toggle('open');
 }
 
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ---------------------------------------------
 // Field builders per type
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ---------------------------------------------
 function buildFieldsHTML(type, item, i) {
   const id = `${type}-${i}`;
   if (type === 'spell') return buildSpellFields(item, id);
@@ -2887,9 +2892,9 @@ function chk(field, label, val, id) {
   </label>`;
 }
 
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ---------------------------------------------
 // Field update helpers
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ---------------------------------------------
 function parseId(id) {
   const parts = id.split('-');
   return { type: parts[0], index: parseInt(parts[1]) };
@@ -3100,9 +3105,9 @@ function revertToGenerated(id, event) {
 }
 
 
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ---------------------------------------------
 // Change tracking
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ---------------------------------------------
 let hasUnsavedChanges = false;
 
 function markChanged() {
@@ -3386,15 +3391,15 @@ function addTrait(id) {
   updateOverrideStatusForId(id);
 }
 
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ---------------------------------------------
 // XML Generation
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ---------------------------------------------
 
 
 
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ---------------------------------------------
 // Completeness checking
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ---------------------------------------------
 
 // Returns { keep: bool, missing: string[] } for each item
 function checkCompleteness(item, type) {
@@ -3415,7 +3420,7 @@ function checkCompleteness(item, type) {
     for (const [field, label] of required) {
       if (!has(item[field])) missing.push(label);
     }
-    // level=0 is valid (cantrip) â€” don't flag it
+    // level=0 is valid (cantrip) - don't flag it
     if (item.level === 0 || item.level === '0') {
       const idx = missing.indexOf('level');
       if (idx !== -1) missing.splice(idx, 1);
@@ -3537,9 +3542,9 @@ function generateSkippedReport(skipped, sourceName) {
 }
 
 
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ---------------------------------------------
 // Validation
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ---------------------------------------------
 function validateAll() {
   const issues = [];
   for (const [type, items] of Object.entries(extractedData)) {
@@ -3763,9 +3768,9 @@ function showValidationResult(issues) {
   return false;
 }
 
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ---------------------------------------------
 // Source metadata helpers
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ---------------------------------------------
 function getSourceMeta() {
   const name   = document.getElementById('sourceName').value.trim() || 'Homebrew';
   const abbr   = document.getElementById('sourceAbbr').value.trim().toUpperCase()
@@ -3862,9 +3867,9 @@ document.addEventListener('DOMContentLoaded', () => {
   if (abbrEl) abbrEl.addEventListener('input', () => { abbrEl.dataset.userEdited = '1'; });
 });
 
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ---------------------------------------------
 // Generic element XML generator (fallback for unknown types)
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ---------------------------------------------
 function genGenericXml(item, type, source, prefix) {
   const typeName = type.charAt(0).toUpperCase() + type.slice(1).toLowerCase();
   const typeSegment = idify(type); // uppercase, underscores only
@@ -3905,9 +3910,9 @@ function genGenericXml(item, type, source, prefix) {
   return lines;
 }
 
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ---------------------------------------------
 // Per-type file names and generators
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ---------------------------------------------
 const FILE_SLUGS = {
   spell:     'spells',
   archetype: 'archetypes',
@@ -3941,9 +3946,9 @@ function dispatchGen(item, type, source, prefix, meta) {
   return genGenericXml(item, resolvedType, source, prefix);
 }
 
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ---------------------------------------------
 // Source XML generator
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ---------------------------------------------
 function genSourceXml(meta, fileList) {
   const today = new Date();
   const release = `${today.getFullYear()}${String(today.getMonth()+1).padStart(2,'0')}${String(today.getDate()).padStart(2,'0')}`;
@@ -3976,9 +3981,9 @@ function genSourceXml(meta, fileList) {
   return lines.join('\n');
 }
 
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ---------------------------------------------
 // Per-type XML file generator
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ---------------------------------------------
 function genTypeXml(type, items, meta) {
   const { name: source, slug, prefix, abbr } = meta;
   const fileName = getFileName(type, abbr);
@@ -4009,9 +4014,9 @@ function appendSharedTypeElements(lines, type, items, source, meta) {
   });
 }
 
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ---------------------------------------------
 // ZIP download
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ---------------------------------------------
 async function downloadZip() {
   const meta = getSourceMeta();
   const issues = validateAll();
@@ -4656,7 +4661,7 @@ function inferFeatRules(feat, meta) {
       }
     }
 
-    // No pattern matched â€” benefit is sheet-only, no rule generated
+    // No pattern matched - benefit is sheet-only, no rule generated
   });
 
   inferDragonmarkFeatRules(featName, allText, meta).forEach(featRule => rules.push(featRule));
@@ -6084,9 +6089,9 @@ function genMagicXml(item, source, prefix) {
   return lines;
 }
 
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ---------------------------------------------
 // Download & Preview
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ---------------------------------------------
 function generateAndDownload() {
   const meta = getSourceMeta();
   const issues = validateAll();
@@ -6125,9 +6130,9 @@ function generateAndDownloadRefreshPreview() {
   }
 }
 
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ---------------------------------------------
 // Utilities
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ---------------------------------------------
 function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }

@@ -258,6 +258,27 @@ test('source ruleset defaults to 2014 unless year or 5.5e signal proves 2024', (
   assert.equal(runInApp(context, `document.getElementById('sourceYear').dataset.rulesetEvidence`), 'Epic Boon feat|Magic action');
 });
 
+test('source title detection normalizes curly and mojibake apostrophes', () => {
+  const context = loadApp();
+
+  runInApp(context, `
+    document.getElementById('sourceName').value = '';
+    document.getElementById('sourceAbbr').value = '';
+    detectSourceMetaFromText([{ page: 1, text: 'Mordenkainen\\u2019s Clockwork Codex\\nby Arcane Press' }]);
+  `);
+  assert.equal(runInApp(context, `document.getElementById('sourceName').value`), "Mordenkainen's Clockwork Codex");
+  assert.equal(runInApp(context, `document.getElementById('sourceAbbr').value`), 'MCC');
+  assert.equal(runInApp(context, `looksLikeTitle('Mordenkainen\\u2019s Clockwork Codex')`), true);
+
+  runInApp(context, `
+    document.getElementById('sourceName').value = '';
+    document.getElementById('sourceAbbr').value = '';
+    detectSourceMetaFromText([{ page: 1, text: 'Tasha\\u00e2\\u20ac\\u2122s Arcane Appendix\\nby Test Author' }]);
+  `);
+  assert.equal(runInApp(context, `document.getElementById('sourceName').value`), "Tasha's Arcane Appendix");
+  assert.equal(runInApp(context, `document.getElementById('sourceAbbr').value`), 'TAA');
+});
+
 test('DDB-style feat blocks parse prerequisite and grouped benefits', () => {
   const context = loadApp();
   const text = [
