@@ -586,7 +586,7 @@ foreach ($file in $sourceFiles) {
 
 foreach ($entry in $ElementIdLocations.GetEnumerator()) {
     $uniqueLocations = @($entry.Value | Sort-Object -Unique)
-    if ($uniqueLocations.Count -gt 1) {
+    if ($entry.Value.Count -gt 1) {
         $files = ($uniqueLocations | ForEach-Object { Get-DisplayPath $_ }) -join "; "
         Add-Finding "Error" $files "DuplicateElementIds" "Duplicate element id '$($entry.Key)'."
     }

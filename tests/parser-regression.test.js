@@ -89,6 +89,8 @@ function loadApp() {
   };
 
   vm.createContext(context);
+  const shapeScript = fs.readFileSync(path.join(repoRoot, 'src', 'aurora-xml-shape.js'), 'utf8');
+  vm.runInContext(shapeScript, context, { filename: 'src/aurora-xml-shape.js' });
   const appScript = fs.readFileSync(path.join(repoRoot, 'src', 'app.js'), 'utf8');
   vm.runInContext(appScript, context, { filename: 'src/app.js' });
   return context;
@@ -256,6 +258,27 @@ test('source ruleset defaults to 2014 unless year or 5.5e signal proves 2024', (
   assert.deepEqual(meta.rulesetEvidence, ['Epic Boon feat', 'Magic action']);
   assert.match(meta.rulesetDecision, /Epic Boon feat/);
   assert.equal(runInApp(context, `document.getElementById('sourceYear').dataset.rulesetEvidence`), 'Epic Boon feat|Magic action');
+});
+
+test('source title detection normalizes curly and mojibake apostrophes', () => {
+  const context = loadApp();
+
+  runInApp(context, `
+    document.getElementById('sourceName').value = '';
+    document.getElementById('sourceAbbr').value = '';
+    detectSourceMetaFromText([{ page: 1, text: 'Mordenkainen\\u2019s Clockwork Codex\\nby Arcane Press' }]);
+  `);
+  assert.equal(runInApp(context, `document.getElementById('sourceName').value`), "Mordenkainen's Clockwork Codex");
+  assert.equal(runInApp(context, `document.getElementById('sourceAbbr').value`), 'MCC');
+  assert.equal(runInApp(context, `looksLikeTitle('Mordenkainen\\u2019s Clockwork Codex')`), true);
+
+  runInApp(context, `
+    document.getElementById('sourceName').value = '';
+    document.getElementById('sourceAbbr').value = '';
+    detectSourceMetaFromText([{ page: 1, text: 'Tasha\\u00e2\\u20ac\\u2122s Arcane Appendix\\nby Test Author' }]);
+  `);
+  assert.equal(runInApp(context, `document.getElementById('sourceName').value`), "Tasha's Arcane Appendix");
+  assert.equal(runInApp(context, `document.getElementById('sourceAbbr').value`), 'TAA');
 });
 
 test('DDB-style feat blocks parse prerequisite and grouped benefits', () => {
@@ -1346,6 +1369,67 @@ test('manual other elements export with their custom Aurora type', () => {
   assert.ok(zipDocs.find(doc => doc.fileName === 'source.xml').xml.includes('vss-companion.xml'));
 });
 
+test('generated XML comments are safe when source text contains comment delimiters', () => {
+  const context = loadApp();
+  setExtractedData(context, {
+    spell: [],
+    archetype: [],
+    item: [],
+    feat: [],
+    magic: [],
+    race: [],
+    background: [{
+      name: 'Delimiter Tester',
+      description: 'A background for comment safety.',
+      skillProficiencies: [],
+      abilityScores: [],
+      feat: 'Bad -- Feat',
+      toolProficiencies: ['Bad -- Tool'],
+      languages: [],
+      equipment: '',
+      features: []
+    }],
+    class: [],
+    other: [{
+      name: 'Oddity',
+      type: 'Bad -- Type',
+      description: 'An odd generated element.',
+      features: []
+    }]
+  });
+
+  const xml = runInApp(context, 'generateXml()');
+
+  assert.ok(xml.includes('BAD - - TYPE'));
+  assert.ok(xml.includes('Background feat: Bad - - Feat - include'));
+  assert.ok(xml.includes('Tool proficiency: Bad - - Tool - add ID manually'));
+  const commentBodies = Array.from(xml.matchAll(/<!--([\s\S]*?)-->/g)).map(match => match[1]);
+  assert.ok(commentBodies.some(comment => comment.includes('BAD - - TYPE')));
+  assert.ok(commentBodies.some(comment => comment.includes('Bad - - Feat')));
+  assert.ok(commentBodies.some(comment => comment.includes('Bad - - Tool')));
+  assert.ok(commentBodies.every(comment => !comment.includes('--')));
+});
+
+test('legacy AI helpers are disabled in deterministic mode', async () => {
+  const context = loadApp();
+  let fetchCalls = 0;
+  context.fetch = () => {
+    fetchCalls += 1;
+    throw new Error('network should not be called');
+  };
+
+  const ranges = await runInApp(context, `discoverPageRanges('AAAA', false, () => { throw new Error('progress should not run'); })`);
+  await runInApp(context, `detectSourceMeta('AAAA', false)`);
+  await runInApp(context, `testKey()`);
+  await runInApp(context, `testOllama()`);
+  await assert.rejects(runInApp(context, `geminiRaw('AAAA', false, 'prompt')`), /AI extraction is disabled/);
+  await assert.rejects(runInApp(context, `ollamaRaw('text', 'prompt')`), /AI extraction is disabled/);
+  await assert.rejects(runInApp(context, `callModel(null, 'AAAA', 'spell', () => {})`), /AI extraction is disabled/);
+
+  assert.equal(JSON.stringify(ranges), '{}');
+  assert.equal(fetchCalls, 0);
+});
+
 test('generated XML metadata matches Aurora shape expectations', () => {
   const context = loadApp();
   const sampleData = {
@@ -1397,4 +1481,54 @@ test('generated XML metadata matches Aurora shape expectations', () => {
   assert.ok(zipDocs.some(doc => doc.fileName === 'source.xml'));
   assert.ok(zipDocs.every(doc => /<update version="0\.1\.0">/.test(doc.xml)));
   assert.ok(zipDocs.every(doc => !/<file\b[^>]*url=""/.test(doc.xml)));
+});
+
+test('browser Aurora validator catches duplicate element IDs in one document', () => {
+  const context = loadApp();
+  const elementNode = attrs => ({
+    tagName: 'element',
+    getAttribute(name) { return attrs[name] || ''; },
+    querySelector() { return null; },
+    querySelectorAll() { return []; }
+  });
+  const updateNode = {
+    getAttribute(name) { return name === 'version' ? '0.1.0' : ''; },
+    querySelectorAll(selector) {
+      return selector === 'file'
+        ? [{ getAttribute(name) { return name === 'name' ? 'duplicate.xml' : 'duplicate.xml'; } }]
+        : [];
+    }
+  };
+  const infoNode = {
+    querySelector(selector) {
+      if (selector === 'update') return updateNode;
+      return null;
+    }
+  };
+  context.DOMParser = class DOMParser {
+    parseFromString() {
+      return {
+        querySelector() { return null; },
+        documentElement: {
+          tagName: 'elements',
+          children: [
+            elementNode({ name: 'First', type: 'Feat', source: 'Duplicate Fixture', id: 'ID_DUPLICATE_FIXTURE_FEAT_REPEAT' }),
+            elementNode({ name: 'Second', type: 'Feat', source: 'Duplicate Fixture', id: 'ID_DUPLICATE_FIXTURE_FEAT_REPEAT' })
+          ],
+          querySelector(selector) {
+            if (selector === 'info') return infoNode;
+            return null;
+          }
+        }
+      };
+    }
+  };
+  const issues = JSON.parse(runInApp(context, `
+    JSON.stringify(validateAuroraXmlDocuments([{
+      fileName: 'duplicate.xml',
+      xml: '<elements></elements>'
+    }], 'Unit Test'))
+  `));
+
+  assert.ok(issues.some(issue => issue.msg.includes('DuplicateElementIds') && issue.msg.includes('duplicate.xml')));
 });

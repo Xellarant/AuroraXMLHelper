@@ -90,6 +90,8 @@ function loadApp(sourceMeta = {}) {
     clearTimeout() {}
   };
   vm.createContext(context);
+  const shapeScript = fs.readFileSync(path.join(repoRoot, 'src', 'aurora-xml-shape.js'), 'utf8');
+  vm.runInContext(shapeScript, context, { filename: 'src/aurora-xml-shape.js' });
   const appScript = fs.readFileSync(path.join(repoRoot, 'src', 'app.js'), 'utf8');
   vm.runInContext(appScript, context, { filename: 'src/app.js' });
   return { context, elements };

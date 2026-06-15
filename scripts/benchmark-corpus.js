@@ -2,6 +2,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { pathToFileURL } = require('node:url');
 const vm = require('node:vm');
 
 const repoRoot = path.resolve(__dirname, '..');
@@ -465,7 +466,7 @@ async function extractPdfPages(sourcePath) {
     console.log = (...args) => { if (!shouldSuppressPdfJsWarning(args)) originalLog(...args); };
     console.warn = (...args) => { if (!shouldSuppressPdfJsWarning(args)) originalWarn(...args); };
     console.error = (...args) => { if (!shouldSuppressPdfJsWarning(args)) originalError(...args); };
-    pdfjsLib = require('pdfjs-dist/legacy/build/pdf.js');
+    pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
   } catch (error) {
     throw new Error(`PDF source support requires pdfjs-dist and Node 20+: ${error.message}`);
   } finally {
@@ -474,7 +475,7 @@ async function extractPdfPages(sourcePath) {
     console.error = originalError;
   }
 
-  pdfjsLib.GlobalWorkerOptions.workerSrc = '';
+  pdfjsLib.GlobalWorkerOptions.workerSrc = pathToFileURL(path.join(repoRoot, 'node_modules', 'pdfjs-dist', 'legacy', 'build', 'pdf.worker.mjs')).href;
   const data = new Uint8Array(fs.readFileSync(sourcePath));
   const pdf = await pdfjsLib.getDocument({
     data,

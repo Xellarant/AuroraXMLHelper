@@ -237,12 +237,14 @@ function expectedEntityEntries(expectations) {
   return entries;
 }
 
-function entityIndex(model) {
-  const index = new Map();
+function entityGroups(model) {
+  const groups = new Map();
   for (const entity of model.entities || []) {
-    index.set(`${normalizeKey(entity.type)}::${normalizeKey(entity.name)}`, entity);
+    const key = `${normalizeKey(entity.type)}::${normalizeKey(entity.name)}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(entity);
   }
-  return index;
+  return groups;
 }
 
 function requiredFeatureEntries(expectations) {
@@ -268,7 +270,7 @@ function artifactFindings(text) {
   const value = String(text || '');
   const findings = [];
   const checks = [
-    { pattern: /\uFFFD|�|Â|Ã|â€|□/, label: 'encoding artifact' },
+    { pattern: /\uFFFD|\u00c2|\u00c3|\u00e2\u20ac|\u25a1/, label: 'encoding artifact' },
     { pattern: /\bCant rip\b/i, label: 'OCR split for Cantrip' },
     { pattern: /<\/?[A-Za-z][^>]*>/, label: 'raw tag artifact' }
   ];
@@ -291,7 +293,7 @@ function summarizeIssues(issues) {
 
 function validateSourceModel(model, expectations = {}) {
   const issues = [];
-  const index = entityIndex(model);
+  const groups = entityGroups(model);
   const add = (severity, category, message, extra = {}) => {
     issues.push({ severity, category, message, ...extra });
   };
@@ -309,9 +311,20 @@ function validateSourceModel(model, expectations = {}) {
 
   for (const expected of expectedEntityEntries(expectations)) {
     const key = `${normalizeKey(expected.type)}::${normalizeKey(expected.name)}`;
-    if (!index.has(key)) {
+    if (!groups.has(key)) {
       add('error', 'missing-entity', `Expected ${expected.type} "${expected.name}" was not extracted.`, expected);
     }
+  }
+
+  for (const entities of groups.values()) {
+    if (entities.length <= 1) continue;
+    const first = entities[0];
+    add('warning', 'duplicate-entity', `${first.type} "${first.name}" was extracted ${entities.length} times.`, {
+      type: first.type,
+      name: first.name,
+      count: entities.length,
+      sourceContext: first.sourceContext
+    });
   }
 
   const minTextLength = Number.isFinite(expectations.minTextLength) ? expectations.minTextLength : 20;
@@ -391,9 +404,11 @@ function validateSourceModel(model, expectations = {}) {
   }
 
   for (const expected of requiredFeatureEntries(expectations)) {
-    const entity = index.get(`${normalizeKey(expected.type)}::${normalizeKey(expected.name)}`);
-    if (!entity) continue;
-    const hasFeature = entity.features.some(feature => normalizeKey(feature.name) === normalizeKey(expected.feature));
+    const entities = groups.get(`${normalizeKey(expected.type)}::${normalizeKey(expected.name)}`) || [];
+    if (!entities.length) continue;
+    const hasFeature = entities.some(entity => (
+      entity.features || []
+    ).some(feature => normalizeKey(feature.name) === normalizeKey(expected.feature)));
     if (!hasFeature) {
       add('error', 'missing-feature', `Expected ${expected.type} "${expected.name}" feature "${expected.feature}" was not extracted.`, expected);
     }
