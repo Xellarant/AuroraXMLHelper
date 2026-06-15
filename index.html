@@ -4,9 +4,13 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Aurora XML Helper</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+<script src="./vendor/jszip.min.js" onload="document.documentElement.dataset.jszipLoaded='true'"></script>
+<script type="module">
+  import * as pdfjsLib from './vendor/pdf.min.mjs';
+  window.pdfjsLib = pdfjsLib;
+  document.documentElement.dataset.pdfjsLoaded = 'true';
+</script>
+<script src="./vendor/pdf-lib.min.js" onload="document.documentElement.dataset.pdfLibLoaded='true'"></script>
 <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600&family=Crimson+Pro:ital,wght@0,300;0,400;0,600;1,300;1,400&display=swap" rel="stylesheet" />
 <style>
   :root {

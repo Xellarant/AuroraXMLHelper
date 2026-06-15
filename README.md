@@ -103,8 +103,18 @@ optional local/external ID references.
 
 ## Development
 
-The browser app is static: `index.html` loads the application logic from
-`src/app.js`.
+The browser app is static, but PDF.js is loaded as a local module, so run it
+through the tiny local server instead of opening `index.html` directly:
+
+```powershell
+npm run serve
+```
+
+Then open `http://127.0.0.1:4173/`.
+
+`index.html` loads the application logic from `src/app.js` and browser bundles
+from `vendor/`. Run `npm run vendor:browser` after changing browser dependency
+versions.
 
 Run parser and generator regression tests with:
 

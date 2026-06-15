@@ -26,6 +26,7 @@ const TYPE_LABELS = {
 
 const ELEMENT_TYPES = ['spell', 'archetype', 'item', 'feat', 'magic', 'race', 'background', 'class', 'other'];
 const MANUAL_AUTHOR_TYPES = ELEMENT_TYPES;
+const PDFJS_WORKER_SRC = './vendor/pdf.worker.min.mjs';
 
 // ---------------------------------------------
 // Init
@@ -111,11 +112,11 @@ const MAX_WORDS = 12000;
 
 async function extractTextFromChunk(uint8Array) {
   try {
-    // PDF.js 3.x UMD global is pdfjsLib
+    // PDF.js is loaded by index.html and exposed on window for the static app.
     const pdfjsLib = window.pdfjsLib || window['pdfjs-dist/build/pdf'];
     if (!pdfjsLib) throw new Error('PDF.js not loaded');
-    // Use fake worker to avoid cross-origin issues in single-file app
-    pdfjsLib.GlobalWorkerOptions.workerSrc = '';
+    // Use the vendored worker module so PDF.js works without CDN access.
+    pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_SRC;
     const loadingTask = pdfjsLib.getDocument({ data: uint8Array, disableWorker: true });
     const pdf = await loadingTask.promise;
     const pageTexts = [];
@@ -620,7 +621,7 @@ async function deterministicExtract(file, types, progressCallback) {
 async function extractPdfPages(file) {
   const pdfjsLib = window.pdfjsLib || window['pdfjs-dist/build/pdf'];
   if (!pdfjsLib) throw new Error('PDF.js is not loaded.');
-  pdfjsLib.GlobalWorkerOptions.workerSrc = '';
+  pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_SRC;
   const data = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data, disableWorker: true }).promise;
   const pages = [];

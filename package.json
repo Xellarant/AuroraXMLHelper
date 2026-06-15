@@ -10,12 +10,16 @@
     "test:benchmark": "node scripts/run-vitest.js run tests/benchmark-corpus.test.js",
     "test:validator": "node scripts/run-vitest.js run tests/validator-integration.test.js",
     "test:validator:required": "node tests/validator-integration.test.js --required",
+    "serve": "node scripts/serve-static.js",
+    "vendor:browser": "node scripts/vendor-browser-deps.js",
     "benchmark:corpus": "node scripts/run-node20.js scripts/benchmark-corpus.js",
     "source:fixture": "node scripts/run-node20.js scripts/source-fixture-report.js",
     "corpus:local": "node scripts/run-node20.js scripts/run-local-corpus-benchmarks.js"
   },
   "devDependencies": {
-    "pdfjs-dist": "^3.11.174",
+    "jszip": "^3.10.1",
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^4.10.38",
     "vitest": "^4.1.8"
   }
 }
