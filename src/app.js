@@ -9,6 +9,7 @@ let useOllama = false;
 let ollamaModel = 'qwen3:8b';
 let generatedBaselineData = {};
 const OVERRIDE_STORAGE_KEY = 'aurora_xml_helper_overrides_v1';
+const LEGACY_AI_EXTRACTION_ENABLED = false;
 let rememberedOverrides = loadRememberedOverrides();
 
 const TYPE_LABELS = {
@@ -47,6 +48,12 @@ window.addEventListener('DOMContentLoaded', () => {
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function toggleOllama(on) {
+  if (!LEGACY_AI_EXTRACTION_ENABLED) {
+    useOllama = false;
+    setKeyStatus(true);
+    showKeyTestResult(false, legacyAiDisabledMessage());
+    return;
+  }
   useOllama = on;
   localStorage.setItem('use_ollama', on ? 'true' : 'false');
   document.getElementById('ollamaSection').classList.toggle('hidden', !on);
@@ -57,6 +64,7 @@ function toggleOllama(on) {
 }
 
 function saveOllamaPrefs() {
+  if (!LEGACY_AI_EXTRACTION_ENABLED) return;
   const model = document.getElementById('ollamaModelInput').value.trim();
   if (model) {
     ollamaModel = model;
@@ -65,6 +73,10 @@ function saveOllamaPrefs() {
 }
 
 async function testOllama() {
+  if (!LEGACY_AI_EXTRACTION_ENABLED) {
+    showLegacyAiDisabled('ollamaTestResult');
+    return;
+  }
   const btn = document.querySelector('#ollamaSection .btn-secondary');
   const resultEl = document.getElementById('ollamaTestResult');
   btn.disabled = true;
@@ -127,6 +139,9 @@ async function extractTextFromChunk(uint8Array) {
 // Ollama raw call - mirrors geminiRaw shape
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function ollamaRaw(textContent, promptText) {
+  if (!LEGACY_AI_EXTRACTION_ENABLED) {
+    throw new Error(legacyAiDisabledMessage());
+  }
   const body = {
     model: ollamaModel,
     format: 'json',
@@ -176,6 +191,12 @@ function toggleKeyVisibility() {
 }
 
 function saveKey() {
+  if (!LEGACY_AI_EXTRACTION_ENABLED) {
+    apiKey = '';
+    setKeyStatus(true);
+    showKeyTestResult(false, legacyAiDisabledMessage());
+    return;
+  }
   const val = document.getElementById('apiKeyInput').value.trim();
   if (!val) { showKeyTestResult(false, 'Please enter an API key.'); return; }
   apiKey = val;
@@ -192,6 +213,10 @@ function setKeyStatus(ok) {
 }
 
 async function testKey() {
+  if (!LEGACY_AI_EXTRACTION_ENABLED) {
+    showKeyTestResult(false, legacyAiDisabledMessage());
+    return;
+  }
   const val = document.getElementById('apiKeyInput').value.trim();
   if (!val) { showKeyTestResult(false, 'Please enter a key first.'); return; }
   const btn = document.getElementById('testKeyBtn');
@@ -225,6 +250,18 @@ function showKeyTestResult(ok, msg) {
   if (!msg) { el.classList.add('hidden'); return; }
   el.className = 'alert ' + (ok ? 'alert-success' : 'alert-error');
   el.textContent = msg;
+  el.classList.remove('hidden');
+}
+
+function legacyAiDisabledMessage() {
+  return 'AI extraction is disabled. The deterministic parser reads local PDF text without API keys or model calls.';
+}
+
+function showLegacyAiDisabled(elementId) {
+  const el = document.getElementById(elementId);
+  if (!el) return;
+  el.className = 'alert alert-info';
+  el.textContent = legacyAiDisabledMessage();
   el.classList.remove('hidden');
 }
 
@@ -468,6 +505,7 @@ Example: {"spell":"45-62","archetype":"10-44","race":"65-120","class":"121-200"}
 Return ONLY the JSON object. If the PDF has no table of contents, return {}.`;
 
 async function discoverPageRanges(base64, isUri, progressCallback) {
+  if (!LEGACY_AI_EXTRACTION_ENABLED) return {};
   progressCallback('Reading table of contents...', 0.05);
   try {
     let text;
@@ -507,6 +545,7 @@ async function discoverPageRanges(base64, isUri, progressCallback) {
 
 
 async function detectSourceMeta(base64, isUri) {
+  if (!LEGACY_AI_EXTRACTION_ENABLED) return;
   const metaPrompt = 'What is the title and author of this supplement? Reply with only this exact JSON structure and nothing else: {"title":"TITLE_HERE","author":"AUTHOR_HERE"}';
   try {
     let text;
@@ -2255,6 +2294,9 @@ async function startExtraction() {
 
 
 async function geminiRaw(base64, isUri, promptText) {
+  if (!LEGACY_AI_EXTRACTION_ENABLED) {
+    throw new Error(legacyAiDisabledMessage());
+  }
   const body = {
     contents: [{ parts: [
       { inline_data: { mime_type: 'application/pdf', data: base64 } },
@@ -2322,6 +2364,9 @@ function archetypeSupport(cls) {
 
 // Extraction with TOC-guided page ranges + automatic alphabetic-split retry on truncation
 async function callModel(pdfChunks, smallBase64, type, progressCallback) {
+  if (!LEGACY_AI_EXTRACTION_ENABLED) {
+    throw new Error(legacyAiDisabledMessage());
+  }
   const manualRange = document.getElementById('pageRange')?.value?.trim() || '';
   const tocRange = discoveredPageRanges[type] || '';
   const pageRange = manualRange || tocRange;

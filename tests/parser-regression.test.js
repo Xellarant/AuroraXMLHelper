@@ -1387,6 +1387,26 @@ test('generated XML comments are safe when source text contains comment delimite
   assert.ok(commentBodies.every(comment => !comment.includes('--')));
 });
 
+test('legacy AI helpers are disabled in deterministic mode', async () => {
+  const context = loadApp();
+  let fetchCalls = 0;
+  context.fetch = () => {
+    fetchCalls += 1;
+    throw new Error('network should not be called');
+  };
+
+  const ranges = await runInApp(context, `discoverPageRanges('AAAA', false, () => { throw new Error('progress should not run'); })`);
+  await runInApp(context, `detectSourceMeta('AAAA', false)`);
+  await runInApp(context, `testKey()`);
+  await runInApp(context, `testOllama()`);
+  await assert.rejects(runInApp(context, `geminiRaw('AAAA', false, 'prompt')`), /AI extraction is disabled/);
+  await assert.rejects(runInApp(context, `ollamaRaw('text', 'prompt')`), /AI extraction is disabled/);
+  await assert.rejects(runInApp(context, `callModel(null, 'AAAA', 'spell', () => {})`), /AI extraction is disabled/);
+
+  assert.equal(JSON.stringify(ranges), '{}');
+  assert.equal(fetchCalls, 0);
+});
+
 test('generated XML metadata matches Aurora shape expectations', () => {
   const context = loadApp();
   const sampleData = {
