@@ -3,6 +3,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { ELEMENT_TYPES, benchmark, renderMarkdown } = require('./benchmark-corpus');
+const { buildSourceReport } = require('./source-fixture-report');
 
 const repoRoot = path.resolve(__dirname, '..');
 const defaultManifest = path.join(repoRoot, 'tests', 'fixtures', 'local-corpus.json');
@@ -77,6 +78,11 @@ async function runBenchmark(entry) {
   });
 }
 
+async function runSourceValidation(entry) {
+  if (!entry.sourceValidation) return null;
+  return buildSourceReport({ entry });
+}
+
 function checkThresholds(entry, result) {
   const thresholds = entry.thresholds || {};
   const failures = [];
@@ -113,6 +119,48 @@ function checkThresholds(entry, result) {
   return failures;
 }
 
+function checkSourceCoverage(coverage) {
+  if (!coverage) return [];
+  return coverage.summary?.pass ? [] : [`source errors ${coverage.summary?.error || 0} > 0`];
+}
+
+function sourceSummaryText(coverage) {
+  const summary = coverage?.summary || {};
+  const status = summary.pass ? 'PASS' : 'FAIL';
+  return `source gate ${status} (errors=${summary.error || 0}, warnings=${summary.warning || 0}, review=${summary.review || 0})`;
+}
+
+async function runEntry(entry, options = {}) {
+  const {
+    verbose = false,
+    benchmarkFn = runBenchmark,
+    sourceValidationFn = runSourceValidation,
+    log = console.log,
+    error = console.error
+  } = options;
+  const name = entry.name || entry.source;
+  const result = await benchmarkFn(entry);
+  const pct = exactPercent(result).toFixed(1);
+  log(`${name}: ${result.exactShapeMatches}/${result.matchedCount} exact (${pct}%), unmatched=${result.unmatchedCount}, different=${result.differentMatches}, high=${result.highSeverityMatches}`);
+  if (verbose) {
+    log(renderMarkdown(result));
+  }
+  const failures = checkThresholds(entry, result);
+  let sourceResult = null;
+  if (entry.sourceValidation) {
+    sourceResult = await sourceValidationFn(entry);
+    log(`${name}: ${sourceSummaryText(sourceResult.coverage)}`);
+    if (verbose) {
+      log(sourceResult.markdown);
+    }
+    failures.push(...checkSourceCoverage(sourceResult.coverage));
+  }
+  if (failures.length) {
+    error(`Threshold failure for ${name}: ${failures.join('; ')}`);
+  }
+  return { failed: failures.length > 0, benchmark: result, source: sourceResult, failures };
+}
+
 async function main() {
   try {
     const args = parseArgs(process.argv.slice(2));
@@ -133,17 +181,8 @@ async function main() {
         console.log(`${name}: skipped (${skipReason})`);
         continue;
       }
-      const result = await runBenchmark(entry);
-      const pct = exactPercent(result).toFixed(1);
-      console.log(`${name}: ${result.exactShapeMatches}/${result.matchedCount} exact (${pct}%), unmatched=${result.unmatchedCount}, different=${result.differentMatches}, high=${result.highSeverityMatches}`);
-      if (args.verbose) {
-        console.log(renderMarkdown(result));
-      }
-      const failures = checkThresholds(entry, result);
-      if (failures.length) {
-        failed = true;
-        console.error(`Threshold failure for ${name}: ${failures.join('; ')}`);
-      }
+      const entryResult = await runEntry(entry, { verbose: args.verbose });
+      if (entryResult.failed) failed = true;
     }
     if (failed) process.exit(1);
   } catch (error) {
@@ -154,4 +193,16 @@ async function main() {
   }
 }
 
-main();
+if (require.main === module) {
+  main();
+}
+
+module.exports = {
+  checkSourceCoverage,
+  checkThresholds,
+  exactPercent,
+  runBenchmark,
+  runEntry,
+  runSourceValidation,
+  sourceSummaryText
+};

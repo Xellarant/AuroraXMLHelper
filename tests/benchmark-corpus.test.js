@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { benchmark, compareSupports, summarizeSemanticDiffs } = require('../scripts/benchmark-corpus');
+const { runEntry } = require('../scripts/run-local-corpus-benchmarks');
 const { generateFromFixtureFile, repoRoot } = require('./fixture-harness');
 
 function escapePdfText(value) {
@@ -113,4 +114,64 @@ test('benchmark classifies missing canonical rules as high severity', async () =
     match.categories.includes('stat-rules') &&
     match.missingRules.includes('stat|name=fixture:canonical-only|value=1')
   )));
+});
+
+function passingBenchmarkResult() {
+  return {
+    exactShapeMatches: 1,
+    matchedCount: 1,
+    unmatchedCount: 0,
+    differentMatches: 0,
+    highSeverityMatches: 0,
+    extractedCounts: {}
+  };
+}
+
+test('local corpus entry fails when declared source validation has errors', async () => {
+  const errors = [];
+  const result = await runEntry({
+    name: 'Source Gate Fixture',
+    source: 'fixture.txt',
+    sourceValidation: { expected: { spell: ['Missing Spell'] } },
+    thresholds: {}
+  }, {
+    benchmarkFn: async () => passingBenchmarkResult(),
+    sourceValidationFn: async () => ({
+      markdown: '# Source Coverage Report',
+      coverage: {
+        summary: { error: 1, warning: 0, review: 0, pass: false },
+        issues: [{ severity: 'error', category: 'missing-entity', message: 'Missing Spell' }]
+      }
+    }),
+    log() {},
+    error(message) { errors.push(message); }
+  });
+
+  assert.equal(result.failed, true);
+  assert.deepEqual(result.failures, ['source errors 1 > 0']);
+  assert.ok(errors[0].includes('Threshold failure for Source Gate Fixture'));
+});
+
+test('local corpus entry reports source warnings without failing', async () => {
+  const logs = [];
+  const result = await runEntry({
+    name: 'Warning Fixture',
+    source: 'fixture.txt',
+    sourceValidation: { requireTextTypes: ['feat'] },
+    thresholds: {}
+  }, {
+    benchmarkFn: async () => passingBenchmarkResult(),
+    sourceValidationFn: async () => ({
+      markdown: '# Source Coverage Report',
+      coverage: {
+        summary: { error: 0, warning: 1, review: 1, pass: true },
+        issues: []
+      }
+    }),
+    log(message) { logs.push(message); },
+    error() { throw new Error('warning-only source gate should not fail'); }
+  });
+
+  assert.equal(result.failed, false);
+  assert.ok(logs.some(message => message.includes('source gate PASS (errors=0, warnings=1, review=1)')));
 });

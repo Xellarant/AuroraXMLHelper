@@ -134,10 +134,9 @@ function writeText(filePath, content) {
 }
 
 async function buildSourceReport(rawArgs) {
-  const args = { ...rawArgs };
-  const entry = args.manifest || (!args.source && fs.existsSync(defaultManifest))
-    ? loadManifestEntry(args)
-    : null;
+  const args = { types: [], ...(rawArgs || {}) };
+  const shouldLoadManifestEntry = args.manifest || (!args.source && fs.existsSync(defaultManifest));
+  const entry = args.entry || (shouldLoadManifestEntry ? loadManifestEntry(args) : null);
   const sourcePath = path.resolve(expandLocalPath(args.source || entry?.source || ''));
   if (!sourcePath || !fs.existsSync(sourcePath)) throw new Error(`Source path does not exist: ${sourcePath}`);
   const source = await readSource(sourcePath);
