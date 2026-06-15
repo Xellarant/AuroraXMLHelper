@@ -4023,7 +4023,7 @@ function generateXml() {
     const sectionLabel = type === 'other'
       ? [...new Set(items.map(i => i.type || 'Other').filter(Boolean))].join(', ').toUpperCase()
       : (TYPE_LABELS[type] || type).toUpperCase();
-    lines.push(`\t<!-- ===== ${sectionLabel} ===== -->`);
+    lines.push(`\t<!-- ===== ${escXmlComment(sectionLabel)} ===== -->`);
     for (const item of items) {
       const elLines = dispatchGen(item, type, source, prefix, meta);
       if (elLines.length) { lines.push(...elLines); lines.push(''); }
@@ -5485,7 +5485,7 @@ function genBackgroundXml(bg, source, prefix, meta) {
       `Feat: ${bg.feat}`
     ));
   } else if (bg.feat) {
-    backgroundRules.push(`\t\t\t<!-- Background feat: ${escXml(bg.feat)} — include the feat in this export or add its Aurora ID manually. -->`);
+    backgroundRules.push(`\t\t\t<!-- ${escXmlComment(`Background feat: ${bg.feat} - include the feat in this export or add its Aurora ID manually.`)} -->`);
   }
   // Skill proficiencies
   const skillIdMap = {
@@ -5518,7 +5518,7 @@ function genBackgroundXml(bg, source, prefix, meta) {
         `Tool Proficiencies: ${(bg.toolProficiencies || []).join(', ')}`
       ));
     } else {
-      backgroundRules.push(`\t\t\t<!-- Tool proficiency: ${escXml(tool)} — add ID manually -->`);
+      backgroundRules.push(`\t\t\t<!-- ${escXmlComment(`Tool proficiency: ${tool} - add ID manually`)} -->`);
     }
   });
   if (modernRules && asiGrantId) {

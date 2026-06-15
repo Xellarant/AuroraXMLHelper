@@ -1346,6 +1346,47 @@ test('manual other elements export with their custom Aurora type', () => {
   assert.ok(zipDocs.find(doc => doc.fileName === 'source.xml').xml.includes('vss-companion.xml'));
 });
 
+test('generated XML comments are safe when source text contains comment delimiters', () => {
+  const context = loadApp();
+  setExtractedData(context, {
+    spell: [],
+    archetype: [],
+    item: [],
+    feat: [],
+    magic: [],
+    race: [],
+    background: [{
+      name: 'Delimiter Tester',
+      description: 'A background for comment safety.',
+      skillProficiencies: [],
+      abilityScores: [],
+      feat: 'Bad -- Feat',
+      toolProficiencies: ['Bad -- Tool'],
+      languages: [],
+      equipment: '',
+      features: []
+    }],
+    class: [],
+    other: [{
+      name: 'Oddity',
+      type: 'Bad -- Type',
+      description: 'An odd generated element.',
+      features: []
+    }]
+  });
+
+  const xml = runInApp(context, 'generateXml()');
+
+  assert.ok(xml.includes('BAD - - TYPE'));
+  assert.ok(xml.includes('Background feat: Bad - - Feat - include'));
+  assert.ok(xml.includes('Tool proficiency: Bad - - Tool - add ID manually'));
+  const commentBodies = Array.from(xml.matchAll(/<!--([\s\S]*?)-->/g)).map(match => match[1]);
+  assert.ok(commentBodies.some(comment => comment.includes('BAD - - TYPE')));
+  assert.ok(commentBodies.some(comment => comment.includes('Bad - - Feat')));
+  assert.ok(commentBodies.some(comment => comment.includes('Bad - - Tool')));
+  assert.ok(commentBodies.every(comment => !comment.includes('--')));
+});
+
 test('generated XML metadata matches Aurora shape expectations', () => {
   const context = loadApp();
   const sampleData = {
