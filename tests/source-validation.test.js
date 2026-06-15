@@ -126,6 +126,58 @@ test('source validation distinguishes hard missing entities from reviewable pars
   assert.ok(coverage.issues.some(issue => issue.severity === 'warning' && issue.category === 'missing-feature-description'));
 });
 
+test('source validation reports duplicate entities and checks features across duplicates', () => {
+  const model = {
+    source: {
+      path: 'fixture.txt',
+      kind: 'text',
+      pageCount: 1,
+      name: 'Fixture',
+      abbr: 'FIX',
+      ruleset: '2024'
+    },
+    counts: { archetype: 2 },
+    entitiesByType: {},
+    entities: [
+      {
+        type: 'archetype',
+        name: 'Cartographer',
+        sourceContext: { page: 1, line: 10, text: 'Cartographer' },
+        bodyText: 'First duplicate.',
+        textLength: 16,
+        features: [],
+        tables: [],
+        tableLikeLineCount: 0
+      },
+      {
+        type: 'archetype',
+        name: 'Cartographer',
+        sourceContext: { page: 1, line: 30, text: 'Cartographer' },
+        bodyText: 'Second duplicate.',
+        textLength: 17,
+        features: [{ name: "Adventurer's Atlas", bodyText: 'You create useful maps.', textLength: 23 }],
+        tables: [],
+        tableLikeLineCount: 0
+      }
+    ]
+  };
+
+  const coverage = validateSourceModel(model, {
+    expected: {
+      archetype: ['Cartographer']
+    },
+    requiredFeatures: {
+      archetype: {
+        Cartographer: ["Adventurer's Atlas"]
+      }
+    }
+  });
+
+  assert.equal(coverage.summary.error, 0);
+  assert.equal(coverage.summary.warning, 1);
+  assert.ok(coverage.issues.some(issue => issue.category === 'duplicate-entity' && issue.count === 2));
+});
+
 test('source coverage markdown gives a compact pass fail summary', () => {
   const model = syntheticSourceModel();
   const coverage = validateSourceModel(model, {
