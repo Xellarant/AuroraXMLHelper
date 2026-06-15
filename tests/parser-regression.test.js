@@ -1398,3 +1398,53 @@ test('generated XML metadata matches Aurora shape expectations', () => {
   assert.ok(zipDocs.every(doc => /<update version="0\.1\.0">/.test(doc.xml)));
   assert.ok(zipDocs.every(doc => !/<file\b[^>]*url=""/.test(doc.xml)));
 });
+
+test('browser Aurora validator catches duplicate element IDs in one document', () => {
+  const context = loadApp();
+  const elementNode = attrs => ({
+    tagName: 'element',
+    getAttribute(name) { return attrs[name] || ''; },
+    querySelector() { return null; },
+    querySelectorAll() { return []; }
+  });
+  const updateNode = {
+    getAttribute(name) { return name === 'version' ? '0.1.0' : ''; },
+    querySelectorAll(selector) {
+      return selector === 'file'
+        ? [{ getAttribute(name) { return name === 'name' ? 'duplicate.xml' : 'duplicate.xml'; } }]
+        : [];
+    }
+  };
+  const infoNode = {
+    querySelector(selector) {
+      if (selector === 'update') return updateNode;
+      return null;
+    }
+  };
+  context.DOMParser = class DOMParser {
+    parseFromString() {
+      return {
+        querySelector() { return null; },
+        documentElement: {
+          tagName: 'elements',
+          children: [
+            elementNode({ name: 'First', type: 'Feat', source: 'Duplicate Fixture', id: 'ID_DUPLICATE_FIXTURE_FEAT_REPEAT' }),
+            elementNode({ name: 'Second', type: 'Feat', source: 'Duplicate Fixture', id: 'ID_DUPLICATE_FIXTURE_FEAT_REPEAT' })
+          ],
+          querySelector(selector) {
+            if (selector === 'info') return infoNode;
+            return null;
+          }
+        }
+      };
+    }
+  };
+  const issues = JSON.parse(runInApp(context, `
+    JSON.stringify(validateAuroraXmlDocuments([{
+      fileName: 'duplicate.xml',
+      xml: '<elements></elements>'
+    }], 'Unit Test'))
+  `));
+
+  assert.ok(issues.some(issue => issue.msg.includes('DuplicateElementIds') && issue.msg.includes('duplicate.xml')));
+});

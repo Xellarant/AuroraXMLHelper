@@ -3658,8 +3658,8 @@ function validateAuroraXmlDocuments(docs, scopeLabel) {
       });
       const id = element.getAttribute('id');
       if (id) {
-        if (!idLocations.has(id)) idLocations.set(id, new Set());
-        idLocations.get(id).add(fileName);
+        if (!idLocations.has(id)) idLocations.set(id, []);
+        idLocations.get(id).push(fileName);
       }
       if (element.getAttribute('type') === 'Class') {
         const hd = element.querySelector('setters > set[name="hd"]');
@@ -3671,9 +3671,10 @@ function validateAuroraXmlDocuments(docs, scopeLabel) {
     });
   });
 
-  idLocations.forEach((files, id) => {
-    if (files.size > 1) {
-      issues.push({ type: 'xml', i: 0, field: null, msg: `${scopeLabel}: DuplicateElementIds - duplicate element id '${id}' in ${Array.from(files).join(', ')}` });
+  idLocations.forEach((locations, id) => {
+    if (locations.length > 1) {
+      const files = Array.from(new Set(locations));
+      issues.push({ type: 'xml', i: 0, field: null, msg: `${scopeLabel}: DuplicateElementIds - duplicate element id '${id}' in ${files.join(', ')}` });
     }
   });
   return issues;
@@ -6157,4 +6158,3 @@ window.AuroraXMLHelper = {
 if (document.documentElement?.dataset) {
   document.documentElement.dataset.auroraAppLoaded = 'true';
 }
-
