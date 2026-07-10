@@ -129,6 +129,79 @@ test('source validation distinguishes hard missing entities from reviewable pars
   assert.ok(coverage.issues.some(issue => issue.severity === 'warning' && issue.category === 'missing-feature-description'));
 });
 
+test('source validation flags PDF chrome, spell-table bleed, and sidebar OCR in descriptions', () => {
+  const model = {
+    source: {
+      path: 'fixture.pdf',
+      kind: 'pdf',
+      pageCount: 1,
+      name: 'Fixture',
+      abbr: 'FIX',
+      ruleset: '2014'
+    },
+    counts: { spell: 1 },
+    entitiesByType: {},
+    entities: [{
+      type: 'spell',
+      name: 'Noisy Spell',
+      sourceContext: { page: 2, line: 10, text: 'NOISY SPELL' },
+      bodyText: [
+        'The spell starts cleanly.',
+        'Cone. Ritual Class',
+        '20 CHAPTER 2 I DRAGON MAGIC',
+        'Se-ho{ay<; have, e,nga~ in [e,?1',
+        '-nzban'
+      ].join('\n'),
+      textLength: 120,
+      features: [],
+      tables: [],
+      tableLikeLineCount: 0
+    }]
+  };
+
+  const coverage = validateSourceModel(model, {});
+
+  assert.equal(coverage.summary.warning, 3);
+  assert.ok(coverage.issues.some(issue => /spell table class-column artifact/.test(issue.message)));
+  assert.ok(coverage.issues.some(issue => /PDF page header\/footer artifact/.test(issue.message)));
+  assert.ok(coverage.issues.some(issue => /sidebar OCR artifact/.test(issue.message)));
+});
+
+test('source validation can opt into warning and review hard limits', () => {
+  const model = {
+    source: {
+      path: 'fixture.pdf',
+      kind: 'pdf',
+      pageCount: 1,
+      name: 'Fixture',
+      abbr: 'FIX',
+      ruleset: '2014'
+    },
+    counts: { spell: 1 },
+    entitiesByType: {},
+    entities: [{
+      type: 'spell',
+      name: 'You have a noisy boundary',
+      sourceContext: { page: 2, line: 10, text: 'You have a noisy boundary' },
+      bodyText: 'Cone. Ritual Class',
+      textLength: 40,
+      features: [],
+      tables: [],
+      tableLikeLineCount: 0
+    }]
+  };
+
+  const defaultCoverage = validateSourceModel(model, {});
+  const strictCoverage = validateSourceModel(model, { maxWarnings: 0, maxReview: 0 });
+
+  assert.equal(defaultCoverage.summary.pass, true);
+  assert.equal(strictCoverage.summary.warning, 1);
+  assert.equal(strictCoverage.summary.review, 1);
+  assert.equal(strictCoverage.summary.maxWarnings, 0);
+  assert.equal(strictCoverage.summary.maxReview, 0);
+  assert.equal(strictCoverage.summary.pass, false);
+});
+
 test('source validation reports duplicate entities and checks features across duplicates', () => {
   const model = {
     source: {

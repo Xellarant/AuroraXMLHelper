@@ -278,6 +278,9 @@ function artifactFindings(text) {
   const checks = [
     { pattern: /\uFFFD|\u00c2|\u00c3|\u00e2\u20ac|\u25a1/, label: 'encoding artifact' },
     { pattern: /\bCant rip\b/i, label: 'OCR split for Cantrip' },
+    { pattern: /\b\d+\s+CHAPTER\s+\d+\s+I\s+[A-Z][A-Z\s]+\b/i, label: 'PDF page header/footer artifact' },
+    { pattern: /\b(?:Conc\.|Concentration|Cone\.)?\s*Ritual\s+Class\b/i, label: 'spell table class-column artifact' },
+    { pattern: /[<{~][^A-Za-z0-9]{0,4}|[-–]?nzban\b/i, label: 'sidebar OCR artifact' },
     { pattern: /<\/?[A-Za-z][^>]*>/, label: 'raw tag artifact' }
   ];
   for (const check of checks) {
@@ -286,14 +289,18 @@ function artifactFindings(text) {
   return findings;
 }
 
-function summarizeIssues(issues) {
+function summarizeIssues(issues, expectations = {}) {
   const counts = { error: 0, warning: 0, review: 0 };
   for (const issue of issues) {
     if (counts[issue.severity] != null) counts[issue.severity] += 1;
   }
+  const maxWarnings = Number.isFinite(expectations.maxWarnings) ? expectations.maxWarnings : Infinity;
+  const maxReview = Number.isFinite(expectations.maxReview) ? expectations.maxReview : Infinity;
   return {
     ...counts,
-    pass: counts.error === 0
+    maxWarnings: Number.isFinite(maxWarnings) ? maxWarnings : null,
+    maxReview: Number.isFinite(maxReview) ? maxReview : null,
+    pass: counts.error === 0 && counts.warning <= maxWarnings && counts.review <= maxReview
   };
 }
 
@@ -421,7 +428,7 @@ function validateSourceModel(model, expectations = {}) {
   }
 
   return {
-    summary: summarizeIssues(issues),
+    summary: summarizeIssues(issues, expectations),
     issues
   };
 }

@@ -791,29 +791,78 @@ function isPdfContinuationNoise(line) {
     || /[<{;~]/.test(text);
 }
 
-function continuationProseStartIndex(lines) {
-  const directAddress = lines.findIndex(line => /^You\b/i.test(line));
-  if (directAddress >= 0) return directAddress;
-  return lines.findIndex(line => /^(?:The|A|An|Each|When|While|For|Until|On)\b/i.test(line));
+function isPdfPageChromeLine(line) {
+  const text = String(line || '').trim();
+  return /^\d+\s+CHAPTER\b/i.test(text)
+    || /^CHAPTER\b.*\d+$/i.test(text)
+    || /^\d+\s*$/.test(text);
 }
 
-function spellContinuationText(name, pages, continuationPages) {
+function isSpellTableMetadataNoiseLine(line) {
+  const text = String(line || '').trim();
+  return /^(?:Cone\.\s+)?(?:(?:Conc\.|Concentration)\s+)?Ritual\s+Class$/i.test(text)
+    || /^(?:Yes|No)\s+(?:Yes|No)\s+[A-Za-z][A-Za-z/',\s-]+$/i.test(text)
+    || /^and Eberron:\s*Rising from the Last War\.?$/i.test(text)
+    || /^\*The artificer class appears\b/i.test(text);
+}
+
+function cleanSpellBodyLines(lines) {
+  const cleaned = [];
+  let skippingSidebar = false;
+  for (const rawLine of lines || []) {
+    const line = String(rawLine || '').trim();
+    if (!line) continue;
+    if (skippingSidebar) {
+      if (/^[-–]?(?:fizban|nzban)$/i.test(line)) skippingSidebar = false;
+      continue;
+    }
+    if (/[<{~]/.test(line)) {
+      skippingSidebar = true;
+      continue;
+    }
+    if (isPdfPageChromeLine(line) || isSpellTableMetadataNoiseLine(line)) continue;
+    const normalized = line.replace(/^[,;:]\s+(?=[A-Z][A-Za-z' -]+\.)/, '');
+    if (/^[-–]?(?:fizban|nzban)$/i.test(normalized)) continue;
+    cleaned.push(normalized);
+  }
+  return cleaned;
+}
+
+function continuationProseStartIndex(lines, options = {}) {
+  const directAddress = lines.findIndex(line => /^You\b/i.test(line));
+  const namedFeature = lines.findIndex(line => /^[A-Z][A-Za-z' -]{2,}\.\s+/.test(line));
+  const proseStart = lines.findIndex(line => /^(?:The|A|An|Each|When|While|For|Until|On)\b/i.test(line));
+  if (!options.preferEarliestFeature) {
+    if (directAddress >= 0) return directAddress;
+    if (proseStart >= 0) return proseStart;
+    return namedFeature;
+  }
+  return [directAddress, namedFeature, proseStart]
+    .filter(index => index >= 0)
+    .sort((a, b) => a - b)[0] ?? -1;
+}
+
+function spellNextPageText(name, pages, candidatePages, options = {}) {
   const location = findSpellLayoutLocation(name, pages);
   if (!location) return '';
-  const page = (continuationPages || []).find(candidate => candidate.page === location.page + 1);
+  const page = (candidatePages || []).find(candidate => candidate.page === location.page + 1);
   const column = page?.layout?.columns?.find(candidate => candidate.side === 'left')
     || page?.layout?.columns?.[0];
   if (!column) return '';
 
   const lines = column.rows.map(row => row.text);
-  const startIndex = continuationProseStartIndex(lines);
+  const startIndex = continuationProseStartIndex(lines, options);
   if (startIndex < 0) return '';
   const boundaryIndex = lines.findIndex((line, index) => index > startIndex && (isSectionHeading(line) || isElementStart(lines, index)));
-  return lines
+  return cleanSpellBodyLines(lines
     .slice(startIndex, boundaryIndex < 0 ? lines.length : boundaryIndex)
-    .filter(line => !isPdfContinuationNoise(line))
+    .filter(line => !isPdfContinuationNoise(line)))
     .join('\n')
     .trim();
+}
+
+function spellContinuationText(name, pages, continuationPages) {
+  return spellNextPageText(name, pages, continuationPages);
 }
 
 function parseSpellsFromText(text, options = {}) {
@@ -845,8 +894,14 @@ function parseSpellsFromText(text, options = {}) {
     const descStart = j + 1;
     let descEnd = descStart;
     while (descEnd < lines.length && !isElementStart(lines, descEnd) && !isSectionHeading(lines[descEnd])) descEnd++;
-    let body = lines.slice(descStart, descEnd).join('\n');
+    const stoppedAtPageChrome = descEnd < lines.length && isPdfPageChromeLine(lines[descEnd]);
+    let bodyLines = cleanSpellBodyLines(lines.slice(descStart, descEnd));
+    let body = bodyLines.join('\n');
     if (!body.trim()) body = spellContinuationText(lines[i], options.pages, options.continuationPages);
+    else if (stoppedAtPageChrome) {
+      const selectedPageContinuation = spellNextPageText(lines[i], options.pages, options.pages, { preferEarliestFeature: true });
+      if (selectedPageContinuation) body = `${body}\n${selectedPageContinuation}`;
+    }
     const higher = body.match(/(?:At Higher Levels?\.?|At Higher Levels:|Using a Higher-Level Spell Slot\.?)\s*(.+)$/is);
     const description = higher ? body.slice(0, higher.index).trim() : body.trim();
     const components = parseComponents(fields.components);

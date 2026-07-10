@@ -12,6 +12,10 @@ Multi-column PDF ordering is resolved for the verified Fizban spell scope. Brows
 
 The fix preserves positioned rows alongside flattened prose and uses that structure to bind the spell-table class/concentration/ritual columns. A selected page range can now read its immediate next page as disclosed continuation context when a spell header has no selected-page body, allowing Summon Draconic Spirit to retain its prose without expanding the fixture's entity scope. Broader multi-column tables remain an open risk: this evidence does not prove general table extraction for races, subclasses, feats, magic items, or other Fizban sections. Those remain separate corpus scopes.
 
+The follow-up cleanup keeps Draconic Transformation's page-break benefit prose, removes spell-list class-column bleed from that description, and removes page chrome/sidebar OCR from Fizban's Platinum Shield while preserving Nathair's Mischief's actual `d4 Effect` table. The Fizban spell source gate now reports zero errors, warnings, or review findings for the seven-spell scope.
+
+The local corpus runner now executes `sourceValidation` for entries that declare it, and strict source fixtures can opt into warning/review limits with `sourceValidation.maxWarnings` and `sourceValidation.maxReview`. Duplicate element IDs inside one XML file, generated XML comment escaping, and duplicate extracted source-entity findings are also covered by current code and tests.
+
 ## Validation Run
 
 - `npm test`: pass, 5 test files and 51 tests.
@@ -86,8 +90,6 @@ Recommendation: add workflow concurrency cancellation and consider limiting push
 
 ## Suggested Next Fix Order
 
-1. Integrate source validation into `npm run corpus:local`.
-2. Fix duplicate ID detection in both browser and PowerShell validators.
-3. Make all generated XML comments comment-safe.
-4. Add duplicate extracted-entity findings to source validation.
-5. Start module extraction around the pure generator and validator surfaces.
+1. Start module extraction around the pure parser, generator, and validator surfaces.
+2. Add the next strict source/corpus scope after Fizban spells, without claiming broader Fizban coverage.
+3. Continue replacing broad parser heuristics with narrow block-shape guards as each real PDF fixture proves a failure mode.

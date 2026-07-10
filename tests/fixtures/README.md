@@ -12,6 +12,7 @@ This directory keeps regression fixtures small and source-safe.
 - Use `maxHighSeverity` in local thresholds to fail on missing canonical IDs, grants, choices, or stats even when the exact-match percentage still looks healthy.
 - Add a `sourceValidation` block when a local fixture should also validate source interpretation before XML generation. It can declare expected entities, minimum parsed counts, required descriptions, and required feature names.
 - Use `sourceValidation.types` when the source gate should parse a broader set of element types than the XML benchmark currently compares. This is useful for proving source coverage before a generator category has reached first-party-like XML shape.
+- Source gates fail on errors by default. Use `sourceValidation.maxWarnings` and `sourceValidation.maxReview` when a strict fixture should also fail on warning or review findings.
 
 Run the committed fixtures with:
 

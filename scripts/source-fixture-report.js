@@ -43,7 +43,7 @@ function usage() {
     '  --summary-out <file>     Write only the source coverage summary JSON.',
     '  --json                   Print JSON instead of Markdown.',
     '',
-    'The source gate fails only on error findings by default. Warnings and review findings are reportable work, not hard failures.'
+    'The source gate fails only on error findings by default. Use sourceValidation.maxWarnings or sourceValidation.maxReview for stricter fixture gates.'
   ].join('\n');
 }
 

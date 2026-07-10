@@ -1131,6 +1131,152 @@ test('a spell with no selected-page prose reads only its next-page column contin
   assert.equal(spell.description, 'The spell continues across the page boundary.');
 });
 
+test('empty selected-page spell continuation skips leading stat block text', () => {
+  const context = loadApp();
+  const text = [
+    'Summon Test Spirit',
+    '5th-level conjuration',
+    'Casting Time: 1 action',
+    'Range: 60 feet',
+    'Components: V, S',
+    'Duration: Concentration, up to 1 hour'
+  ].join('\n');
+  const pages = [{
+    page: 10,
+    layout: {
+      columns: [{
+        side: 'left',
+        rows: [{ y: 100, text: 'Summon Test Spirit' }]
+      }]
+    }
+  }];
+  const continuationPages = [{
+    page: 11,
+    layout: {
+      columns: [{
+        side: 'left',
+        rows: [
+          { y: 760, text: 'TEST SPIRIT' },
+          { y: 740, text: 'Armor Class 14 + the level of the spell' },
+          { y: 720, text: 'Shared Resistances. You have resistance.' },
+          { y: 700, text: 'ACTIONS' },
+          { y: 680, text: 'Rend. Melee Weapon Attack: your spell attack modifier to hit.' },
+          { y: 640, text: 'You call forth a test spirit.' },
+          { y: 620, text: 'The creature obeys your commands.' },
+          { y: 600, text: 'MAGIC ITEMS' }
+        ]
+      }]
+    }
+  }];
+
+  const [spell] = context.parseSpellsFromText(text, { pages, continuationPages });
+
+  assert.equal(spell.description, [
+    'You call forth a test spirit.',
+    'The creature obeys your commands.'
+  ].join('\n'));
+});
+
+test('spell prose stopped by page chrome continues on the next selected page', () => {
+  const context = loadApp();
+  const text = [
+    'Dragon Shape',
+    '7th-level transmutation',
+    'Casting Time: 1 bonus action',
+    'Range: Self',
+    'Components: V, S, M (a dragon statuette)',
+    'Duration: Concentration, up to 1 minute',
+    'You gain the following benefits:',
+    'Blindsight. You have blindsight.',
+    'Cone. Ritual Class',
+    'Yes No Druid, Sorcerer, Wizard',
+    'CHAPTER 2 I DRAGON MAGIC 19',
+    'Breath Weapon. When you cast this spell, and as a',
+    'bonus action on later turns,',
+    'you exhale force in a cone.',
+    'Wings. You gain a flying speed.',
+    'NEXT SPELL',
+    '1st-level evocation',
+    'Casting Time: 1 action',
+    'Range: 60 feet',
+    'Components: V',
+    'Duration: Instantaneous',
+    'A spark appears.'
+  ].join('\n');
+  const pages = [
+    {
+      page: 20,
+      layout: {
+        columns: [{
+          side: 'right',
+          rows: [{ y: 100, text: 'Dragon Shape' }]
+        }]
+      }
+    },
+    {
+      page: 21,
+      layout: {
+        columns: [{
+          side: 'left',
+          rows: [
+            { y: 700, text: 'Breath Weapon. When you cast this spell, and as a' },
+            { y: 680, text: 'bonus action on later turns,' },
+            { y: 660, text: 'you exhale force in a cone.' },
+            { y: 640, text: 'Wings. You gain a flying speed.' },
+            { y: 620, text: 'NEXT SPELL' },
+            { y: 600, text: '1st-level evocation' }
+          ]
+        }]
+      }
+    }
+  ];
+
+  const [spell] = context.parseSpellsFromText(text, { pages });
+
+  assert.equal(spell.description, [
+    'You gain the following benefits:',
+    'Blindsight. You have blindsight.',
+    'Breath Weapon. When you cast this spell, and as a',
+    'bonus action on later turns,',
+    'you exhale force in a cone.',
+    'Wings. You gain a flying speed.'
+  ].join('\n'));
+});
+
+test('spell body cleanup removes page chrome and sidebar OCR while preserving following rule text', () => {
+  const context = loadApp();
+  const text = [
+    'Silver Shield',
+    '6th-level abjuration',
+    'Casting Time: 1 bonus action',
+    'Range: 60 feet',
+    'Components: V, S, M (a platinum scale)',
+    'Duration: Concentration, up to 1 minute',
+    'The creature gains the following benefits:',
+    'Damage Resistance. The creature has resistance.',
+    '20 CHAPTER 2 I DRAGON MAGIC',
+    'Se-ho{ay<; have, e,nga~ in [e,?1',
+    'e,,an,t ye,a/11 ke,e,p mc.k- of fhe,m al/.',
+    '-nzban',
+    ', Evasion. The creature takes no damage on a successful save.',
+    'NEXT SPELL',
+    '1st-level evocation',
+    'Casting Time: 1 action',
+    'Range: 60 feet',
+    'Components: V',
+    'Duration: Instantaneous',
+    'A spark appears.'
+  ].join('\n');
+
+  const [spell] = context.parseSpellsFromText(text);
+
+  assert.equal(spell.description, [
+    'The creature gains the following benefits:',
+    'Damage Resistance. The creature has resistance.',
+    'Evasion. The creature takes no damage on a successful save.'
+  ].join('\n'));
+});
+
 test('2020-2021 spells use corroborated sparse legacy setters while retaining component booleans', () => {
   const context = loadApp();
   runInApp(context, `document.getElementById('sourceYear').value = '2021';`);

@@ -138,6 +138,8 @@
       "sourceValidation": {
         "types": ["spell"],
         "requireTextTypes": ["spell"],
+        "maxWarnings": 0,
+        "maxReview": 0,
         "minCounts": {
           "spell": 7
         },

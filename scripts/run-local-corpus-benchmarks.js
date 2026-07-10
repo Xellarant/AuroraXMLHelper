@@ -122,7 +122,9 @@ function checkThresholds(entry, result) {
 
 function checkSourceCoverage(coverage) {
   if (!coverage) return [];
-  return coverage.summary?.pass ? [] : [`source errors ${coverage.summary?.error || 0} > 0`];
+  if (coverage.summary?.pass) return [];
+  const summary = coverage.summary || {};
+  return [`source gate failed (errors=${summary.error || 0}, warnings=${summary.warning || 0}, review=${summary.review || 0})`];
 }
 
 function sourceSummaryText(coverage) {

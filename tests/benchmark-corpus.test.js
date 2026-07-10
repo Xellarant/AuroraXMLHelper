@@ -238,7 +238,7 @@ test('local corpus entry fails when declared source validation has errors', asyn
   });
 
   assert.equal(result.failed, true);
-  assert.deepEqual(result.failures, ['source errors 1 > 0']);
+  assert.deepEqual(result.failures, ['source gate failed (errors=1, warnings=0, review=0)']);
   assert.ok(errors[0].includes('Threshold failure for Source Gate Fixture'));
 });
 
@@ -264,6 +264,31 @@ test('local corpus entry reports source warnings without failing', async () => {
 
   assert.equal(result.failed, false);
   assert.ok(logs.some(message => message.includes('source gate PASS (errors=0, warnings=1, review=1)')));
+});
+
+test('local corpus entry fails when source validation opts into strict warning and review limits', async () => {
+  const errors = [];
+  const result = await runEntry({
+    name: 'Strict Source Gate Fixture',
+    source: 'fixture.txt',
+    sourceValidation: { maxWarnings: 0, maxReview: 0 },
+    thresholds: {}
+  }, {
+    benchmarkFn: async () => passingBenchmarkResult(),
+    sourceValidationFn: async () => ({
+      markdown: '# Source Coverage Report',
+      coverage: {
+        summary: { error: 0, warning: 1, review: 1, maxWarnings: 0, maxReview: 0, pass: false },
+        issues: []
+      }
+    }),
+    log() {},
+    error(message) { errors.push(message); }
+  });
+
+  assert.equal(result.failed, true);
+  assert.deepEqual(result.failures, ['source gate failed (errors=0, warnings=1, review=1)']);
+  assert.ok(errors[0].includes('Threshold failure for Strict Source Gate Fixture'));
 });
 
 test('local corpus benchmark forwarding preserves manifest pageRange', async () => {
