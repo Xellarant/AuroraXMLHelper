@@ -1,7 +1,10 @@
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { generateFromFixtureFile, repoRoot } = require('./fixture-harness');
 const { sourceLineRecords, sourceContextForName } = require('../scripts/benchmark-corpus');
+const { buildSourceReport } = require('../scripts/source-fixture-report');
 const {
   createSourceModel,
   validateSourceModel,
@@ -204,4 +207,31 @@ test('markdown table extraction keeps headers and rows', () => {
   assert.equal(tables.length, 1);
   assert.deepEqual(tables[0].headers, ['Spell Level', 'Spells']);
   assert.deepEqual(tables[0].rows[0], ['1', 'Feather Fall, Fog Cloud']);
+});
+
+test('source fixture reporting forwards manifest pageRange to the source reader', async () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'aurora-xml-helper-source-range-'));
+  const sourcePath = path.join(tempRoot, 'fixture.txt');
+  fs.writeFileSync(sourcePath, [
+    'Range Spark',
+    '1st-level evocation',
+    'Casting Time: 1 Action',
+    'Range: 30 feet',
+    'Components: V, S',
+    'Duration: Instantaneous',
+    'A focused source-report fixture.'
+  ].join('\n'), 'utf8');
+
+  const result = await buildSourceReport({
+    entry: {
+      source: sourcePath,
+      pageRange: '1',
+      types: ['spell'],
+      sourceMeta: { name: 'Range Fixture', abbr: 'RNG', author: 'Codex Fixture' }
+    }
+  });
+
+  assert.equal(result.model.source.pageRange, '1');
+  assert.equal(result.model.source.pageCount, 1);
+  assert.ok(result.markdown.includes('- Selected page range: 1 (1/1 page)'));
 });

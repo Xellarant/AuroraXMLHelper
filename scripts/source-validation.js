@@ -182,6 +182,9 @@ function createSourceModel(options) {
     sourcePath,
     sourceKind,
     pages,
+    pageRange,
+    continuationPageCount,
+    totalPageCount,
     sourceMeta,
     generatedMeta,
     parsedData,
@@ -206,6 +209,9 @@ function createSourceModel(options) {
       path: sourcePath ? path.resolve(sourcePath) : '',
       kind: sourceKind,
       pageCount: pages?.length || 0,
+      pageRange: pageRange || '',
+      continuationPageCount: continuationPageCount || 0,
+      totalPageCount: totalPageCount || pages?.length || 0,
       name: sourceMeta?.name || '',
       abbr: sourceMeta?.abbr || '',
       author: sourceMeta?.author || '',
@@ -436,6 +442,8 @@ function renderSourceCoverageMarkdown(model, coverage) {
   lines.push('');
   lines.push(`- Source: \`${model.source.path}\``);
   lines.push(`- Source kind: ${model.source.kind}${model.source.pageCount ? ` (${model.source.pageCount} page${model.source.pageCount === 1 ? '' : 's'})` : ''}`);
+  lines.push(`- Selected page range: ${model.source.pageRange || 'all'} (${model.source.pageCount}/${model.source.totalPageCount || model.source.pageCount} page${(model.source.totalPageCount || model.source.pageCount) === 1 ? '' : 's'})`);
+  if (model.source.continuationPageCount) lines.push(`- Continuation pages read: ${model.source.continuationPageCount}`);
   lines.push(`- Source name: ${model.source.name || '(unknown)'}`);
   lines.push(`- Source abbreviation: ${model.source.abbr || '(unknown)'}`);
   lines.push(`- Ruleset: ${model.source.ruleset || '(unknown)'}`);

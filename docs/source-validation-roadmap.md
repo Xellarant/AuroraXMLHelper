@@ -20,6 +20,19 @@ The Eberron: Forge of the Artificer fixture should include or reference:
 
 The fixture should be runnable from one command and should produce every report needed to understand whether the source passed.
 
+## Second Golden Corpus: Fizban Spells
+
+Fizban's Treasury of Dragons is the second, deliberately narrow golden corpus. Its current scope is spell parsing only:
+
+- physical PDF pages `21-23`
+- exactly seven expected spells: Ashardalon's Stride, Draconic Transformation, Fizban's Platinum Shield, Nathair's Mischief, Raulothim's Psychic Lance, Rime's Binding Ice, and Summon Draconic Spirit
+- `WOTC_FTOD`, Wizards of the Coast, 2021 metadata
+- strict corpus thresholds: seven extracted, seven matched, 100% exact shape matches, and zero unmatched/different/high-severity elements
+
+The fixture remains disabled in the committed local-corpus example until a developer explicitly opts into its local paths. It does not establish coverage for Fizban races, feats, subclasses, magic items, or any other section.
+
+When a selected range ends at an entity header, the runner may read the immediately following page as bounded continuation context. The selected range still determines source coverage and report page counts; continuation pages are disclosed separately and cannot introduce new in-scope entities.
+
 ## Normalized Source Model
 
 Before generating XML, parse source material into structured JSON/entities. The model should preserve the source's own content and capture enough context to explain every generated rule:

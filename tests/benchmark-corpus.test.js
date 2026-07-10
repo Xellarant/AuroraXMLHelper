@@ -2,8 +2,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { benchmark, compareSupports, summarizeSemanticDiffs } = require('../scripts/benchmark-corpus');
-const { runEntry } = require('../scripts/run-local-corpus-benchmarks');
+const { benchmark, compareMaps, compareSupports, continuationPageNumbers, parseArgs, readSource, summarizeSemanticDiffs } = require('../scripts/benchmark-corpus');
+const { runBenchmark, runEntry } = require('../scripts/run-local-corpus-benchmarks');
 const { generateFromFixtureFile, repoRoot } = require('./fixture-harness');
 
 function escapePdfText(value) {
@@ -14,17 +14,30 @@ function escapePdfText(value) {
 }
 
 function makeTextPdf(lines) {
-  const textOps = lines.flatMap((line, index) => (
-    index === 0 ? [`(${escapePdfText(line)}) Tj`] : ['0 -16 Td', `(${escapePdfText(line)}) Tj`]
-  ));
-  const stream = ['BT', '/F1 12 Tf', '72 720 Td', ...textOps, 'ET'].join('\n');
+  return makeTextPdfPages([lines]);
+}
+
+function makeTextPdfPages(pageLines) {
+  const pageCount = pageLines.length;
+  const pageObjectNumber = index => 3 + (index * 2);
+  const contentObjectNumber = index => pageObjectNumber(index) + 1;
+  const fontObjectNumber = 3 + (pageCount * 2);
   const objects = [
     '<< /Type /Catalog /Pages 2 0 R >>',
-    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
-    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>',
-    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
-    `<< /Length ${Buffer.byteLength(stream, 'latin1')} >>\nstream\n${stream}\nendstream`
+    `<< /Type /Pages /Kids [${pageLines.map((_, index) => `${pageObjectNumber(index)} 0 R`).join(' ')}] /Count ${pageCount} >>`
   ];
+  for (let pageIndex = 0; pageIndex < pageLines.length; pageIndex++) {
+    const lines = pageLines[pageIndex];
+    const textOps = lines.flatMap((line, index) => (
+      index === 0 ? [`(${escapePdfText(line)}) Tj`] : ['0 -16 Td', `(${escapePdfText(line)}) Tj`]
+    ));
+    const stream = ['BT', '/F1 12 Tf', '72 720 Td', ...textOps, 'ET'].join('\n');
+    objects.push(
+      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 ${fontObjectNumber} 0 R >> >> /Contents ${contentObjectNumber(pageIndex)} 0 R >>`,
+      `<< /Length ${Buffer.byteLength(stream, 'latin1')} >>\nstream\n${stream}\nendstream`
+    );
+  }
+  objects.push('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>');
   let pdf = '%PDF-1.4\n';
   const offsets = [0];
   objects.forEach((body, index) => {
@@ -82,6 +95,83 @@ test('benchmark extracts selectable text from PDF sources', async () => {
   assert.equal(result.unmatched[0].name, 'Memory Spark');
   assert.equal(result.unmatched[0].sourceContext.page, 1);
   assert.equal(result.unmatched[0].sourceContext.text, 'Memory Spark');
+});
+
+test('benchmark treats a material cost spacing variant as source-equivalent', () => {
+  assert.deepEqual(compareMaps(
+    { materialComponent: 'an engraved object worth at least 500 gp' },
+    { materialComponent: 'an engraved object worth at least 500gp' }
+  ), []);
+});
+
+test('benchmark parses and reports only the selected PDF page range', async () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'aurora-xml-helper-page-range-'));
+  const sourcePath = path.join(tempRoot, 'two-spell-pages.pdf');
+  fs.writeFileSync(sourcePath, makeTextPdfPages([
+    [
+      'First Page Spark',
+      '1st-level evocation',
+      'Casting Time: 1 Action',
+      'Range: 30 feet',
+      'Components: V, S',
+      'Duration: Instantaneous',
+      'A first-page flare.'
+    ],
+    [
+      'Second Page Spark',
+      '2nd-level evocation',
+      'Casting Time: 1 Action',
+      'Range: 60 feet',
+      'Components: V, S',
+      'Duration: Instantaneous',
+      'A second-page flare.'
+    ]
+  ]));
+
+  const result = await benchmark({
+    source: sourcePath,
+    canonical: [tempRoot],
+    types: ['spell'],
+    sourceName: 'Page Range Fixture',
+    sourceAbbr: 'PRF',
+    sourceAuthor: 'Codex Fixture',
+    pageRange: '2'
+  });
+
+  assert.equal(result.pageRange, '2');
+  assert.equal(result.pageCount, 1);
+  assert.equal(result.totalPageCount, 2);
+  assert.equal(result.extractedCounts.spell, 1);
+  assert.equal(result.unmatched[0].name, 'Second Page Spark');
+  assert.equal(result.unmatched[0].sourceContext.page, 2);
+});
+
+test('PDF page ranges retain only the immediate next page as continuation context', async () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'aurora-xml-helper-continuation-'));
+  const sourcePath = path.join(tempRoot, 'three-pages.pdf');
+  fs.writeFileSync(sourcePath, makeTextPdfPages([
+    ['Selected page'],
+    ['Continuation page'],
+    ['Out of scope page']
+  ]));
+
+  const source = await readSource(sourcePath, '1');
+
+  assert.deepEqual(source.pages.map(page => page.page), [1]);
+  assert.deepEqual(source.continuationPages.map(page => page.page), [2]);
+  assert.equal(source.text.includes('Continuation page'), false);
+  assert.deepEqual(continuationPageNumbers(5, [1, 2, 4]), [3, 5]);
+});
+
+test('invalid PDF page ranges fail instead of falling back to the whole source', () => {
+  assert.throws(
+    () => parseArgs(['--source', 'fixture.pdf', '--canonical', 'canonical', '--page-range', '21-']),
+    /Invalid page range: 21-/
+  );
+  assert.throws(
+    () => parseArgs(['--source', 'fixture.pdf', '--canonical', 'canonical', '--page-range', '23-21']),
+    /Invalid page range: 23-21/
+  );
 });
 
 test('benchmark classifies missing canonical rules as high severity', async () => {
@@ -174,4 +264,16 @@ test('local corpus entry reports source warnings without failing', async () => {
 
   assert.equal(result.failed, false);
   assert.ok(logs.some(message => message.includes('source gate PASS (errors=0, warnings=1, review=1)')));
+});
+
+test('local corpus benchmark forwarding preserves manifest pageRange', async () => {
+  await runBenchmark({
+    source: 'fixture.pdf',
+    canonical: 'canonical',
+    pageRange: '21-23',
+    sourceMeta: {}
+  }, async args => {
+    assert.equal(args.pageRange, '21-23');
+    return { ok: true };
+  });
 });

@@ -63,9 +63,9 @@ function shouldSkipEntry(entry) {
   return '';
 }
 
-async function runBenchmark(entry) {
+async function runBenchmark(entry, benchmarkFn = benchmark) {
   const sourceMeta = entry.sourceMeta || {};
-  return benchmark({
+  return benchmarkFn({
     source: expandLocalPath(entry.source),
     canonical: normalizeCanonical(entry.canonical),
     types: entry.types || ELEMENT_TYPES,
@@ -73,14 +73,15 @@ async function runBenchmark(entry) {
     sourceAbbr: sourceMeta.abbr,
     sourceAuthor: sourceMeta.author,
     sourceYear: sourceMeta.year,
+    pageRange: entry.pageRange,
     customRoot: expandLocalPath(entry.customRoot || ''),
     json: false
   });
 }
 
-async function runSourceValidation(entry) {
+async function runSourceValidation(entry, buildSourceReportFn = buildSourceReport) {
   if (!entry.sourceValidation) return null;
-  return buildSourceReport({ entry });
+  return buildSourceReportFn({ entry });
 }
 
 function checkThresholds(entry, result) {

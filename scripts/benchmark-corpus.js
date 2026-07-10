@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const vm = require('node:vm');
+const { textItemsToLayout, textItemsToLines } = require('../src/pdf-text-layout');
 
 const repoRoot = path.resolve(__dirname, '..');
 const defaultCustomRoot = path.join(process.env.USERPROFILE || '', 'Documents', '5e Character Builder', 'custom');
@@ -31,12 +32,52 @@ function usage() {
     '  --source-abbr <abbr>      Source abbreviation to use while generating XML.',
     '  --source-author <name>    Source author to use while generating XML.',
     '  --source-year <year>      Publication year; 2024+ uses 2024 generation rules.',
+    '  --page-range <range>      PDF pages to parse, for example 21-23 or 21,24.',
     '  --custom-root <dir>       Canonical Aurora custom root for dependency lookups.',
     '  --out <file>              Write a Markdown report to this path.',
     '  --json                    Print JSON instead of Markdown.',
     '',
     'PDF sources use pdfjs-dist text extraction, matching the browser app as closely as possible.'
   ].join('\n');
+}
+
+function parsePageRange(value) {
+  const text = String(value || '').trim();
+  if (!text) return [];
+  const ranges = [];
+  for (const rawPart of text.split(',')) {
+    const part = rawPart.trim();
+    const match = part.match(/^(\d+)(?:\s*-\s*(\d+))?$/);
+    if (!match) throw new Error(`Invalid page range: ${value}`);
+    const start = Number(match[1]);
+    const end = Number(match[2] || match[1]);
+    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 1 || end < start) {
+      throw new Error(`Invalid page range: ${value}`);
+    }
+    ranges.push({ start, end });
+  }
+  return ranges;
+}
+
+function formatPageRange(ranges) {
+  return ranges.map(range => range.start === range.end ? String(range.start) : `${range.start}-${range.end}`).join(',');
+}
+
+function selectPageNumbers(totalPageCount, ranges) {
+  if (!ranges.length) return Array.from({ length: totalPageCount }, (_, index) => index + 1);
+  const selected = [];
+  for (let page = 1; page <= totalPageCount; page++) {
+    if (ranges.some(range => page >= range.start && page <= range.end)) selected.push(page);
+  }
+  if (!selected.length) throw new Error(`Page range ${formatPageRange(ranges)} selected no pages from a ${totalPageCount}-page source.`);
+  return selected;
+}
+
+function continuationPageNumbers(totalPageCount, selectedPages) {
+  const selected = new Set(selectedPages || []);
+  return (selectedPages || [])
+    .map(page => page + 1)
+    .filter(page => page <= totalPageCount && !selected.has(page));
 }
 
 function parseArgs(argv) {
@@ -60,6 +101,7 @@ function parseArgs(argv) {
       case '--source-abbr': args.sourceAbbr = next(); break;
       case '--source-author': args.sourceAuthor = next(); break;
       case '--source-year': args.sourceYear = next(); break;
+      case '--page-range': args.pageRange = formatPageRange(parsePageRange(next())); break;
       case '--custom-root': args.customRoot = next(); break;
       case '--out': args.out = next(); break;
       case '--json': args.json = true; break;
@@ -130,6 +172,7 @@ function loadApp(sourceMeta) {
   };
   const window = {
     addEventListener() {},
+    AuroraPdfTextLayout: { textItemsToLayout, textItemsToLines },
     localStorage: {
       getItem() { return null; },
       setItem() {}
@@ -253,11 +296,20 @@ function compareValues(generated, canonical) {
   return { generated, canonical };
 }
 
+function comparableSetterValue(name, value) {
+  const text = String(value || '');
+  if (name === 'materialComponent') return text.replace(/\b(\d+)\s+gp\b/gi, '$1gp');
+  return text;
+}
+
 function compareMaps(generated, canonical) {
   const diffs = [];
   const keys = new Set([...Object.keys(generated), ...Object.keys(canonical)]);
   for (const key of Array.from(keys).sort()) {
-    const diff = compareValues(generated[key] || '', canonical[key] || '');
+    const generatedValue = generated[key] || '';
+    const canonicalValue = canonical[key] || '';
+    if (comparableSetterValue(key, generatedValue) === comparableSetterValue(key, canonicalValue)) continue;
+    const diff = compareValues(generatedValue, canonicalValue);
     if (diff) diffs.push({ name: key, ...diff });
   }
   return diffs;
@@ -368,13 +420,16 @@ function indexByKey(elements) {
   return index;
 }
 
-function generateBenchmarkXml(context, text, types) {
+function generateBenchmarkXml(context, text, types, sourceContext = {}) {
+  const { pages = [], continuationPages = [] } = Array.isArray(sourceContext)
+    ? { pages: sourceContext }
+    : sourceContext;
   const data = {};
   for (const type of ELEMENT_TYPES) data[type] = [];
   data.other = [];
   for (const type of types) {
     const parserName = PARSERS[type];
-    const parsed = context[parserName](text);
+    const parsed = context[parserName](text, { pages, continuationPages });
     data[type] = type === 'feat' ? parsed.map(feat => context.parseFeatFullText(feat)) : parsed;
   }
   runInApp(context, `extractedData = ${JSON.stringify(data)};`);
@@ -434,29 +489,7 @@ function sourceContextForName(records, name) {
   };
 }
 
-function textItemsToLines(items) {
-  const rows = [];
-  for (const item of items) {
-    const y = Math.round((item.transform?.[5] || 0) * 2) / 2;
-    let row = rows.find(candidate => Math.abs(candidate.y - y) < 2);
-    if (!row) {
-      row = { y, items: [] };
-      rows.push(row);
-    }
-    row.items.push({ x: item.transform?.[4] || 0, str: item.str || '' });
-  }
-  return rows
-    .sort((a, b) => b.y - a.y)
-    .map(row => row.items
-      .sort((a, b) => a.x - b.x)
-      .map(item => item.str)
-      .join(' ')
-      .replace(/\s+/g, ' ')
-      .trim())
-    .filter(Boolean);
-}
-
-async function extractPdfPages(sourcePath) {
+async function extractPdfPages(sourcePath, ranges) {
   let pdfjsLib;
   const shouldSuppressPdfJsWarning = args => /Cannot polyfill `(DOMMatrix|Path2D)`/.test(String(args[0] || ''));
   const originalLog = console.log;
@@ -482,30 +515,39 @@ async function extractPdfPages(sourcePath) {
     disableWorker: true,
     standardFontDataUrl: path.join(repoRoot, 'node_modules', 'pdfjs-dist', 'standard_fonts') + path.sep
   }).promise;
-  const pages = [];
-  for (let p = 1; p <= pdf.numPages; p++) {
+  const selectedPageNumbers = selectPageNumbers(pdf.numPages, ranges);
+  const pageByNumber = new Map();
+  for (const p of [...selectedPageNumbers, ...continuationPageNumbers(pdf.numPages, selectedPageNumbers)]) {
     const page = await pdf.getPage(p);
     const content = await page.getTextContent();
-    pages.push({ page: p, text: textItemsToLines(content.items).join('\n') });
+    const layout = textItemsToLayout(content.items);
+    pageByNumber.set(p, { page: p, text: layout.lines.join('\n'), layout });
   }
-  return pages;
+  return {
+    pages: selectedPageNumbers.map(page => pageByNumber.get(page)),
+    continuationPages: continuationPageNumbers(pdf.numPages, selectedPageNumbers).map(page => pageByNumber.get(page)),
+    totalPageCount: pdf.numPages
+  };
 }
 
-async function readSource(sourcePath) {
+async function readSource(sourcePath, pageRange = '') {
+  const ranges = parsePageRange(pageRange);
+  const selectedPageRange = formatPageRange(ranges);
   if (/\.pdf$/i.test(sourcePath)) {
-    const pages = await extractPdfPages(sourcePath);
+    const { pages, continuationPages, totalPageCount } = await extractPdfPages(sourcePath, ranges);
     const text = pages.map(page => page.text).join('\n\n');
     if (!text.trim()) throw new Error(`No selectable text was found in PDF source: ${sourcePath}`);
-    return { kind: 'pdf', pages, text };
+    return { kind: 'pdf', pages, continuationPages, text, pageRange: selectedPageRange, totalPageCount };
   }
   const text = fs.readFileSync(sourcePath, 'utf8');
-  return { kind: 'text', pages: [{ page: 1, text }], text };
+  const pages = selectPageNumbers(1, ranges).map(page => ({ page, text }));
+  return { kind: 'text', pages, continuationPages: [], text, pageRange: selectedPageRange, totalPageCount: 1 };
 }
 
 async function benchmark(args) {
   const sourcePath = path.resolve(args.source);
   if (!fs.existsSync(sourcePath)) throw new Error(`Source path does not exist: ${args.source}`);
-  const source = await readSource(sourcePath);
+  const source = await readSource(sourcePath, args.pageRange);
   const sourceText = source.text;
   const sourceBase = path.basename(sourcePath, path.extname(sourcePath));
   const sourceMeta = {
@@ -521,7 +563,7 @@ async function benchmark(args) {
   if (args.sourceAuthor) elements.sourceAuthor.value = args.sourceAuthor;
   if (args.sourceYear) elements.sourceYear.value = args.sourceYear;
 
-  const generated = generateBenchmarkXml(context, sourceText, args.types);
+  const generated = generateBenchmarkXml(context, sourceText, args.types, source);
   const generatedElements = parseElements(generated.xml, sourcePath).filter(element => element.type !== 'Source');
   const sourceRecords = sourceLineRecords(source.pages);
   const canonicalFiles = args.canonical.flatMap(listXmlFiles);
@@ -560,7 +602,10 @@ async function benchmark(args) {
   return {
     source: sourcePath,
     sourceKind: source.kind,
+    pageRange: source.pageRange,
     pageCount: source.pages.length,
+    continuationPages: (source.continuationPages || []).map(page => page.page),
+    totalPageCount: source.totalPageCount,
     canonical: canonicalFiles,
     meta: generated.meta,
     extractedCounts: summarizeExtractedData(generated.data),
@@ -608,6 +653,8 @@ function renderMarkdown(result) {
   lines.push('');
   lines.push(`- Source: \`${result.source}\``);
   lines.push(`- Source kind: ${result.sourceKind}${result.pageCount ? ` (${result.pageCount} page${result.pageCount === 1 ? '' : 's'})` : ''}`);
+  lines.push(`- Selected page range: ${result.pageRange || 'all'} (${result.pageCount}/${result.totalPageCount || result.pageCount} page${(result.totalPageCount || result.pageCount) === 1 ? '' : 's'})`);
+  if (result.continuationPages?.length) lines.push(`- Continuation pages read: ${result.continuationPages.join(', ')}`);
   lines.push(`- Canonical files scanned: ${result.canonical.length}`);
   lines.push(`- Source ruleset: ${result.meta.ruleset}${result.meta.year ? ` (${result.meta.year})` : ''}`);
   lines.push(`- Ruleset confidence: ${result.meta.rulesetConfidence || 'unknown'}`);
@@ -688,8 +735,14 @@ if (require.main === module) {
 
 module.exports = {
   ELEMENT_TYPES,
+  parseArgs,
+  parsePageRange,
+  formatPageRange,
+  selectPageNumbers,
+  continuationPageNumbers,
   benchmark,
   renderMarkdown,
+  compareMaps,
   compareSupports,
   summarizeSemanticDiffs,
   loadApp,

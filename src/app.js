@@ -602,6 +602,7 @@ async function deterministicExtract(file, types, progressCallback) {
   progressCallback(5, 'Reading PDF text locally...');
   const pages = await extractPdfPages(file);
   const selectedPages = selectPages(pages, document.getElementById('pageRange')?.value?.trim() || '');
+  const continuationPages = selectContinuationPages(pages, selectedPages);
   const text = selectedPages.map(p => p.text).join('\n\n');
   if (!text.trim()) throw new Error('No selectable text was found in this PDF. Scanned/image-only PDFs need OCR before deterministic parsing can work.');
 
@@ -612,7 +613,7 @@ async function deterministicExtract(file, types, progressCallback) {
     const type = types[i];
     const parser = DETERMINISTIC_PARSERS[type];
     progressCallback(10 + Math.round((i / Math.max(types.length, 1)) * 80), `Parsing ${TYPE_LABELS[type] || type}...`);
-    out[type] = parser ? parser(text) : [];
+    out[type] = parser ? parser(text, { pages: selectedPages, continuationPages }) : [];
   }
   progressCallback(95, 'Normalizing parsed elements...');
   return out;
@@ -628,27 +629,12 @@ async function extractPdfPages(file) {
   for (let p = 1; p <= pdf.numPages; p++) {
     const page = await pdf.getPage(p);
     const content = await page.getTextContent();
-    const lines = textItemsToLines(content.items);
-    pages.push({ page: p, text: lines.join('\n') });
+    const layout = window.AuroraPdfTextLayout;
+    if (!layout?.textItemsToLayout) throw new Error('PDF text layout support is not loaded.');
+    const pageLayout = layout.textItemsToLayout(content.items);
+    pages.push({ page: p, text: pageLayout.lines.join('\n'), layout: pageLayout });
   }
   return pages;
-}
-
-function textItemsToLines(items) {
-  const rows = [];
-  for (const item of items) {
-    const y = Math.round((item.transform?.[5] || 0) * 2) / 2;
-    let row = rows.find(r => Math.abs(r.y - y) < 2);
-    if (!row) {
-      row = { y, items: [] };
-      rows.push(row);
-    }
-    row.items.push({ x: item.transform?.[4] || 0, str: item.str || '' });
-  }
-  return rows
-    .sort((a, b) => b.y - a.y)
-    .map(row => row.items.sort((a, b) => a.x - b.x).map(i => i.str).join(' ').replace(/\s+/g, ' ').trim())
-    .filter(Boolean);
 }
 
 function selectPages(pages, rangeText) {
@@ -663,6 +649,18 @@ function selectPages(pages, rangeText) {
   }
   const filtered = pages.filter(p => wanted.has(p.page));
   return filtered.length ? filtered : pages;
+}
+
+function selectContinuationPages(allPages, selectedPages) {
+  const selected = new Set((selectedPages || []).map(page => page.page));
+  const continuationPageNumbers = new Set();
+  for (const page of selectedPages || []) {
+    const nextPage = page.page + 1;
+    if (!selected.has(nextPage) && allPages.some(candidate => candidate.page === nextPage)) {
+      continuationPageNumbers.add(nextPage);
+    }
+  }
+  return (allPages || []).filter(page => continuationPageNumbers.has(page.page));
 }
 
 function detectSourceMetaFromText(pages) {
@@ -724,8 +722,103 @@ function normalizeTextLine(line) {
   return value;
 }
 
-function parseSpellsFromText(text) {
+function spellTableKey(value) {
+  return normalizeEncodingArtifacts(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '');
+}
+
+function spellTableClasses(value) {
+  const expression = /\b(Bard|Cleric|Druid|Paladin|Ranger|Sorcerer|Warlock|Wizard|Artificer)\b/gi;
+  return uniqueTokens([...String(value || '').matchAll(expression)].map(match => titleCase(match[1])));
+}
+
+function extractSpellTableMetadata(pages) {
+  const metadata = new Map();
+  for (const page of pages || []) {
+    const columns = page?.layout?.columns || [];
+    const left = columns.find(column => column.side === 'left');
+    const right = columns.find(column => column.side === 'right');
+    if (!left || !right) continue;
+    if (!left.rows.some(row => /^Level\s+Spell\s+School$/i.test(row.text)) || !right.rows.some(row => /Ritual\s+Class$/i.test(row.text))) continue;
+
+    for (const row of left.rows) {
+      const match = row.text.match(/^(\d+)(?:st|nd|rd|th)\s+(.+?)\s+(Abjuration|Conjuration|Divination|Enchantment|Evocation|Illusion|Necromancy|Transmutation)$/i);
+      if (!match) continue;
+      const companion = right.rows
+        .map(candidate => ({ candidate, distance: Math.abs(candidate.y - row.y) }))
+        .filter(candidate => candidate.distance < 4)
+        .sort((a, b) => a.distance - b.distance)[0]?.candidate;
+      const companionMatch = companion?.text.match(/^(Yes|No)\s+(Yes|No)\s+(.+)$/i);
+      if (!companionMatch) continue;
+      const classes = spellTableClasses(companionMatch[3]);
+      if (!classes.length) continue;
+      metadata.set(spellTableKey(match[2]), {
+        level: Number(match[1]),
+        school: titleCase(match[3]),
+        isConcentration: /^yes$/i.test(companionMatch[1]),
+        isRitual: /^yes$/i.test(companionMatch[2]),
+        classes
+      });
+    }
+  }
+  return metadata;
+}
+
+function hasUnclosedParenthesis(value) {
+  const text = String(value || '');
+  return (text.match(/\(/g) || []).length > (text.match(/\)/g) || []).length;
+}
+
+function findSpellLayoutLocation(name, pages) {
+  const key = spellTableKey(name);
+  for (const page of pages || []) {
+    for (const column of page?.layout?.columns || []) {
+      if (column.rows.some(row => spellTableKey(row.text) === key)) {
+        return { page: page.page, side: column.side };
+      }
+    }
+  }
+  return null;
+}
+
+function isPdfContinuationNoise(line) {
+  const text = String(line || '').trim();
+  return !text
+    || /^\d+\s+CHAPTER\b/i.test(text)
+    || /^[-–]?(?:fizban|nzban)$/i.test(text)
+    || /^[A-Za-z](?:\s+[A-Za-z])+(?:\s*\.\s*[A-Za-z])?\.?$/.test(text)
+    || /[<{;~]/.test(text);
+}
+
+function continuationProseStartIndex(lines) {
+  const directAddress = lines.findIndex(line => /^You\b/i.test(line));
+  if (directAddress >= 0) return directAddress;
+  return lines.findIndex(line => /^(?:The|A|An|Each|When|While|For|Until|On)\b/i.test(line));
+}
+
+function spellContinuationText(name, pages, continuationPages) {
+  const location = findSpellLayoutLocation(name, pages);
+  if (!location) return '';
+  const page = (continuationPages || []).find(candidate => candidate.page === location.page + 1);
+  const column = page?.layout?.columns?.find(candidate => candidate.side === 'left')
+    || page?.layout?.columns?.[0];
+  if (!column) return '';
+
+  const lines = column.rows.map(row => row.text);
+  const startIndex = continuationProseStartIndex(lines);
+  if (startIndex < 0) return '';
+  const boundaryIndex = lines.findIndex((line, index) => index > startIndex && (isSectionHeading(line) || isElementStart(lines, index)));
+  return lines
+    .slice(startIndex, boundaryIndex < 0 ? lines.length : boundaryIndex)
+    .filter(line => !isPdfContinuationNoise(line))
+    .join('\n')
+    .trim();
+}
+
+function parseSpellsFromText(text, options = {}) {
   const lines = normalizeTextLines(text);
+  const tableMetadata = extractSpellTableMetadata(options.pages);
   const spells = [];
   for (let i = 0; i < lines.length - 5; i++) {
     const kind = parseSpellKind(lines[i + 1]);
@@ -734,21 +827,34 @@ function parseSpellsFromText(text) {
     let j = i + 2;
     for (; j < Math.min(lines.length, i + 14); j++) {
       const m = lines[j].match(/^(Casting Time|Range|Components|Duration):\s*(.+)$/i);
-      if (m) fields[m[1].toLowerCase()] = m[2].trim();
+      if (m) {
+        const field = m[1].toLowerCase();
+        fields[field] = m[2].trim();
+        if (field === 'components') {
+          while (hasUnclosedParenthesis(fields.components) && j + 1 < Math.min(lines.length, i + 14)) {
+            const continuation = lines[j + 1];
+            if (/^(Casting Time|Range|Components|Duration):\s*/i.test(continuation)) break;
+            fields.components += ` ${continuation}`;
+            j++;
+          }
+        }
+      }
       if (fields['casting time'] && fields.range && fields.components && fields.duration) break;
     }
     if (!fields['casting time'] || !fields.range || !fields.components || !fields.duration) continue;
     const descStart = j + 1;
     let descEnd = descStart;
     while (descEnd < lines.length && !isElementStart(lines, descEnd) && !isSectionHeading(lines[descEnd])) descEnd++;
-    const body = lines.slice(descStart, descEnd).join('\n');
+    let body = lines.slice(descStart, descEnd).join('\n');
+    if (!body.trim()) body = spellContinuationText(lines[i], options.pages, options.continuationPages);
     const higher = body.match(/(?:At Higher Levels?\.?|At Higher Levels:|Using a Higher-Level Spell Slot\.?)\s*(.+)$/is);
     const description = higher ? body.slice(0, higher.index).trim() : body.trim();
     const components = parseComponents(fields.components);
+    const tableEntry = tableMetadata.get(spellTableKey(lines[i]));
     spells.push({
       name: normalizeExtractedName(lines[i]),
-      school: kind.school,
-      level: kind.level,
+      school: tableEntry?.school || kind.school,
+      level: tableEntry?.level ?? kind.level,
       castingTime: normalizeSpellCastingTime(fields['casting time'], lines[i + 1]),
       range: fields.range,
       hasVerbal: components.hasVerbal,
@@ -756,10 +862,11 @@ function parseSpellsFromText(text) {
       hasMaterial: components.hasMaterial,
       material: components.material,
       duration: normalizeSpellDuration(fields.duration),
-      isConcentration: /^concentration/i.test(fields.duration),
-      isRitual: /\britual\b/i.test(lines[i + 1]),
+      isConcentration: tableEntry?.isConcentration ?? /^concentration/i.test(fields.duration),
+      isRitual: tableEntry?.isRitual ?? /\britual\b/i.test(lines[i + 1]),
       isTechnomagic: false,
-      classes: kind.classes?.length ? kind.classes : inferClasses(`${lines.slice(Math.max(0, i - 8), i).join(' ')}\n${body}`),
+      classes: tableEntry?.classes?.length ? tableEntry.classes : (kind.classes?.length ? kind.classes : inferClasses(`${lines.slice(Math.max(0, i - 8), i).join(' ')}\n${body}`)),
+      tableMetadata: tableEntry || null,
       description,
       higherLevels: higher ? higher[1].trim() : ''
     });
@@ -4072,6 +4179,17 @@ function spellSearchText(spell) {
   ].filter(Boolean).join(' ');
 }
 
+function directSpellSavingThrowAbilities(spell) {
+  const primaryEffect = String(spell.description || '')
+    .split(/\bgain the following benefits\b/i)[0]
+    .replace(/([A-Za-z])-\s*\n\s*([A-Za-z])/g, '$1$2')
+    .replace(/\s+/g, ' ');
+  const abilities = [];
+  const expression = /\b(?:the target|each creature|a creature)\b[^.]{0,180}?\bmust\s+(?:make|succeed on)\s+(?:a|an)\s+(Strength|Dexterity|Constitution|Intelligence|Wisdom|Charisma)\s+saving throw/gi;
+  for (const match of primaryEffect.matchAll(expression)) abilities.push(titleCase(match[1]));
+  return uniqueTokens(abilities);
+}
+
 function inferSpellSupportTokens(spell, meta) {
   const text = spellSearchText(spell);
   const lower = text.toLowerCase();
@@ -4081,7 +4199,12 @@ function inferSpellSupportTokens(spell, meta) {
   else if (/\branged spell attack\b/i.test(text)) supports.push('Ranged', 'Spell Attack');
   else if (/\bspell attack\b/i.test(text)) supports.push('Spell Attack');
 
-  if (/\bsaving throw\b/i.test(text)) supports.push('Spell Saving Throw');
+  if (spell.tableMetadata) {
+    const savingThrowAbilities = directSpellSavingThrowAbilities(spell);
+    if (savingThrowAbilities.length) supports.push(...savingThrowAbilities, 'Spell Saving Throw');
+  } else if (/\bsaving throw\b/i.test(text)) {
+    supports.push('Spell Saving Throw');
+  }
 
   if (isModernRuleset(meta)) {
     const hasDamage = /\bdamage\b/i.test(text) || /\b(acid|bludgeoning|cold|fire|force|lightning|necrotic|piercing|poison|psychic|radiant|slashing|thunder)\b/i.test(text);
@@ -4136,11 +4259,17 @@ function inferSpellKeywords(spell, meta) {
   return uniqueTokens(tokens).join(', ');
 }
 
+function usesSparseLegacySpellSetters(meta) {
+  const year = Number(meta?.year);
+  return Number.isInteger(year) && year >= 2020 && year <= 2021;
+}
+
 function genSpellXml(s, source, prefix, meta) {
   const id = `${prefix}_SPELL_${idify(s.name)}`;
   const supports = inferSpellSupportTokens(s, meta).join(', ');
   const keywords = inferSpellKeywords(s, meta);
   const modernRules = isModernRuleset(meta);
+  const sparseLegacySetters = !modernRules && usesSparseLegacySpellSetters(meta);
   const lines = [];
   lines.push(`\t<element name="${escAttrXml(s.name)}" type="Spell" source="${escAttrXml(source)}" id="${id}">`);
   lines.push(`\t\t<supports>${escXml(supports)}</supports>`);
@@ -4154,7 +4283,7 @@ function genSpellXml(s, source, prefix, meta) {
   lines.push(`\t\t<setters>`);
   if (modernRules) {
     if (keywords) lines.push(`\t\t\t<set name="keywords">${escXml(keywords)}</set>`);
-  } else {
+  } else if (!sparseLegacySetters) {
     lines.push(`\t\t\t<set name="keywords">${escXml(keywords)}</set>`);
   }
   lines.push(`\t\t\t<set name="level">${s.level}</set>`);
@@ -4176,9 +4305,9 @@ function genSpellXml(s, source, prefix, meta) {
     lines.push(`\t\t\t<set name="hasSomaticComponent">${!!s.hasSomatic}</set>`);
     lines.push(`\t\t\t<set name="hasMaterialComponent">${!!(s.hasMaterial || s.material)}</set>`);
     if (s.material) lines.push(`\t\t\t<set name="materialComponent">${escXml(s.material)}</set>`);
-    else lines.push(`\t\t\t<set name="materialComponent" />`);
-    lines.push(`\t\t\t<set name="isConcentration">${!!s.isConcentration}</set>`);
-    lines.push(`\t\t\t<set name="isRitual">${!!s.isRitual}</set>`);
+    else if (!sparseLegacySetters) lines.push(`\t\t\t<set name="materialComponent" />`);
+    if (s.isConcentration || !sparseLegacySetters) lines.push(`\t\t\t<set name="isConcentration">${!!s.isConcentration}</set>`);
+    if (s.isRitual || !sparseLegacySetters) lines.push(`\t\t\t<set name="isRitual">${!!s.isRitual}</set>`);
   }
   lines.push(`\t\t</setters>`);
   lines.push(`\t</element>`);

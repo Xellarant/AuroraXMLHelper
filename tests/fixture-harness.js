@@ -92,6 +92,8 @@ function loadApp(sourceMeta = {}) {
   vm.createContext(context);
   const shapeScript = fs.readFileSync(path.join(repoRoot, 'src', 'aurora-xml-shape.js'), 'utf8');
   vm.runInContext(shapeScript, context, { filename: 'src/aurora-xml-shape.js' });
+  const layoutScript = fs.readFileSync(path.join(repoRoot, 'src', 'pdf-text-layout.js'), 'utf8');
+  vm.runInContext(layoutScript, context, { filename: 'src/pdf-text-layout.js' });
   const appScript = fs.readFileSync(path.join(repoRoot, 'src', 'app.js'), 'utf8');
   vm.runInContext(appScript, context, { filename: 'src/app.js' });
   return { context, elements };

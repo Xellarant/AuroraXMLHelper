@@ -123,7 +123,7 @@
       }
     },
     {
-      "name": "Fizban's Treasury of Dragons",
+      "name": "Fizban's Treasury of Dragons - Spells",
       "enabled": false,
       "source": "{USERPROFILE}\\Documents\\DnD\\books and docs\\Fizban's Treasury of Dragons [HQ] [OCR] [Bookmarked].pdf",
       "canonical": "{USERPROFILE}\\Documents\\5e Character Builder\\custom\\supplements\\fizbans-treasury-of-dragons",
@@ -133,14 +133,34 @@
         "author": "Wizards of the Coast",
         "year": "2021"
       },
+      "pageRange": "21-23",
+      "types": ["spell"],
+      "sourceValidation": {
+        "types": ["spell"],
+        "requireTextTypes": ["spell"],
+        "minCounts": {
+          "spell": 7
+        },
+        "expected": {
+          "spell": [
+            "Ashardalon's Stride",
+            "Draconic Transformation",
+            "Fizban's Platinum Shield",
+            "Nathair's Mischief",
+            "Raulothim's Psychic Lance",
+            "Rime's Binding Ice",
+            "Summon Draconic Spirit"
+          ]
+        }
+      },
       "thresholds": {
         "minExtracted": {
-          "spell": 1,
-          "magic": 1
+          "spell": 7
         },
-        "minMatched": 2,
-        "maxUnmatched": 4,
-        "maxDifferent": 2,
+        "minMatched": 7,
+        "minExactPercent": 100,
+        "maxUnmatched": 0,
+        "maxDifferent": 0,
         "maxHighSeverity": 0
       }
     },

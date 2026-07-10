@@ -35,6 +35,7 @@ function usage() {
     '  --source-abbr <abbr>     Source abbreviation to use while parsing.',
     '  --source-author <name>   Source author to use while parsing.',
     '  --source-year <year>     Publication year; 2024+ uses 2024 generation rules.',
+    '  --page-range <range>     PDF pages to parse, for example 21-23 or 21,24.',
     '  --expect <file>          JSON file containing sourceValidation expectations.',
     '  --out-dir <dir>          Write normalized-source.json, source-coverage-report.md, and source-coverage-summary.json.',
     '  --model-out <file>       Write only the normalized source model JSON.',
@@ -68,6 +69,7 @@ function parseArgs(argv) {
       case '--source-abbr': args.sourceAbbr = next(); break;
       case '--source-author': args.sourceAuthor = next(); break;
       case '--source-year': args.sourceYear = next(); break;
+      case '--page-range': args.pageRange = next(); break;
       case '--expect': args.expect = next(); break;
       case '--out-dir': args.outDir = next(); break;
       case '--model-out': args.modelOut = next(); break;
@@ -139,7 +141,7 @@ async function buildSourceReport(rawArgs) {
   const entry = args.entry || (shouldLoadManifestEntry ? loadManifestEntry(args) : null);
   const sourcePath = path.resolve(expandLocalPath(args.source || entry?.source || ''));
   if (!sourcePath || !fs.existsSync(sourcePath)) throw new Error(`Source path does not exist: ${sourcePath}`);
-  const source = await readSource(sourcePath);
+  const source = await readSource(sourcePath, args.pageRange || entry?.pageRange || '');
   const sourceMeta = sourceMetaFromArgs(args, entry, sourcePath);
   const types = (args.types.length ? args.types : entry?.sourceValidation?.types || entry?.types || ELEMENT_TYPES)
     .map(type => type.toLowerCase());
@@ -154,12 +156,15 @@ async function buildSourceReport(rawArgs) {
   elements.sourceAuthor.value = sourceMeta.author;
   elements.sourceYear.value = String(sourceMeta.year || '');
 
-  const generated = generateBenchmarkXml(context, source.text, types);
+  const generated = generateBenchmarkXml(context, source.text, types, source);
   const sourceRecords = sourceLineRecords(source.pages);
   const model = createSourceModel({
     sourcePath,
     sourceKind: source.kind,
     pages: source.pages,
+    pageRange: source.pageRange,
+    continuationPageCount: source.continuationPages?.length || 0,
+    totalPageCount: source.totalPageCount,
     sourceMeta,
     generatedMeta: generated.meta,
     parsedData: generated.data,

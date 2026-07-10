@@ -6,6 +6,12 @@ Full audit of Aurora XML Helper after the recent deterministic parser, source va
 
 The active repository is `C:\Users\Ralla\source\repos\AuroraXMLHelper`. The older `C:\Users\Ralla\source\repos\Aurora XML Helper` folder is only a pointer workspace and is not the source of truth.
 
+## 2026-06-22 Follow-up: Narrow Fizban Spell Corpus
+
+Multi-column PDF ordering is resolved for the verified Fizban spell scope. Browser and CLI now share positioned-text layout logic, preserve row-first ordering on ordinary pages, and read accepted two-column pages left-to-right by column. The Fizban pages `21-23` spell benchmark extracts the seven expected spells and reaches 7/7 exact canonical shape matches with no unmatched or high-severity differences.
+
+The fix preserves positioned rows alongside flattened prose and uses that structure to bind the spell-table class/concentration/ritual columns. A selected page range can now read its immediate next page as disclosed continuation context when a spell header has no selected-page body, allowing Summon Draconic Spirit to retain its prose without expanding the fixture's entity scope. Broader multi-column tables remain an open risk: this evidence does not prove general table extraction for races, subclasses, feats, magic items, or other Fizban sections. Those remain separate corpus scopes.
+
 ## Validation Run
 
 - `npm test`: pass, 5 test files and 51 tests.

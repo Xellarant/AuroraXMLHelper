@@ -91,6 +91,8 @@ function loadApp() {
   vm.createContext(context);
   const shapeScript = fs.readFileSync(path.join(repoRoot, 'src', 'aurora-xml-shape.js'), 'utf8');
   vm.runInContext(shapeScript, context, { filename: 'src/aurora-xml-shape.js' });
+  const layoutScript = fs.readFileSync(path.join(repoRoot, 'src', 'pdf-text-layout.js'), 'utf8');
+  vm.runInContext(layoutScript, context, { filename: 'src/pdf-text-layout.js' });
   const appScript = fs.readFileSync(path.join(repoRoot, 'src', 'app.js'), 'utf8');
   vm.runInContext(appScript, context, { filename: 'src/app.js' });
   return context;
@@ -1037,6 +1039,137 @@ test('spell XML defaults to legacy explicit setters for unknown-year sources', (
   assert.ok(xml.includes('<set name="materialComponent" />'));
   assert.ok(xml.includes('<set name="isConcentration">false</set>'));
   assert.ok(xml.includes('<set name="isRitual">false</set>'));
+});
+
+test('spell tables attach cross-column classes and flags without leaking table prose into spell bodies', () => {
+  const context = loadApp();
+  const text = [
+    'Table Spark',
+    '3rd-level evocation',
+    'Casting Time: 1 action',
+    'Range: 60 feet',
+    'Components: V, S, M (a dragon scale',
+    'worth 500 gp)',
+    'Duration: Instantaneous',
+    'A focused burst of magical energy.'
+  ].join('\n');
+  const pages = [{
+    layout: {
+      columns: [
+        {
+          side: 'left',
+          rows: [
+            { y: 700, text: 'SPELLS' },
+            { y: 680, text: 'Level Spell School' },
+            { y: 660, text: '3rd Table Spark Transmutation' }
+          ]
+        },
+        {
+          side: 'right',
+          rows: [
+            { y: 680, text: 'Conc. Ritual Class' },
+            { y: 660, text: 'Yes No Artificer, Ranger, Wizard' }
+          ]
+        }
+      ]
+    }
+  }];
+
+  const [spell] = context.parseSpellsFromText(text, { pages });
+
+  assert.equal(spell.school, 'Transmutation');
+  assert.equal(spell.level, 3);
+  assert.deepEqual([...spell.classes], ['Artificer', 'Ranger', 'Wizard']);
+  assert.equal(spell.isConcentration, true);
+  assert.equal(spell.isRitual, false);
+  assert.equal(spell.material, 'a dragon scale worth 500 gp');
+  assert.equal(spell.description, 'A focused burst of magical energy.');
+  assert.deepEqual(JSON.parse(JSON.stringify(spell.tableMetadata)), {
+    level: 3,
+    school: 'Transmutation',
+    isConcentration: true,
+    isRitual: false,
+    classes: ['Artificer', 'Ranger', 'Wizard']
+  });
+});
+
+test('a spell with no selected-page prose reads only its next-page column continuation', () => {
+  const context = loadApp();
+  const text = [
+    'Overflow Spark',
+    '2nd-level evocation',
+    'Casting Time: 1 action',
+    'Range: 60 feet',
+    'Components: V, S',
+    'Duration: Instantaneous'
+  ].join('\n');
+  const pages = [{
+    page: 10,
+    layout: {
+      columns: [{
+        side: 'right',
+        rows: [{ y: 100, text: 'Overflow Spark' }]
+      }]
+    }
+  }];
+  const continuationPages = [{
+    page: 11,
+    layout: {
+      columns: [{
+        side: 'left',
+        rows: [
+          { y: 700, text: 'The spell continues across the page boundary.' },
+          { y: 650, text: 'MAGIC ITEMS' },
+          { y: 620, text: 'Out-of-scope text must not be included.' }
+        ]
+      }]
+    }
+  }];
+
+  const [spell] = context.parseSpellsFromText(text, { pages, continuationPages });
+
+  assert.equal(spell.description, 'The spell continues across the page boundary.');
+});
+
+test('2020-2021 spells use corroborated sparse legacy setters while retaining component booleans', () => {
+  const context = loadApp();
+  runInApp(context, `document.getElementById('sourceYear').value = '2021';`);
+  setExtractedData(context, {
+    spell: [{
+      name: 'Sparse Spark',
+      level: 1,
+      school: 'Evocation',
+      castingTime: 'Action',
+      range: '60 feet',
+      hasVerbal: true,
+      hasSomatic: false,
+      hasMaterial: false,
+      material: '',
+      duration: 'Instantaneous',
+      isRitual: false,
+      isConcentration: false,
+      classes: ['Wizard'],
+      description: 'A precise spark leaps to a target.'
+    }],
+    archetype: [],
+    item: [],
+    feat: [],
+    magic: [],
+    race: [],
+    background: [],
+    class: [],
+    other: []
+  });
+
+  const xml = runInApp(context, 'generateXml()');
+
+  assert.ok(xml.includes('<set name="hasVerbalComponent">true</set>'));
+  assert.ok(xml.includes('<set name="hasSomaticComponent">false</set>'));
+  assert.ok(xml.includes('<set name="hasMaterialComponent">false</set>'));
+  assert.ok(!xml.includes('<set name="keywords"></set>'));
+  assert.ok(!xml.includes('<set name="materialComponent" />'));
+  assert.ok(!xml.includes('<set name="isConcentration">false</set>'));
+  assert.ok(!xml.includes('<set name="isRitual">false</set>'));
 });
 
 test('spell supports and inferred keywords follow source ruleset', () => {

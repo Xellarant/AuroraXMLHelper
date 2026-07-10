@@ -126,6 +126,30 @@ Tests run with Vitest and require Node 20 or newer. `npm test` uses
 `scripts/run-vitest.js`, which prefers `AURORA_NODE`, then a local Node install
 under `%LOCALAPPDATA%\Programs\nodejs-lts`, then `node` on `PATH`.
 
+Run the browser smoke test with:
+
+```powershell
+npm run smoke:browser
+```
+
+The smoke test starts the local static server, opens Playwright Chromium, and
+checks that the app and browser-only dependencies finish loading. It prefers
+Playwright's bundled Chromium headless shell when available, then falls back to
+installed Google Chrome or Microsoft Edge. If you want the bundled shell, install
+it with:
+
+```powershell
+npm run install:browser
+```
+
+If local security software blocks the Playwright browser cache or the bundled
+shell install stalls, use an installed browser explicitly:
+
+```powershell
+$env:AURORA_BROWSER_CHANNEL="chrome"
+npm run smoke:browser
+```
+
 Run local corpus comparisons with:
 
 ```powershell
