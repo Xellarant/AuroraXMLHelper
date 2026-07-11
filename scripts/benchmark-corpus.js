@@ -3,23 +3,22 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
-const vm = require('node:vm');
+const {
+  parsePageRange,
+  formatPageRange,
+  selectPageNumbers,
+  continuationPageNumbers
+} = require('../src/pdf-page-range');
 const { textItemsToLayout, textItemsToLines } = require('../src/pdf-text-layout');
+const {
+  ELEMENT_TYPES,
+  PARSERS,
+  loadApp: loadAppHarness,
+  runInApp
+} = require('./app-vm-harness');
 
 const repoRoot = path.resolve(__dirname, '..');
 const defaultCustomRoot = path.join(process.env.USERPROFILE || '', 'Documents', '5e Character Builder', 'custom');
-
-const ELEMENT_TYPES = ['spell', 'archetype', 'feat', 'magic', 'item', 'race', 'background', 'class'];
-const PARSERS = {
-  spell: 'parseSpellsFromText',
-  archetype: 'parseArchetypesFromText',
-  feat: 'parseFeatsFromText',
-  magic: 'parseMagicItemsFromText',
-  item: 'parseItemsFromText',
-  race: 'parseRacesFromText',
-  background: 'parseBackgroundsFromText',
-  class: 'parseClassesFromText'
-};
 
 function usage() {
   return [
@@ -39,45 +38,6 @@ function usage() {
     '',
     'PDF sources use pdfjs-dist text extraction, matching the browser app as closely as possible.'
   ].join('\n');
-}
-
-function parsePageRange(value) {
-  const text = String(value || '').trim();
-  if (!text) return [];
-  const ranges = [];
-  for (const rawPart of text.split(',')) {
-    const part = rawPart.trim();
-    const match = part.match(/^(\d+)(?:\s*-\s*(\d+))?$/);
-    if (!match) throw new Error(`Invalid page range: ${value}`);
-    const start = Number(match[1]);
-    const end = Number(match[2] || match[1]);
-    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 1 || end < start) {
-      throw new Error(`Invalid page range: ${value}`);
-    }
-    ranges.push({ start, end });
-  }
-  return ranges;
-}
-
-function formatPageRange(ranges) {
-  return ranges.map(range => range.start === range.end ? String(range.start) : `${range.start}-${range.end}`).join(',');
-}
-
-function selectPageNumbers(totalPageCount, ranges) {
-  if (!ranges.length) return Array.from({ length: totalPageCount }, (_, index) => index + 1);
-  const selected = [];
-  for (let page = 1; page <= totalPageCount; page++) {
-    if (ranges.some(range => page >= range.start && page <= range.end)) selected.push(page);
-  }
-  if (!selected.length) throw new Error(`Page range ${formatPageRange(ranges)} selected no pages from a ${totalPageCount}-page source.`);
-  return selected;
-}
-
-function continuationPageNumbers(totalPageCount, selectedPages) {
-  const selected = new Set(selectedPages || []);
-  return (selectedPages || [])
-    .map(page => page + 1)
-    .filter(page => page <= totalPageCount && !selected.has(page));
 }
 
 function parseArgs(argv) {
@@ -123,84 +83,15 @@ function parseArgs(argv) {
   return args;
 }
 
-function createStubElement(value = '') {
-  const element = {
-    value,
-    checked: false,
-    disabled: false,
-    textContent: '',
-    innerHTML: '',
-    className: '',
-    style: {},
-    dataset: {},
-    classList: {
-      add() {},
-      remove() {},
-      toggle() {}
-    },
-    addEventListener() {},
-    querySelector() { return null; },
-    querySelectorAll() { return []; },
-    closest() { return element; },
-    appendChild() {},
-    insertAdjacentHTML() {},
-    focus() {},
-    remove() {},
-    scrollIntoView() {}
-  };
-  return element;
-}
-
 function loadApp(sourceMeta) {
-  const elements = {
-    sourceName: createStubElement(sourceMeta.name || 'Benchmark Source'),
-    sourceAbbr: createStubElement(sourceMeta.abbr || 'BENCH'),
-    sourceAuthor: createStubElement(sourceMeta.author || 'Benchmark'),
-    sourceYear: createStubElement(sourceMeta.year || ''),
-    pageRange: createStubElement('')
-  };
-  const fallbackElement = createStubElement();
-  const document = {
-    getElementById(id) {
-      return elements[id] || fallbackElement;
+  return loadAppHarness(sourceMeta, {
+    defaults: {
+      name: 'Benchmark Source',
+      abbr: 'BENCH',
+      author: 'Benchmark'
     },
-    querySelector() { return null; },
-    querySelectorAll() { return []; },
-    createElement() { return createStubElement(); },
-    addEventListener() {},
-    documentElement: { dataset: {} }
-  };
-  const window = {
-    addEventListener() {},
-    AuroraPdfTextLayout: { textItemsToLayout, textItemsToLines },
-    localStorage: {
-      getItem() { return null; },
-      setItem() {}
-    }
-  };
-  const context = {
-    console,
-    document,
-    window,
-    localStorage: window.localStorage,
-    Blob: class Blob {},
-    URL: {
-      createObjectURL() { return ''; },
-      revokeObjectURL() {}
-    },
-    confirm() { return true; },
-    alert() {},
-    setTimeout,
-    clearTimeout
-  };
-  vm.createContext(context);
-  const appScript = fs.readFileSync(path.join(repoRoot, 'src', 'app.js'), 'utf8');
-  vm.runInContext(appScript, context, { filename: 'src/app.js' });
-  return { context, elements };
-}
-
-function runInApp(context, code) {
-  return vm.runInContext(code, context);
+    immediateTimers: false
+  });
 }
 
 function listXmlFiles(inputPath) {

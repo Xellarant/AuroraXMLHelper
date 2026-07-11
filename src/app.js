@@ -638,17 +638,9 @@ async function extractPdfPages(file) {
 }
 
 function selectPages(pages, rangeText) {
-  if (!rangeText) return pages;
-  const wanted = new Set();
-  for (const part of rangeText.split(',')) {
-    const m = part.trim().match(/^(\d+)(?:\s*-\s*(\d+))?$/);
-    if (!m) continue;
-    const start = parseInt(m[1], 10);
-    const end = parseInt(m[2] || m[1], 10);
-    for (let p = Math.min(start, end); p <= Math.max(start, end); p++) wanted.add(p);
-  }
-  const filtered = pages.filter(p => wanted.has(p.page));
-  return filtered.length ? filtered : pages;
+  const pageRange = globalThis.AuroraPageRange || window.AuroraPageRange;
+  if (!pageRange?.selectPageObjects) throw new Error('PDF page range support is not loaded.');
+  return pageRange.selectPageObjects(pages, rangeText, pages.length);
 }
 
 function selectContinuationPages(allPages, selectedPages) {

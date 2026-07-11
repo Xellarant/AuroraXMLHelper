@@ -199,6 +199,7 @@ async function run() {
       pdfjsLoaded: document.documentElement.dataset.pdfjsLoaded,
       auroraShapeLoaded: document.documentElement.dataset.auroraShapeLoaded,
       pdfTextLayoutLoaded: document.documentElement.dataset.pdfTextLayoutLoaded,
+      pdfPageRangeLoaded: document.documentElement.dataset.pdfPageRangeLoaded,
       auroraAppLoaded: document.documentElement.dataset.auroraAppLoaded,
       hasPdfInput: Boolean(document.querySelector('input[type=file]')),
       hasPageRange: Boolean(document.querySelector('#pageRange')),
@@ -211,6 +212,7 @@ async function run() {
       'pdfjsLoaded',
       'auroraShapeLoaded',
       'pdfTextLayoutLoaded',
+      'pdfPageRangeLoaded',
       'auroraAppLoaded'
     ];
     const missing = expectedFlags.filter(flag => result[flag] !== 'true');

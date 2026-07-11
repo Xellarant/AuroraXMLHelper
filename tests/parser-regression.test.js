@@ -1,105 +1,13 @@
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
-const vm = require('node:vm');
-
-const repoRoot = path.resolve(__dirname, '..');
-
-function createStubElement(value = '') {
-  const element = {
-    value,
-    checked: false,
-    disabled: false,
-    textContent: '',
-    innerHTML: '',
-    className: '',
-    style: {},
-    dataset: {},
-    classList: {
-      add() {},
-      remove() {},
-      toggle() {}
-    },
-    addEventListener() {},
-    querySelector() { return null; },
-    querySelectorAll() { return []; },
-    closest() { return element; },
-    appendChild() {},
-    insertAdjacentHTML() {},
-    focus() {},
-    remove() {},
-    scrollIntoView() {}
-  };
-  return element;
-}
+const { loadApp: loadAppHarness, runInApp } = require('../scripts/app-vm-harness');
 
 function loadApp() {
-  const storage = {};
-  const elements = {
-    sourceName: createStubElement('Validator Sample Source'),
-    sourceAbbr: createStubElement('VSS'),
-    sourceAuthor: createStubElement('Codex Test'),
-    sourceYear: createStubElement(''),
-    pageRange: createStubElement('')
-  };
-
-  const fallbackElement = createStubElement();
-  const document = {
-    getElementById(id) {
-      return elements[id] || fallbackElement;
-    },
-    querySelector() {
-      return null;
-    },
-    querySelectorAll() {
-      return [];
-    },
-    createElement() {
-      return createStubElement();
-    },
-    addEventListener() {}
-  };
-
-  const window = {
-    addEventListener() {},
-    localStorage: {
-      getItem(key) { return Object.prototype.hasOwnProperty.call(storage, key) ? storage[key] : null; },
-      setItem(key, value) { storage[key] = String(value); },
-      removeItem(key) { delete storage[key]; },
-      clear() { Object.keys(storage).forEach(key => delete storage[key]); }
-    }
-  };
-
-  const context = {
-    console,
-    document,
-    window,
-    localStorage: window.localStorage,
-    Blob: class Blob {},
-    URL: {
-      createObjectURL() { return ''; },
-      revokeObjectURL() {}
-    },
-    confirm() { return true; },
-    setTimeout(callback) {
-      if (typeof callback === 'function') callback();
-      return 0;
-    },
-    clearTimeout() {}
-  };
-
-  vm.createContext(context);
-  const shapeScript = fs.readFileSync(path.join(repoRoot, 'src', 'aurora-xml-shape.js'), 'utf8');
-  vm.runInContext(shapeScript, context, { filename: 'src/aurora-xml-shape.js' });
-  const layoutScript = fs.readFileSync(path.join(repoRoot, 'src', 'pdf-text-layout.js'), 'utf8');
-  vm.runInContext(layoutScript, context, { filename: 'src/pdf-text-layout.js' });
-  const appScript = fs.readFileSync(path.join(repoRoot, 'src', 'app.js'), 'utf8');
-  vm.runInContext(appScript, context, { filename: 'src/app.js' });
-  return context;
-}
-
-function runInApp(context, code) {
-  return vm.runInContext(code, context);
+  return loadAppHarness({
+    name: 'Validator Sample Source',
+    abbr: 'VSS',
+    author: 'Codex Test',
+    year: ''
+  }).context;
 }
 
 function setExtractedData(context, data) {
@@ -281,6 +189,26 @@ test('source title detection normalizes curly and mojibake apostrophes', () => {
   `);
   assert.equal(runInApp(context, `document.getElementById('sourceName').value`), "Tasha's Arcane Appendix");
   assert.equal(runInApp(context, `document.getElementById('sourceAbbr').value`), 'TAA');
+});
+
+test('browser page range selection uses strict shared parsing', () => {
+  const context = loadApp();
+  const selected = JSON.parse(runInApp(context, `
+    JSON.stringify(selectPages([
+      { page: 1, text: 'first' },
+      { page: 2, text: 'second' },
+      { page: 3, text: 'third' }
+    ], '1,3').map(page => page.page))
+  `));
+  assert.deepEqual(selected, [1, 3]);
+  assert.throws(
+    () => runInApp(context, `selectPages([{ page: 1, text: 'first' }], '2-')`),
+    /Invalid page range: 2-/
+  );
+  assert.throws(
+    () => runInApp(context, `selectPages([{ page: 1, text: 'first' }], '2')`),
+    /selected no pages/
+  );
 });
 
 test('DDB-style feat blocks parse prerequisite and grouped benefits', () => {

@@ -14,7 +14,7 @@ The fix preserves positioned rows alongside flattened prose and uses that struct
 
 The follow-up cleanup keeps Draconic Transformation's page-break benefit prose, removes spell-list class-column bleed from that description, and removes page chrome/sidebar OCR from Fizban's Platinum Shield while preserving Nathair's Mischief's actual `d4 Effect` table. The Fizban spell source gate now reports zero errors, warnings, or review findings for the seven-spell scope.
 
-The local corpus runner now executes `sourceValidation` for entries that declare it, and strict source fixtures can opt into warning/review limits with `sourceValidation.maxWarnings` and `sourceValidation.maxReview`. Duplicate element IDs inside one XML file, generated XML comment escaping, and duplicate extracted source-entity findings are also covered by current code and tests.
+The local corpus runner now executes `sourceValidation` for entries that declare it, and strict source fixtures can opt into warning/review limits with `sourceValidation.maxWarnings` and `sourceValidation.maxReview`. Duplicate element IDs inside one XML file, generated XML comment escaping, duplicate extracted source-entity findings, and source-title curly/mojibake apostrophe normalization are also covered by current code and tests. Browser and CLI page-range handling now share the same strict parser, so malformed ranges fail instead of silently scanning the whole source.
 
 ## Validation Run
 
@@ -60,7 +60,7 @@ Recommendation: either remove the legacy AI path or quarantine it behind an expl
 
 Some corrupted quote/dash sequences remain in strings and regexes. Most are harmless legacy prompts, but source-title detection still includes corrupted punctuation in its character class.
 
-Recommendation: normalize remaining mojibake in parser-adjacent code and add focused tests for source titles with real curly punctuation.
+Status: current source-title detection normalizes real curly and common mojibake apostrophes before title matching, with focused regression coverage. Harmless legacy prompt text can be cleaned separately if the legacy AI path is removed.
 
 ### Corpus coverage is strong for EFA but weak for other sources
 

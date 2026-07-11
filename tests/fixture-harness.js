@@ -1,107 +1,12 @@
 const fs = require('node:fs');
 const path = require('node:path');
-const vm = require('node:vm');
-
-const repoRoot = path.resolve(__dirname, '..');
-
-const ELEMENT_TYPES = ['spell', 'archetype', 'feat', 'magic', 'item', 'race', 'background', 'class'];
-const PARSERS = {
-  spell: 'parseSpellsFromText',
-  archetype: 'parseArchetypesFromText',
-  feat: 'parseFeatsFromText',
-  magic: 'parseMagicItemsFromText',
-  item: 'parseItemsFromText',
-  race: 'parseRacesFromText',
-  background: 'parseBackgroundsFromText',
-  class: 'parseClassesFromText'
-};
-
-function createStubElement(value = '') {
-  const element = {
-    value,
-    checked: false,
-    disabled: false,
-    textContent: '',
-    innerHTML: '',
-    className: '',
-    style: {},
-    dataset: {},
-    classList: {
-      add() {},
-      remove() {},
-      toggle() {},
-      contains() { return true; }
-    },
-    addEventListener() {},
-    querySelector() { return null; },
-    querySelectorAll() { return []; },
-    closest() { return element; },
-    appendChild() {},
-    insertAdjacentHTML() {},
-    focus() {},
-    remove() {},
-    scrollIntoView() {}
-  };
-  return element;
-}
-
-function loadApp(sourceMeta = {}) {
-  const elements = {
-    sourceName: createStubElement(sourceMeta.name || 'Fixture Source'),
-    sourceAbbr: createStubElement(sourceMeta.abbr || 'FIX'),
-    sourceAuthor: createStubElement(sourceMeta.author || 'Fixture Author'),
-    sourceYear: createStubElement(sourceMeta.year || ''),
-    pageRange: createStubElement('')
-  };
-  const fallbackElement = createStubElement();
-  const document = {
-    getElementById(id) {
-      return elements[id] || fallbackElement;
-    },
-    querySelector() { return null; },
-    querySelectorAll() { return []; },
-    createElement() { return createStubElement(); },
-    addEventListener() {},
-    documentElement: { dataset: {} }
-  };
-  const window = {
-    addEventListener() {},
-    localStorage: {
-      getItem() { return null; },
-      setItem() {}
-    }
-  };
-  const context = {
-    console,
-    document,
-    window,
-    localStorage: window.localStorage,
-    Blob: class Blob {},
-    URL: {
-      createObjectURL() { return ''; },
-      revokeObjectURL() {}
-    },
-    confirm() { return true; },
-    alert() {},
-    setTimeout(callback) {
-      if (typeof callback === 'function') callback();
-      return 0;
-    },
-    clearTimeout() {}
-  };
-  vm.createContext(context);
-  const shapeScript = fs.readFileSync(path.join(repoRoot, 'src', 'aurora-xml-shape.js'), 'utf8');
-  vm.runInContext(shapeScript, context, { filename: 'src/aurora-xml-shape.js' });
-  const layoutScript = fs.readFileSync(path.join(repoRoot, 'src', 'pdf-text-layout.js'), 'utf8');
-  vm.runInContext(layoutScript, context, { filename: 'src/pdf-text-layout.js' });
-  const appScript = fs.readFileSync(path.join(repoRoot, 'src', 'app.js'), 'utf8');
-  vm.runInContext(appScript, context, { filename: 'src/app.js' });
-  return { context, elements };
-}
-
-function runInApp(context, code) {
-  return vm.runInContext(code, context);
-}
+const {
+  ELEMENT_TYPES,
+  PARSERS,
+  repoRoot,
+  loadApp,
+  runInApp
+} = require('../scripts/app-vm-harness');
 
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, 'utf8'));
