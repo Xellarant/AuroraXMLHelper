@@ -172,6 +172,21 @@ This writes `normalized-source.json`, `source-coverage-report.md`, and
 model before XML shape comparison, so parser/OCR omissions can be separated
 from Aurora XML generation issues.
 
+Build an observed Aurora XML pattern/repair report with:
+
+```powershell
+npm run patterns:xml -- --xml path\to\aurora\xml-or-folder
+```
+
+The pattern report summarizes the shapes found in existing Aurora XML: element
+types, setter names, support tokens, rule kinds, grant types, select types, and
+related counts. It also flags initial repair-oriented diagnostics such as
+duplicate element IDs, missing element attributes, malformed grant/select/stat
+rules, damage resistance encoded as `Condition Immunity`, numeric spell-level
+support tokens, class elements without hit dice, and ID-shaped placeholders in
+comments. This report is intended to become the shared evidence layer for
+custom authoring and broken-XML repair assistance.
+
 ---
 
 ## Installation into Aurora Builder

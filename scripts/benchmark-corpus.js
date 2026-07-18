@@ -16,6 +16,10 @@ const {
   loadApp: loadAppHarness,
   runInApp
 } = require('./app-vm-harness');
+const {
+  parseAuroraElements: parseElements,
+  normalizeSpace
+} = require('../src/aurora-xml-patterns');
 
 const repoRoot = path.resolve(__dirname, '..');
 const defaultCustomRoot = path.join(process.env.USERPROFILE || '', 'Documents', '5e Character Builder', 'custom');
@@ -106,80 +110,6 @@ function listXmlFiles(inputPath) {
     else if (entry.isFile() && entry.name.toLowerCase().endsWith('.xml')) files.push(full);
   }
   return files;
-}
-
-function attrMap(tag) {
-  const attrs = {};
-  for (const match of tag.matchAll(/([A-Za-z_:][-A-Za-z0-9_:.]*)\s*=\s*"([^"]*)"/g)) {
-    attrs[match[1]] = decodeXml(match[2]);
-  }
-  return attrs;
-}
-
-function decodeXml(value) {
-  return String(value || '')
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'")
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&amp;/g, '&');
-}
-
-function stripTags(value) {
-  return decodeXml(String(value || '').replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
-}
-
-function normalizeSpace(value) {
-  return String(value || '').replace(/\s+/g, ' ').trim();
-}
-
-function normalizeName(value) {
-  return normalizeSpace(decodeXml(value)).toLowerCase();
-}
-
-function parseElements(xml, fileName = '') {
-  const elements = [];
-  const elementRegex = /<element\b([^>]*)>([\s\S]*?)<\/element>/gi;
-  let match;
-  while ((match = elementRegex.exec(xml))) {
-    const attrs = attrMap(match[1]);
-    const body = match[2];
-    const supports = stripTags((body.match(/<supports\b[^>]*>([\s\S]*?)<\/supports>/i) || [])[1] || '');
-    const description = stripTags((body.match(/<description\b[^>]*>([\s\S]*?)<\/description>/i) || [])[1] || '');
-    const setters = {};
-    const setterAttrs = {};
-    const settersBody = (body.match(/<setters\b[^>]*>([\s\S]*?)<\/setters>/i) || [])[1] || '';
-    for (const setter of settersBody.matchAll(/<set\b([^>]*?)(?:\/>|>([\s\S]*?)<\/set>)/gi)) {
-      const setAttrs = attrMap(setter[1]);
-      if (!setAttrs.name) continue;
-      setters[setAttrs.name] = stripTags(setter[2] || '');
-      setterAttrs[setAttrs.name] = setAttrs;
-    }
-    const rulesBody = (body.match(/<rules\b[^>]*>([\s\S]*?)<\/rules>/i) || [])[1] || '';
-    const rules = [];
-    for (const rule of rulesBody.matchAll(/<(grant|select|stat|append)\b([^>]*?)(?:\/>|>([\s\S]*?)<\/\1>)/gi)) {
-      const kind = rule[1];
-      const ruleAttrs = attrMap(rule[2]);
-      const signature = [kind]
-        .concat(Object.keys(ruleAttrs).sort().map(key => `${key}=${ruleAttrs[key]}`))
-        .join('|');
-      rules.push(signature);
-    }
-    elements.push({
-      fileName,
-      name: attrs.name || '',
-      type: attrs.type || '',
-      source: attrs.source || '',
-      id: attrs.id || '',
-      supports,
-      description,
-      setters,
-      setterAttrs,
-      rules: rules.sort(),
-      key: `${normalizeName(attrs.type)}::${normalizeName(attrs.name)}`
-    });
-  }
-  return elements;
 }
 
 function compareValues(generated, canonical) {
