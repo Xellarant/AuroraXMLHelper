@@ -180,12 +180,16 @@ npm run patterns:xml -- --xml path\to\aurora\xml-or-folder
 
 The pattern report summarizes the shapes found in existing Aurora XML: element
 types, setter names, support tokens, rule kinds, grant types, select types, and
-related counts. It also flags initial repair-oriented diagnostics such as
-duplicate element IDs, missing element attributes, malformed grant/select/stat
-rules, damage resistance encoded as `Condition Immunity`, numeric spell-level
-support tokens, class elements without hit dice, and ID-shaped placeholders in
-comments. This report is intended to become the shared evidence layer for
-custom authoring and broken-XML repair assistance.
+related counts. It also derives authoring profiles for each observed element
+type, including required/common setters, support/category hints, rule-shape
+hints, and example elements. Finally, it flags initial repair-oriented
+diagnostics such as duplicate element IDs, missing element attributes, malformed
+grant/select/stat rules, damage resistance encoded as `Condition Immunity`,
+numeric spell-level support tokens, class elements without hit dice, and
+ID-shaped placeholders in comments. Diagnostics include machine-readable repair
+records where the fix shape is known, but the tool does not rewrite XML yet.
+This report is intended to become the shared evidence layer for custom authoring
+and broken-XML repair assistance.
 
 ---
 

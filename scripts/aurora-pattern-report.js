@@ -17,7 +17,7 @@ function usage() {
     '  --out <file>    Write the report to a file.',
     '  --json          Print JSON instead of Markdown.',
     '',
-    'The report summarizes observed Aurora element shapes and flags common XML repair issues.'
+    'The report summarizes observed Aurora element shapes, authoring hints, and common XML repair issues.'
   ].join('\n');
 }
 
@@ -81,6 +81,7 @@ function main() {
       ? JSON.stringify({
         files: docs.map(doc => doc.fileName),
         catalog: analysis.catalog,
+        authoringProfiles: analysis.authoringProfiles,
         diagnostics: analysis.diagnostics
       }, null, 2)
       : renderPatternReport(analysis, { top: args.top });
