@@ -114,6 +114,32 @@ test('Aurora XML diagnostics flag initial repair issues', () => {
   assert.ok(finding('select-missing-required-attribute').repairs.some(repair => repair.attribute === 'supports'));
 });
 
+test('Aurora XML diagnostics require an actual elements root before suppressing root repair', () => {
+  const fragmentXml = `<?xml version="1.0" encoding="utf-8"?>
+<!-- TODO: wrap this fragment in <elements>. -->
+<element name="Loose Spell" type="Spell" source="Pattern Fixture" id="ID_FIXTURE_SPELL_LOOSE" />`;
+  const analysis = analyzeAuroraXmlDocuments([{ fileName: 'fragment.xml', xml: fragmentXml }]);
+  const rootFinding = analysis.diagnostics.find(finding => finding.category === 'root-shape');
+
+  assert.equal(rootFinding.severity, 'error');
+  assert.equal(rootFinding.repairs[0].kind, 'wrap-document-root');
+  assert.equal(rootFinding.repairs[0].target.fileName, 'fragment.xml');
+});
+
+test('Aurora XML diagnostics include repair targets for missing element attributes', () => {
+  const brokenXml = `<elements>
+  <element source="Pattern Fixture" />
+</elements>`;
+  const analysis = analyzeAuroraXmlDocuments([{ fileName: 'missing-attributes.xml', xml: brokenXml }]);
+  const findings = analysis.diagnostics.filter(finding => finding.category === 'missing-element-attribute');
+  const byAttribute = Object.fromEntries(findings.map(finding => [finding.repairs[0].attribute, finding]));
+
+  assert.deepEqual(Object.keys(byAttribute).sort(), ['id', 'name', 'type']);
+  assert.equal(byAttribute.id.repairs[0].kind, 'set-element-attribute');
+  assert.equal(byAttribute.id.repairs[0].valuePlaceholder, 'ID_SOURCE_TYPE_NAME');
+  assert.equal(byAttribute.name.repairs[0].target.fileName, 'missing-attributes.xml');
+});
+
 test('Aurora XML pattern report renders summary and diagnostics', () => {
   const analysis = analyzeAuroraXmlDocuments([{ fileName: 'fixture.xml', xml: sampleXml }]);
   const report = renderPatternReport(analysis);

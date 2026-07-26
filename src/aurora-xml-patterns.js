@@ -368,6 +368,23 @@
     };
   }
 
+  function xmlWithoutLeadingPreamble(xml) {
+    let remaining = String(xml || '').replace(/^\uFEFF/, '');
+    let previous = '';
+    while (remaining !== previous) {
+      previous = remaining;
+      remaining = remaining
+        .replace(/^\s*<\?xml\b[\s\S]*?\?>/i, '')
+        .replace(/^\s*<!--[\s\S]*?-->/, '')
+        .replace(/^\s*<!DOCTYPE\b[\s\S]*?>/i, '');
+    }
+    return remaining.trimStart();
+  }
+
+  function hasElementsRoot(xml) {
+    return /^<elements\b/i.test(xmlWithoutLeadingPreamble(xml));
+  }
+
   function elementTarget(element, extra = {}) {
     return {
       fileName: element?.fileName || '',
@@ -397,7 +414,7 @@
     const idLocations = new Map();
 
     for (const doc of docs || []) {
-      if (!/<elements\b/i.test(doc.xml || '')) {
+      if (!hasElementsRoot(doc.xml)) {
         findings.push(diagnostic(
           { fileName: doc.fileName },
           'error',
