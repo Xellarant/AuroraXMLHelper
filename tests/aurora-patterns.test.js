@@ -126,6 +126,20 @@ test('Aurora XML diagnostics require an actual elements root before suppressing 
   assert.equal(rootFinding.repairs[0].target.fileName, 'fragment.xml');
 });
 
+test('Aurora XML diagnostics accept elements roots after internal doctype subsets', () => {
+  const doctypeXml = `<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE elements [
+  <!ELEMENT elements (info?, element*)>
+  <!ELEMENT element ANY>
+]>
+<elements>
+  <element name="Doctype Spell" type="Spell" source="Pattern Fixture" id="ID_FIXTURE_SPELL_DOCTYPE" />
+</elements>`;
+  const analysis = analyzeAuroraXmlDocuments([{ fileName: 'doctype.xml', xml: doctypeXml }]);
+
+  assert.equal(analysis.diagnostics.some(finding => finding.category === 'root-shape'), false);
+});
+
 test('Aurora XML diagnostics include repair targets for missing element attributes', () => {
   const brokenXml = `<elements>
   <element source="Pattern Fixture" />

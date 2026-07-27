@@ -368,15 +368,44 @@
     };
   }
 
+  function withoutLeadingDoctype(xml) {
+    const value = String(xml || '');
+    const match = value.match(/^\s*<!DOCTYPE\b/i);
+    if (!match) return value;
+
+    let quote = '';
+    let subsetDepth = 0;
+    for (let index = match[0].length; index < value.length; index += 1) {
+      const char = value[index];
+      if (quote) {
+        if (char === quote) quote = '';
+        continue;
+      }
+      if (char === '"' || char === "'") {
+        quote = char;
+        continue;
+      }
+      if (char === '[') {
+        subsetDepth += 1;
+        continue;
+      }
+      if (char === ']' && subsetDepth > 0) {
+        subsetDepth -= 1;
+        continue;
+      }
+      if (char === '>' && subsetDepth === 0) return value.slice(index + 1);
+    }
+    return value;
+  }
+
   function xmlWithoutLeadingPreamble(xml) {
     let remaining = String(xml || '').replace(/^\uFEFF/, '');
     let previous = '';
     while (remaining !== previous) {
       previous = remaining;
-      remaining = remaining
+      remaining = withoutLeadingDoctype(remaining
         .replace(/^\s*<\?xml\b[\s\S]*?\?>/i, '')
-        .replace(/^\s*<!--[\s\S]*?-->/, '')
-        .replace(/^\s*<!DOCTYPE\b[\s\S]*?>/i, '');
+        .replace(/^\s*<!--[\s\S]*?-->/, ''));
     }
     return remaining.trimStart();
   }
