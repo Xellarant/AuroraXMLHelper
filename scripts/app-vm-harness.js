@@ -59,7 +59,11 @@ function loadApp(sourceMeta = {}, options = {}) {
     sourceAbbr: createStubElement(sourceMeta.abbr || defaults.abbr),
     sourceAuthor: createStubElement(sourceMeta.author || defaults.author),
     sourceYear: createStubElement(sourceMeta.year || defaults.year),
-    pageRange: createStubElement('')
+    pageRange: createStubElement(''),
+    repairXmlInput: createStubElement(''),
+    repairXmlFile: createStubElement(''),
+    repairPreviewStatus: createStubElement(''),
+    repairPreviewResults: createStubElement('')
   };
   const fallbackElement = createStubElement();
   const document = {
@@ -105,6 +109,7 @@ function loadApp(sourceMeta = {}, options = {}) {
   vm.createContext(context);
   for (const scriptPath of [
     path.join(repoRoot, 'src', 'aurora-xml-shape.js'),
+    path.join(repoRoot, 'src', 'aurora-xml-patterns.js'),
     path.join(repoRoot, 'src', 'pdf-text-layout.js'),
     path.join(repoRoot, 'src', 'pdf-page-range.js'),
     path.join(repoRoot, 'src', 'app.js')

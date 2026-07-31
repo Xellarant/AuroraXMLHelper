@@ -46,14 +46,110 @@
       .join('|');
   }
 
+  function lineForIndex(value, index) {
+    if (!Number.isFinite(index) || index < 0) return 0;
+    return String(value || '').slice(0, index).split(/\r\n|\r|\n/).length;
+  }
+
+  function trimSnippet(value, maxLength = 1200) {
+    const text = String(value || '').trim();
+    if (text.length <= maxLength) return text;
+    return `${text.slice(0, maxLength).trimEnd()}\n...`;
+  }
+
+  function encodeAttributeValue(value) {
+    return String(value || '')
+      .replace(/&/g, '&amp;')
+      .replace(/"/g, '&quot;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  }
+
+  function escapeRegExp(value) {
+    return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  function xmlWithAttribute(rawXml, attr, value) {
+    const xml = trimSnippet(rawXml);
+    if (!xml || !attr) return '';
+    const escaped = encodeAttributeValue(value);
+    const attrPattern = new RegExp(`\\b${escapeRegExp(attr)}\\s*=\\s*"[^"]*"`);
+    if (attrPattern.test(xml)) return xml.replace(attrPattern, `${attr}="${escaped}"`);
+    return xml.replace(/\s*(\/?>)\s*$/, ` ${attr}="${escaped}"$1`);
+  }
+
+  function xmlWithAttributes(rawXml, attrs) {
+    return Object.entries(attrs || {}).reduce(
+      (xml, [attr, value]) => xmlWithAttribute(xml, attr, value),
+      trimSnippet(rawXml)
+    );
+  }
+
+  function inferSelectSupports(rule) {
+    const type = normalizeSpace(rule?.attrs?.type || '');
+    if (/^feat$/i.test(type)) {
+      return {
+        value: 'feat',
+        reason: 'select type="Feat"'
+      };
+    }
+    return null;
+  }
+
+  function selectAttributePlaceholder(attr, rule) {
+    if (attr === 'supports') return inferSelectSupports(rule)?.value || 'SUPPORT TOKEN';
+    return attr.toUpperCase();
+  }
+
+  function buildSelectSupportsCandidates(elements) {
+    const byType = new Map();
+    for (const element of elements || []) {
+      for (const rule of element.ruleRecords || []) {
+        if (rule.kind !== 'select') continue;
+        const typeKey = normalizeName(rule.attrs.type || '');
+        const supports = normalizeSpace(rule.attrs.supports || '');
+        if (!typeKey || !supports) continue;
+        if (!byType.has(typeKey)) byType.set(typeKey, new Map());
+        const counts = byType.get(typeKey);
+        counts.set(supports, (counts.get(supports) || 0) + 1);
+      }
+    }
+    const candidates = new Map();
+    for (const [typeKey, counts] of byType.entries()) {
+      candidates.set(typeKey, Array.from(counts.entries())
+        .map(([value, count]) => ({ value, count }))
+        .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value))
+        .slice(0, 3));
+    }
+    return candidates;
+  }
+
+  function candidateSelectSupports(rule, selectSupportsCandidates) {
+    const type = normalizeSpace(rule?.attrs?.type || '');
+    const typeKey = normalizeName(type);
+    if (!typeKey) return [];
+    return (selectSupportsCandidates.get(typeKey) || []).map(candidate => ({
+      ...candidate,
+      reason: `observed on select type="${type}"`
+    }));
+  }
+
   function parseAuroraElements(xml, fileName = '') {
     const elements = [];
     const elementRegex = /<element\b([^>]*?)(\/>|>([\s\S]*?)<\/element>)/gi;
     let match;
     while ((match = elementRegex.exec(xml))) {
       const attrs = attrMap(match[1]);
+      const rawXml = match[0];
+      const openingTag = (rawXml.match(/^<element\b[^>]*>/i) || [])[0] || '';
+      const bodyOffset = rawXml.indexOf(match[3] || '');
+      const bodyStart = bodyOffset >= 0 ? match.index + bodyOffset : match.index;
+      const line = lineForIndex(xml, match.index);
       const body = match[3] || '';
-      const supports = stripTags((body.match(/<supports\b[^>]*>([\s\S]*?)<\/supports>/i) || [])[1] || '');
+      const supportsMatch = body.match(/<supports\b[^>]*>([\s\S]*?)<\/supports>/i);
+      const supports = stripTags((supportsMatch || [])[1] || '');
+      const supportsRawXml = supportsMatch?.[0] || '';
+      const supportsLine = supportsMatch ? lineForIndex(xml, bodyStart + supportsMatch.index) : 0;
       const description = stripTags((body.match(/<description\b[^>]*>([\s\S]*?)<\/description>/i) || [])[1] || '');
       const setters = {};
       const setterAttrs = {};
@@ -65,27 +161,39 @@
         setterAttrs[setAttrs.name] = setAttrs;
       }
 
-      const rulesBody = (body.match(/<rules\b[^>]*>([\s\S]*?)<\/rules>/i) || [])[1] || '';
+      const rulesMatch = body.match(/<rules\b[^>]*>([\s\S]*?)<\/rules>/i);
+      const rulesBody = (rulesMatch || [])[1] || '';
+      const rulesBodyOffset = rulesMatch ? rulesMatch.index + rulesMatch[0].indexOf(rulesBody) : -1;
       const ruleRecords = [];
       for (const rule of rulesBody.matchAll(/<(grant|select|stat|append)\b([^>]*?)(?:\/>|>([\s\S]*?)<\/\1>)/gi)) {
         const kind = rule[1].toLowerCase();
         const ruleAttrs = attrMap(rule[2]);
+        const ruleLine = rulesBodyOffset >= 0
+          ? lineForIndex(xml, bodyStart + rulesBodyOffset + rule.index)
+          : line;
         ruleRecords.push({
           kind,
           attrs: ruleAttrs,
           text: stripTags(rule[3] || ''),
-          signature: ruleSignature(kind, ruleAttrs)
+          signature: ruleSignature(kind, ruleAttrs),
+          rawXml: trimSnippet(rule[0]),
+          line: ruleLine
         });
       }
 
       elements.push({
         fileName,
+        line,
         name: attrs.name || '',
         type: attrs.type || '',
         source: attrs.source || '',
         id: attrs.id || '',
         attrs,
+        openingTag: trimSnippet(openingTag),
+        rawXml: trimSnippet(rawXml),
         supports,
+        supportsRawXml: trimSnippet(supportsRawXml),
+        supportsLine,
         supportTokens: splitSupportTokens(supports),
         description,
         setters,
@@ -385,6 +493,18 @@
         quote = char;
         continue;
       }
+      if (subsetDepth > 0 && value.startsWith('<!--', index)) {
+        const commentEnd = value.indexOf('-->', index + 4);
+        if (commentEnd === -1) return value;
+        index = commentEnd + 2;
+        continue;
+      }
+      if (subsetDepth > 0 && value.startsWith('<?', index)) {
+        const instructionEnd = value.indexOf('?>', index + 2);
+        if (instructionEnd === -1) return value;
+        index = instructionEnd + 1;
+        continue;
+      }
       if (char === '[') {
         subsetDepth += 1;
         continue;
@@ -415,16 +535,46 @@
   }
 
   function elementTarget(element, extra = {}) {
-    return {
+    const target = {
       fileName: element?.fileName || '',
       elementId: element?.id || '',
       elementName: element?.name || '',
       elementType: element?.type || '',
-      ...extra
     };
+    if (element?.line) target.line = element.line;
+    if (element?.openingTag) target.nodeXml = element.openingTag;
+    return { ...target, ...extra };
   }
 
-  function diagnostic(element, severity, category, message, suggestion = '', repairs = []) {
+  function nodeFromElement(element, fallbackKind = 'element') {
+    const node = {
+      kind: element?.nodeKind || fallbackKind
+    };
+    if (element?.line) node.line = element.line;
+    const xml = element?.nodeXml || element?.openingTag || '';
+    if (xml) node.xml = trimSnippet(xml);
+    return node;
+  }
+
+  function nodeFromRule(rule) {
+    const node = {
+      kind: rule?.kind || 'rule'
+    };
+    if (rule?.line) node.line = rule.line;
+    if (rule?.rawXml) node.xml = trimSnippet(rule.rawXml);
+    return node;
+  }
+
+  function nodeFromSupports(element) {
+    const node = {
+      kind: 'supports'
+    };
+    if (element?.supportsLine) node.line = element.supportsLine;
+    if (element?.supportsRawXml) node.xml = trimSnippet(element.supportsRawXml);
+    return node;
+  }
+
+  function diagnostic(element, severity, category, message, suggestion = '', repairs = [], details = {}) {
     return {
       severity,
       category,
@@ -434,6 +584,7 @@
       elementType: element?.type || '',
       message,
       suggestion,
+      node: details.node || nodeFromElement(element),
       repairs
     };
   }
@@ -441,11 +592,13 @@
   function diagnoseAuroraElements(elements, docs = []) {
     const findings = [];
     const idLocations = new Map();
+    const selectSupportsCandidates = buildSelectSupportsCandidates(elements);
 
     for (const doc of docs || []) {
       if (!hasElementsRoot(doc.xml)) {
+        const preview = trimSnippet(String(doc.xml || '').replace(/^\s+/, '').slice(0, 240));
         findings.push(diagnostic(
-          { fileName: doc.fileName },
+          { fileName: doc.fileName, nodeKind: 'document', nodeXml: preview, line: 1 },
           'error',
           'root-shape',
           'XML document does not appear to have an <elements> root.',
@@ -453,14 +606,20 @@
           [repair('wrap-document-root', 'Create an <elements> root with an <info> block, then move element nodes inside it.', {
             confidence: 'manual',
             target: { fileName: doc.fileName },
-            wrapper: '<elements>\\n  <info>...</info>\\n  ...\\n</elements>'
+            wrapper: '<elements>\\n  <info>...</info>\\n  ...\\n</elements>',
+            sample: '<elements>\n  <info>...</info>\n  ...\n</elements>'
           })]
         ));
       }
       for (const comment of String(doc.xml || '').matchAll(/<!--([\s\S]*?)-->/g)) {
         if (/\bID_[A-Z0-9_]+\b/.test(comment[1])) {
           findings.push(diagnostic(
-            { fileName: doc.fileName },
+            {
+              fileName: doc.fileName,
+              nodeKind: 'comment',
+              nodeXml: trimSnippet(comment[0]),
+              line: lineForIndex(doc.xml, comment.index)
+            },
             'review',
             'id-like-comment',
             'XML comment contains ID-shaped text that can confuse raw ID-reference checks.',
@@ -468,7 +627,8 @@
             [repair('edit-comment-text', 'Remove ID-shaped placeholder text from the XML comment.', {
               confidence: 'manual',
               target: { fileName: doc.fileName },
-              removedPattern: '\\bID_[A-Z0-9_]+\\b'
+              removedPattern: '\\bID_[A-Z0-9_]+\\b',
+              sample: '<!-- Comment text without placeholder ID values. -->'
             })]
           ));
         }
@@ -488,7 +648,8 @@
               confidence: 'manual',
               target: elementTarget(element),
               attribute: attr,
-              valuePlaceholder: attr === 'id' ? 'ID_SOURCE_TYPE_NAME' : attr.toUpperCase()
+              valuePlaceholder: attr === 'id' ? 'ID_SOURCE_TYPE_NAME' : attr.toUpperCase(),
+              sample: xmlWithAttribute(element.openingTag || '<element />', attr, attr === 'id' ? 'ID_SOURCE_TYPE_NAME' : attr.toUpperCase())
             })]
           ));
         }
@@ -510,7 +671,8 @@
             target: elementTarget(element),
             setterName: 'hd',
             valuePlaceholder: 'd8',
-            snippet: '<set name="hd">d8</set>'
+            snippet: '<set name="hd">d8</set>',
+            sample: '<setters>\n  <set name="hd">d8</set>\n</setters>'
           })]
         ));
       }
@@ -530,8 +692,10 @@
               target: elementTarget(element),
               currentValue: element.supports,
               replacementValue: cleanedTokens.join(', '),
-              removedTokens: numericTokens
-            })]
+              removedTokens: numericTokens,
+              sample: `<supports>${cleanedTokens.length ? cleanedTokens.join(', ') : 'CLASS_OR_TAG'}</supports>`
+            })],
+            { node: nodeFromSupports(element) }
           ));
         }
       }
@@ -550,8 +714,10 @@
                 confidence: 'manual',
                 target: elementTarget(element, { ruleKind: rule.kind, ruleSignature: rule.signature }),
                 attribute: attr,
-                valuePlaceholder: attr === 'id' ? 'ID_TARGET_ELEMENT' : 'TARGET TYPE'
-              }))
+                valuePlaceholder: attr === 'id' ? 'ID_TARGET_ELEMENT' : 'TARGET TYPE',
+                sample: xmlWithAttribute(rule.rawXml || '<grant />', attr, attr === 'id' ? 'ID_TARGET_ELEMENT' : 'TARGET TYPE')
+              })),
+              { node: nodeFromRule(rule) }
             ));
           }
           if (rule.attrs.type === 'Condition Immunity' && /^ID_INTERNAL_CONDITION_DAMAGE_RESISTANCE_/i.test(rule.attrs.id || '')) {
@@ -566,13 +732,21 @@
                 target: elementTarget(element, { ruleKind: rule.kind, ruleSignature: rule.signature }),
                 attribute: 'type',
                 currentValue: 'Condition Immunity',
-                replacementValue: 'Condition'
-              })]
+                replacementValue: 'Condition',
+                sample: xmlWithAttribute(rule.rawXml || '<grant />', 'type', 'Condition')
+              })],
+              { node: nodeFromRule(rule) }
             ));
           }
         } else if (rule.kind === 'select') {
           const missing = ['type', 'name', 'supports'].filter(attr => !rule.attrs[attr]);
           if (missing.length) {
+            const inferredSupports = inferSelectSupports(rule);
+            const supportsCandidates = inferredSupports ? [] : candidateSelectSupports(rule, selectSupportsCandidates);
+            const sampleAttrs = Object.fromEntries(missing.map(attr => [
+              attr,
+              selectAttributePlaceholder(attr, rule)
+            ]));
             findings.push(diagnostic(
               element,
               'warning',
@@ -580,16 +754,31 @@
               `Select rule is missing ${missing.join(', ')} attribute(s).`,
               'Select rules should usually include type, name, and supports.',
               missing.map(attr => repair('set-rule-attribute', `Set select ${attr} attribute.`, {
-                confidence: 'manual',
+                confidence: attr === 'supports' && inferredSupports ? 'high' : 'manual',
                 target: elementTarget(element, { ruleKind: rule.kind, ruleSignature: rule.signature }),
                 attribute: attr,
-                valuePlaceholder: attr === 'supports' ? 'SUPPORT TOKEN' : attr.toUpperCase()
-              }))
+                ...(attr === 'supports' && inferredSupports
+                  ? {
+                    replacementValue: inferredSupports.value,
+                    inferenceReason: inferredSupports.reason
+                  }
+                  : {
+                    valuePlaceholder: selectAttributePlaceholder(attr, rule),
+                    ...(attr === 'supports' && supportsCandidates.length ? { candidateValues: supportsCandidates } : {})
+                  }),
+                sample: xmlWithAttribute(rule.rawXml || '<select />', attr, selectAttributePlaceholder(attr, rule)),
+                completeSample: xmlWithAttributes(rule.rawXml || '<select />', sampleAttrs)
+              })),
+              { node: nodeFromRule(rule) }
             ));
           }
         } else if (rule.kind === 'stat') {
           const missing = ['name', 'value'].filter(attr => !rule.attrs[attr]);
           if (missing.length) {
+            const sampleAttrs = Object.fromEntries(missing.map(attr => [
+              attr,
+              attr === 'name' ? 'stat:name' : 'VALUE'
+            ]));
             findings.push(diagnostic(
               element,
               'warning',
@@ -600,8 +789,11 @@
                 confidence: 'manual',
                 target: elementTarget(element, { ruleKind: rule.kind, ruleSignature: rule.signature }),
                 attribute: attr,
-                valuePlaceholder: attr === 'name' ? 'stat:name' : 'VALUE'
-              }))
+                valuePlaceholder: attr === 'name' ? 'stat:name' : 'VALUE',
+                sample: xmlWithAttribute(rule.rawXml || '<stat />', attr, attr === 'name' ? 'stat:name' : 'VALUE'),
+                completeSample: xmlWithAttributes(rule.rawXml || '<stat />', sampleAttrs)
+              })),
+              { node: nodeFromRule(rule) }
             ));
           }
         }
@@ -621,7 +813,8 @@
             confidence: 'manual',
             target: elementTarget(element),
             currentValue: id,
-            valuePlaceholder: `${id}_${index + 2}`
+            valuePlaceholder: `${id}_${index + 2}`,
+            sample: xmlWithAttribute(element.openingTag || '<element />', 'id', `${id}_${index + 2}`)
           }))
         ));
       }

@@ -191,32 +191,61 @@ async function run() {
     });
     await page.waitForLoadState('networkidle', { timeout: navigationTimeoutMs }).catch(() => null);
 
-    const result = await page.evaluate(() => ({
-      title: document.title,
-      readyState: document.readyState,
-      jszipLoaded: document.documentElement.dataset.jszipLoaded,
-      pdfLibLoaded: document.documentElement.dataset.pdfLibLoaded,
-      pdfjsLoaded: document.documentElement.dataset.pdfjsLoaded,
-      auroraShapeLoaded: document.documentElement.dataset.auroraShapeLoaded,
-      pdfTextLayoutLoaded: document.documentElement.dataset.pdfTextLayoutLoaded,
-      pdfPageRangeLoaded: document.documentElement.dataset.pdfPageRangeLoaded,
-      auroraAppLoaded: document.documentElement.dataset.auroraAppLoaded,
-      hasPdfInput: Boolean(document.querySelector('input[type=file]')),
-      hasPageRange: Boolean(document.querySelector('#pageRange')),
-      hasExtractButton: Boolean(document.querySelector('#extractBtn'))
-    }));
+    const result = await page.evaluate(() => {
+      const smokeXml = `<elements>
+        <element name="Smoke Spell" type="Spell" source="Smoke Fixture" id="ID_SMOKE_SPELL">
+          <supports>Wizard, 1</supports>
+          <setters><set name="level">1</set></setters>
+        </element>
+      </elements>`;
+      const repairPreviewCanAnalyze = Boolean(window.AuroraXMLHelper?.analyzeRepairXmlText)
+        && (() => {
+          const analysis = window.AuroraXMLHelper.analyzeRepairXmlText(smokeXml, 'smoke.xml');
+          return analysis.catalog.totalElements === 1
+            && analysis.diagnostics.some(finding => finding.category === 'spell-supports-level-token');
+        })();
+
+      return {
+        title: document.title,
+        readyState: document.readyState,
+        jszipLoaded: document.documentElement.dataset.jszipLoaded,
+        pdfLibLoaded: document.documentElement.dataset.pdfLibLoaded,
+        pdfjsLoaded: document.documentElement.dataset.pdfjsLoaded,
+        auroraShapeLoaded: document.documentElement.dataset.auroraShapeLoaded,
+        auroraPatternsLoaded: document.documentElement.dataset.auroraPatternsLoaded,
+        pdfTextLayoutLoaded: document.documentElement.dataset.pdfTextLayoutLoaded,
+        pdfPageRangeLoaded: document.documentElement.dataset.pdfPageRangeLoaded,
+        auroraAppLoaded: document.documentElement.dataset.auroraAppLoaded,
+        hasPdfInput: Boolean(document.querySelector('input[type=file]')),
+        hasPageRange: Boolean(document.querySelector('#pageRange')),
+        hasExtractButton: Boolean(document.querySelector('#extractBtn')),
+        hasRepairXmlInput: Boolean(document.querySelector('#repairXmlInput')),
+        hasRepairInspectButton: Array.from(document.querySelectorAll('button'))
+          .some(button => button.textContent.trim() === 'Inspect XML'),
+        repairPreviewCanAnalyze
+      };
+    });
 
     const expectedFlags = [
       'jszipLoaded',
       'pdfLibLoaded',
       'pdfjsLoaded',
       'auroraShapeLoaded',
+      'auroraPatternsLoaded',
       'pdfTextLayoutLoaded',
       'pdfPageRangeLoaded',
       'auroraAppLoaded'
     ];
     const missing = expectedFlags.filter(flag => result[flag] !== 'true');
-    if (missing.length || !result.hasPdfInput || !result.hasPageRange || !result.hasExtractButton) {
+    if (
+      missing.length
+      || !result.hasPdfInput
+      || !result.hasPageRange
+      || !result.hasExtractButton
+      || !result.hasRepairXmlInput
+      || !result.hasRepairInspectButton
+      || !result.repairPreviewCanAnalyze
+    ) {
       throw new Error(`Browser smoke failed app readiness checks: ${JSON.stringify({ missing, result }, null, 2)}`);
     }
     if (pageErrors.length) {

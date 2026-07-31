@@ -132,6 +132,137 @@ test('browser namespace exposes parser and generator API', () => {
   assert.equal(typeof context.window.AuroraXMLHelper.getSourceMeta, 'function');
   assert.equal(typeof context.window.AuroraXMLHelper.detectModernRulesetSignals, 'function');
   assert.equal(typeof context.window.AuroraXMLHelper.generateXml, 'function');
+  assert.equal(typeof context.window.AuroraXMLHelper.analyzeRepairXmlText, 'function');
+  assert.equal(typeof context.window.AuroraXMLHelper.renderRepairPreviewHtml, 'function');
+});
+
+test('repair preview analyzes pasted Aurora XML without rewriting it', () => {
+  const context = loadApp();
+  const xml = `<?xml version="1.0" encoding="utf-8"?>
+<elements>
+  <element name="Fire Needle" type="Spell" source="Pattern Fixture" id="ID_FIXTURE_SPELL_FIRE_NEEDLE">
+    <supports>Wizard, 1</supports>
+    <setters>
+      <set name="level">1</set>
+      <set name="school">Evocation</set>
+    </setters>
+  </element>
+  <element name="Resistant Scale" type="Racial Trait" source="Pattern Fixture" id="ID_FIXTURE_RACIAL_TRAIT_RESISTANT_SCALE">
+    <rules>
+      <grant type="Condition Immunity" id="ID_INTERNAL_CONDITION_DAMAGE_RESISTANCE_FIRE" />
+    </rules>
+  </element>
+</elements>`;
+
+  const analysis = JSON.parse(runInApp(
+    context,
+    `JSON.stringify(window.AuroraXMLHelper.analyzeRepairXmlText(${JSON.stringify(xml)}, 'broken.xml'))`
+  ));
+
+  assert.equal(analysis.catalog.totalElements, 2);
+  assert.equal(analysis.catalog.types.Spell.count, 1);
+  assert.equal(analysis.diagnostics.length, 2);
+  assert.equal(analysis.diagnostics.find(finding => finding.category === 'spell-supports-level-token').repairs[0].kind, 'replace-supports-text');
+  assert.equal(analysis.diagnostics.find(finding => finding.category === 'spell-supports-level-token').repairs[0].replacementValue, 'Wizard');
+  assert.equal(analysis.diagnostics.find(finding => finding.category === 'damage-resistance-grant-type').repairs[0].kind, 'set-rule-attribute');
+
+  const html = runInApp(
+    context,
+    `window.AuroraXMLHelper.renderRepairPreviewHtml(${JSON.stringify(analysis)})`
+  );
+  assert.match(html, /Repair Preview Summary/);
+  assert.match(html, /Diagnostics &amp; Repair Suggestions/);
+  assert.match(html, /Flagged node/);
+  assert.match(html, /&lt;supports&gt;Wizard, 1&lt;\/supports&gt;/);
+  assert.match(html, /Suggested sample/);
+  assert.match(html, /&lt;supports&gt;Wizard&lt;\/supports&gt;/);
+  assert.match(html, /replace-supports-text/);
+  assert.match(html, /Relevant Authoring Context/);
+  assert.match(html, /Showing observed patterns only for element types that have diagnostics/);
+  assert.match(html, /<h4>Spell<\/h4>/);
+  assert.ok(!xml.includes('type="Condition"'));
+});
+
+test('repair preview hides authoring profiles when there are no related diagnostics', () => {
+  const context = loadApp();
+  const xml = `<elements>
+  <element name="Clean Feat" type="Feat" source="Pattern Fixture" id="ID_FIXTURE_FEAT_CLEAN" />
+</elements>`;
+
+  const analysis = JSON.parse(runInApp(
+    context,
+    `JSON.stringify(window.AuroraXMLHelper.analyzeRepairXmlText(${JSON.stringify(xml)}, 'clean.xml'))`
+  ));
+  const html = runInApp(
+    context,
+    `window.AuroraXMLHelper.renderRepairPreviewHtml(${JSON.stringify(analysis)})`
+  );
+
+  assert.equal(analysis.catalog.totalElements, 1);
+  assert.equal(analysis.diagnostics.length, 0);
+  assert.doesNotMatch(html, /Relevant Authoring Context/);
+  assert.doesNotMatch(html, /<h4>Feat<\/h4>/);
+});
+
+test('repair preview surfaces inferred select supports values', () => {
+  const context = loadApp();
+  const xml = `<elements>
+  <element name="Ability Score Improvement" type="Class Feature" source="Pattern Fixture" id="ID_FIXTURE_CLASS_FEATURE_ASI">
+    <rules>
+      <select type="Feat" name="Feat (Artificer)" level="4" />
+    </rules>
+  </element>
+</elements>`;
+
+  const analysis = JSON.parse(runInApp(
+    context,
+    `JSON.stringify(window.AuroraXMLHelper.analyzeRepairXmlText(${JSON.stringify(xml)}, 'feat-select.xml'))`
+  ));
+  const html = runInApp(
+    context,
+    `window.AuroraXMLHelper.renderRepairPreviewHtml(${JSON.stringify(analysis)})`
+  );
+
+  assert.match(html, /-&gt; feat/);
+  assert.match(html, /Inferred from select type=&quot;Feat&quot;/);
+  assert.match(html, /supports=&quot;feat&quot;/);
+});
+
+test('repair preview surfaces likely select supports candidates', () => {
+  const context = loadApp();
+  const xml = `<elements>
+  <element name="Known Proficiencies" type="Class Feature" source="Pattern Fixture" id="ID_FIXTURE_CLASS_FEATURE_KNOWN_PROFICIENCIES">
+    <rules>
+      <select type="Proficiency" name="Skill A" supports="Skill" />
+      <select type="Proficiency" name="Skill B" supports="Skill" />
+      <select type="Proficiency" name="Language A" supports="Language" />
+      <select type="Proficiency" name="Tool A" supports="Tool" />
+      <select type="Proficiency" name="Missing Support" />
+    </rules>
+  </element>
+</elements>`;
+
+  const analysis = JSON.parse(runInApp(
+    context,
+    `JSON.stringify(window.AuroraXMLHelper.analyzeRepairXmlText(${JSON.stringify(xml)}, 'proficiency-select.xml'))`
+  ));
+  const html = runInApp(
+    context,
+    `window.AuroraXMLHelper.renderRepairPreviewHtml(${JSON.stringify(analysis)})`
+  );
+
+  assert.match(html, /-&gt; SUPPORT TOKEN/);
+  assert.match(html, /Likely candidates \(observed on select type=&quot;Proficiency&quot;\): Skill \(2\), Language \(1\), Tool \(1\)\./);
+  assert.match(html, /supports=&quot;SUPPORT TOKEN&quot;/);
+});
+
+test('repair preview requires pasted XML before analysis', () => {
+  const context = loadApp();
+
+  assert.throws(
+    () => runInApp(context, `window.AuroraXMLHelper.analyzeRepairXmlText('')`),
+    /Paste or upload Aurora XML before inspecting/
+  );
 });
 
 test('source ruleset defaults to 2014 unless year or 5.5e signal proves 2024', () => {

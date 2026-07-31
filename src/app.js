@@ -3457,6 +3457,231 @@ function setManualAuthorStatus(message, tone = 'info') {
   el.classList.remove('hidden');
 }
 
+// ---------------------------------------------
+// Existing XML repair preview
+// ---------------------------------------------
+
+function getAuroraXmlPatterns() {
+  const patterns = globalThis.AuroraXmlPatterns || window.AuroraXmlPatterns;
+  if (!patterns?.analyzeAuroraXmlDocuments) {
+    throw new Error('Aurora XML pattern support is not loaded.');
+  }
+  return patterns;
+}
+
+function analyzeRepairXmlText(xml, fileName = 'pasted.xml', options = {}) {
+  const text = String(xml || '').trim();
+  if (!text) throw new Error('Paste or upload Aurora XML before inspecting.');
+  return getAuroraXmlPatterns().analyzeAuroraXmlDocuments([{ fileName, xml: text }], {
+    top: 6,
+    ...options
+  });
+}
+
+function repairSeverityCounts(diagnostics = []) {
+  const counts = { error: 0, warning: 0, review: 0 };
+  for (const finding of diagnostics || []) {
+    if (Object.prototype.hasOwnProperty.call(counts, finding.severity)) counts[finding.severity] += 1;
+  }
+  return counts;
+}
+
+function repairCountList(map = {}, emptyLabel = 'none') {
+  const entries = Object.entries(map || {});
+  if (!entries.length) return escHtml(emptyLabel);
+  return entries.map(([name, count]) => `${escHtml(name)} (${count})`).join(', ');
+}
+
+function repairElementLabel(finding) {
+  return [finding.fileName, finding.elementType, finding.elementName]
+    .filter(Boolean)
+    .join(' / ') || finding.fileName || 'document';
+}
+
+function repairDetailValue(repair) {
+  return repair.replacementValue
+    || repair.valuePlaceholder
+    || repair.snippet
+    || repair.wrapper
+    || repair.attribute
+    || '';
+}
+
+function renderRepairSnippet(title, xml, detail = '') {
+  if (!String(xml || '').trim()) return '';
+  const detailText = detail ? ` <span class="text-muted">${escHtml(detail)}</span>` : '';
+  return `<div class="repair-snippet">
+    <div class="repair-snippet-title">${escHtml(title)}${detailText}</div>
+    <pre><code>${escHtml(xml)}</code></pre>
+  </div>`;
+}
+
+function renderFlaggedNodeSnippet(finding) {
+  const node = finding?.node || {};
+  const detail = node.line ? `line ${node.line}${node.kind ? `, ${node.kind}` : ''}` : (node.kind || '');
+  return renderRepairSnippet('Flagged node', node.xml, detail);
+}
+
+function repairSampleXml(repair) {
+  return repair.completeSample
+    || repair.sample
+    || repair.suggestedXml
+    || repair.snippet
+    || repair.wrapper
+    || '';
+}
+
+function renderCandidateValues(repair) {
+  const candidates = Array.isArray(repair?.candidateValues) ? repair.candidateValues : [];
+  if (!candidates.length) return '';
+  const label = candidates
+    .map(candidate => `${escHtml(candidate.value)}${candidate.count ? ` (${candidate.count})` : ''}`)
+    .join(', ');
+  const reason = candidates[0]?.reason ? ` (${escHtml(candidates[0].reason)})` : '';
+  return `<br /><span class="text-muted">Likely candidates${reason}: ${label}.</span>`;
+}
+
+function renderRepairDiagnosticCards(diagnostics = []) {
+  if (!diagnostics.length) {
+    return '<p class="text-muted">No diagnostics found for the pasted XML.</p>';
+  }
+  return `<div class="repair-list">${diagnostics.map(finding => {
+    const repairs = (finding.repairs || []).map(repair => {
+      const detail = repairDetailValue(repair);
+      const detailText = detail ? ` <span class="text-muted">-&gt; ${escHtml(detail)}</span>` : '';
+      const sample = repairSampleXml(repair);
+      const inference = repair.inferenceReason
+        ? `<br /><span class="text-muted">Inferred from ${escHtml(repair.inferenceReason)}.</span>`
+        : '';
+      return `<li>${escHtml(repair.kind || 'manual-review')} (${escHtml(repair.confidence || 'manual')})${detailText}<br />${escHtml(repair.description || '')}${inference}${renderCandidateValues(repair)}${renderRepairSnippet('Suggested sample', sample)}</li>`;
+    }).join('');
+    return `<div class="repair-card ${escAttr(finding.severity || 'review')}">
+      <div class="repair-meta">${escHtml(finding.severity || 'review')} / ${escHtml(finding.category || 'diagnostic')} / ${escHtml(repairElementLabel(finding))}</div>
+      <p>${escHtml(finding.message || '')}</p>
+      ${finding.suggestion ? `<p class="text-muted">${escHtml(finding.suggestion)}</p>` : ''}
+      ${renderFlaggedNodeSnippet(finding)}
+      ${repairs ? `<ul>${repairs}</ul>` : ''}
+    </div>`;
+  }).join('')}</div>`;
+}
+
+function renderAuthoringProfileCards(profiles = []) {
+  if (!profiles.length) {
+    return '<p class="text-muted">No authoring profiles were derived because no element nodes were found.</p>';
+  }
+  const limited = profiles.slice(0, 6);
+  const more = profiles.length > limited.length
+    ? `<p class="text-muted">Showing ${limited.length} of ${profiles.length} profile(s).</p>`
+    : '';
+  return `${more}<div class="profile-grid">${limited.map(profile => {
+    const hints = (profile.hints || []).slice(0, 3)
+      .map(hint => `<li>${escHtml(hint.category)}: ${escHtml(hint.message)}</li>`)
+      .join('');
+    return `<div class="profile-card">
+      <h4>${escHtml(profile.type || '(missing type)')}</h4>
+      <p><strong>Evidence:</strong> ${escHtml(profile.count)} element(s), ${escHtml(profile.confidence)} confidence.</p>
+      <p><strong>Required attributes:</strong> ${escHtml((profile.requiredAttributes || []).join(', ') || 'none observed')}</p>
+      <p><strong>Required setters:</strong> ${escHtml((profile.requiredSetters || []).map(row => row.name).join(', ') || 'none observed across every element')}</p>
+      <p><strong>Common rules:</strong> ${escHtml((profile.ruleKinds || []).map(row => `${row.name} (${row.count})`).join(', ') || 'none observed')}</p>
+      ${hints ? `<ul>${hints}</ul>` : ''}
+    </div>`;
+  }).join('')}</div>`;
+}
+
+function profilesRelatedToDiagnostics(profiles = [], diagnostics = []) {
+  const diagnosticTypes = new Set(
+    (diagnostics || [])
+      .map(finding => String(finding.elementType || '').trim())
+      .filter(Boolean)
+  );
+  if (!diagnosticTypes.size) return [];
+  return (profiles || []).filter(profile => diagnosticTypes.has(profile.type));
+}
+
+function renderRepairPreviewHtml(analysis) {
+  const catalog = analysis?.catalog || { totalElements: 0, files: [], types: {} };
+  const diagnostics = analysis?.diagnostics || [];
+  const counts = repairSeverityCounts(diagnostics);
+  const relatedProfiles = profilesRelatedToDiagnostics(analysis?.authoringProfiles || [], diagnostics);
+  const typeRows = Object.entries(catalog.types || {}).map(([type, bucket]) => (
+    `<li>${escHtml(type)}: ${escHtml(bucket.count || 0)} element(s);
+      setters: ${repairCountList(bucket.setterNames)};
+      rules: ${repairCountList(bucket.ruleKinds)}</li>`
+  )).join('');
+
+  return `<div class="repair-result-section">
+    <h3>Repair Preview Summary</h3>
+    <p><strong>Elements:</strong> ${escHtml(catalog.totalElements || 0)}</p>
+    <p><strong>Diagnostics:</strong> errors=${escHtml(counts.error)}, warnings=${escHtml(counts.warning)}, review=${escHtml(counts.review)}</p>
+    ${typeRows ? `<ul>${typeRows}</ul>` : '<p class="text-muted">No element type patterns were found.</p>'}
+  </div>
+  <div class="repair-result-section">
+    <h3>Diagnostics &amp; Repair Suggestions</h3>
+    ${renderRepairDiagnosticCards(diagnostics)}
+  </div>
+  ${relatedProfiles.length ? `<div class="repair-result-section">
+    <h3>Relevant Authoring Context</h3>
+    <p class="text-muted">Showing observed patterns only for element types that have diagnostics in this XML.</p>
+    ${renderAuthoringProfileCards(relatedProfiles)}
+  </div>` : ''}`;
+}
+
+function setRepairPreviewStatus(message, tone = 'info') {
+  const el = document.getElementById('repairPreviewStatus');
+  if (!el) return;
+  el.className = `alert alert-${tone} manual-status`;
+  el.textContent = message;
+  el.classList.remove('hidden');
+}
+
+async function handleRepairXmlFileSelect(event) {
+  const file = event?.target?.files?.[0];
+  if (!file) return;
+  document.getElementById('repairXmlInput').value = await file.text();
+  setRepairPreviewStatus(`Loaded ${file.name}. Click Inspect XML to analyze.`, 'success');
+}
+
+function inspectRepairXml() {
+  const input = document.getElementById('repairXmlInput');
+  const fileInput = document.getElementById('repairXmlFile');
+  const results = document.getElementById('repairPreviewResults');
+  try {
+    const fileName = fileInput?.files?.[0]?.name || 'pasted.xml';
+    const analysis = analyzeRepairXmlText(input?.value || '', fileName);
+    results.innerHTML = renderRepairPreviewHtml(analysis);
+    results.classList.remove('hidden');
+    const counts = repairSeverityCounts(analysis.diagnostics);
+    const tone = counts.error || counts.warning ? 'warning' : 'success';
+    setRepairPreviewStatus(
+      `Inspected ${analysis.catalog.totalElements} element(s): errors=${counts.error}, warnings=${counts.warning}, review=${counts.review}.`,
+      tone
+    );
+  } catch (error) {
+    if (results) {
+      results.innerHTML = '';
+      results.classList.add('hidden');
+    }
+    setRepairPreviewStatus(error.message, 'error');
+  }
+}
+
+function clearRepairXmlPreview() {
+  const input = document.getElementById('repairXmlInput');
+  const fileInput = document.getElementById('repairXmlFile');
+  const status = document.getElementById('repairPreviewStatus');
+  const results = document.getElementById('repairPreviewResults');
+  if (input) input.value = '';
+  if (fileInput) fileInput.value = '';
+  if (status) {
+    status.textContent = '';
+    status.classList.add('hidden');
+  }
+  if (results) {
+    results.innerHTML = '';
+    results.classList.add('hidden');
+  }
+}
+
 
 function addBenefit(id) {
   const { type, index } = parseId(id);
@@ -6319,7 +6544,10 @@ window.AuroraXMLHelper = {
   revertToGenerated,
   generateXml,
   buildZipXmlDocuments,
-  validateAll
+  validateAll,
+  analyzeRepairXmlText,
+  renderRepairPreviewHtml,
+  repairSeverityCounts
 };
 
 if (document.documentElement?.dataset) {

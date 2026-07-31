@@ -108,10 +108,65 @@ test('Aurora XML diagnostics flag initial repair issues', () => {
   assert.equal(analysis.diagnostics.filter(finding => finding.severity === 'error').length, 4);
   assert.equal(finding('damage-resistance-grant-type').repairs[0].kind, 'set-rule-attribute');
   assert.equal(finding('damage-resistance-grant-type').repairs[0].replacementValue, 'Condition');
+  assert.match(finding('damage-resistance-grant-type').node.xml, /<grant type="Condition Immunity"/);
+  assert.match(finding('damage-resistance-grant-type').repairs[0].sample, /type="Condition"/);
   assert.equal(finding('spell-supports-level-token').repairs[0].replacementValue, 'Wizard');
+  assert.match(finding('spell-supports-level-token').node.xml, /<supports>Wizard, 1<\/supports>/);
+  assert.match(finding('spell-supports-level-token').repairs[0].sample, /<supports>Wizard<\/supports>/);
   assert.equal(finding('class-missing-hit-die').repairs[0].snippet, '<set name="hd">d8</set>');
+  assert.match(finding('class-missing-hit-die').repairs[0].sample, /<setters>/);
   assert.equal(finding('duplicate-element-id').repairs[0].kind, 'regenerate-element-id');
   assert.ok(finding('select-missing-required-attribute').repairs.some(repair => repair.attribute === 'supports'));
+  assert.match(finding('select-missing-required-attribute').node.xml, /<select type="Proficiency" name="Skill" \/>/);
+  assert.match(finding('select-missing-required-attribute').repairs.find(repair => repair.attribute === 'supports').sample, /supports="SUPPORT TOKEN"/);
+});
+
+test('Aurora XML diagnostics infer Feat select supports from select type', () => {
+  const xml = `<elements>
+  <element name="Ability Score Improvement" type="Class Feature" source="Pattern Fixture" id="ID_FIXTURE_CLASS_FEATURE_ASI">
+    <rules>
+      <select type="Feat" name="Feat (Artificer)" level="4" />
+    </rules>
+  </element>
+</elements>`;
+  const analysis = analyzeAuroraXmlDocuments([{ fileName: 'feat-select.xml', xml }]);
+  const finding = analysis.diagnostics.find(item => item.category === 'select-missing-required-attribute');
+  const repair = finding.repairs.find(item => item.attribute === 'supports');
+
+  assert.equal(repair.confidence, 'high');
+  assert.equal(repair.replacementValue, 'feat');
+  assert.equal(repair.inferenceReason, 'select type="Feat"');
+  assert.match(repair.sample, /supports="feat"/);
+  assert.match(repair.completeSample, /supports="feat"/);
+});
+
+test('Aurora XML diagnostics include observed candidates for ambiguous select supports', () => {
+  const xml = `<elements>
+  <element name="Known Skills" type="Class Feature" source="Pattern Fixture" id="ID_FIXTURE_CLASS_FEATURE_KNOWN_SKILLS">
+    <rules>
+      <select type="Proficiency" name="Skill A" supports="Skill" />
+      <select type="Proficiency" name="Skill B" supports="Skill" />
+      <select type="Proficiency" name="Skill C" supports="Skill" />
+      <select type="Proficiency" name="Language A" supports="Language" />
+      <select type="Proficiency" name="Language B" supports="Language" />
+      <select type="Proficiency" name="Tool A" supports="Tool" />
+      <select type="Proficiency" name="Tool B" supports="Tool" />
+      <select type="Proficiency" name="Armor A" supports="Armor" />
+      <select type="Proficiency" name="Missing Support" />
+    </rules>
+  </element>
+</elements>`;
+  const analysis = analyzeAuroraXmlDocuments([{ fileName: 'proficiency-select.xml', xml }]);
+  const finding = analysis.diagnostics.find(item => item.category === 'select-missing-required-attribute');
+  const repair = finding.repairs.find(item => item.attribute === 'supports');
+
+  assert.equal(repair.valuePlaceholder, 'SUPPORT TOKEN');
+  assert.deepEqual(
+    repair.candidateValues.map(candidate => [candidate.value, candidate.count]),
+    [['Skill', 3], ['Language', 2], ['Tool', 2]]
+  );
+  assert.equal(repair.candidateValues[0].reason, 'observed on select type="Proficiency"');
+  assert.match(repair.sample, /supports="SUPPORT TOKEN"/);
 });
 
 test('Aurora XML diagnostics require an actual elements root before suppressing root repair', () => {
@@ -136,6 +191,22 @@ test('Aurora XML diagnostics accept elements roots after internal doctype subset
   <element name="Doctype Spell" type="Spell" source="Pattern Fixture" id="ID_FIXTURE_SPELL_DOCTYPE" />
 </elements>`;
   const analysis = analyzeAuroraXmlDocuments([{ fileName: 'doctype.xml', xml: doctypeXml }]);
+
+  assert.equal(analysis.diagnostics.some(finding => finding.category === 'root-shape'), false);
+});
+
+test('Aurora XML diagnostics ignore markup delimiters in internal doctype comments', () => {
+  const doctypeXml = `<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE elements [
+  <!-- literal ] and > characters here are comment text -->
+  <?pattern literal ] and > characters here are processing instruction text?>
+  <!ELEMENT elements (info?, element*)>
+  <!ELEMENT element ANY>
+]>
+<elements>
+  <element name="Doctype Comment Spell" type="Spell" source="Pattern Fixture" id="ID_FIXTURE_SPELL_DOCTYPE_COMMENT" />
+</elements>`;
+  const analysis = analyzeAuroraXmlDocuments([{ fileName: 'doctype-comment.xml', xml: doctypeXml }]);
 
   assert.equal(analysis.diagnostics.some(finding => finding.category === 'root-shape'), false);
 });
