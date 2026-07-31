@@ -27,6 +27,7 @@ const TYPE_LABELS = {
 const ELEMENT_TYPES = ['spell', 'archetype', 'item', 'feat', 'magic', 'race', 'background', 'class', 'other'];
 const MANUAL_AUTHOR_TYPES = ELEMENT_TYPES;
 const PDFJS_WORKER_SRC = './vendor/pdf.worker.min.mjs';
+const WORKSPACE_VIEWS = ['parse', 'repair', 'author'];
 
 // ---------------------------------------------
 // Init
@@ -35,13 +36,45 @@ window.addEventListener('DOMContentLoaded', () => {
   apiKey = '';
   useOllama = false;
   setKeyStatus(true);
+  window.addEventListener('aurora:pdfjs-loaded', checkExtractReady);
   updateTypeCheck();
   checkExtractReady();
   // Mark initially checked boxes
   document.querySelectorAll('.type-check input:checked').forEach(cb => {
     cb.closest('.type-check').classList.add('checked');
   });
+  switchWorkspaceView('parse');
 });
+
+function switchWorkspaceView(viewName) {
+  const selected = WORKSPACE_VIEWS.includes(viewName) ? viewName : 'parse';
+  document.querySelectorAll('[data-workspace-view]').forEach(view => {
+    view.classList.toggle('hidden', view.dataset.workspaceView !== selected);
+  });
+  document.querySelectorAll('[data-workspace-tab]').forEach(tab => {
+    const isActive = tab.dataset.workspaceTab === selected;
+    tab.classList.toggle('active', isActive);
+    tab.setAttribute('aria-selected', isActive ? 'true' : 'false');
+  });
+}
+
+function getPdfJsLib() {
+  return window.pdfjsLib || window['pdfjs-dist/build/pdf'] || globalThis.pdfjsLib || globalThis['pdfjs-dist/build/pdf'];
+}
+
+async function ensurePdfJsLoaded() {
+  let pdfjsLib = getPdfJsLib();
+  if (pdfjsLib) return pdfjsLib;
+  try {
+    pdfjsLib = await import('./vendor/pdf.min.mjs');
+    window.pdfjsLib = pdfjsLib;
+    if (document.documentElement?.dataset) document.documentElement.dataset.pdfjsLoaded = 'true';
+    window.dispatchEvent?.(new CustomEvent('aurora:pdfjs-loaded'));
+    return pdfjsLib;
+  } catch (error) {
+    throw new Error(`PDF.js is not loaded. ${error?.message || error}`);
+  }
+}
 
 
 // ---------------------------------------------
@@ -113,8 +146,7 @@ const MAX_WORDS = 12000;
 async function extractTextFromChunk(uint8Array) {
   try {
     // PDF.js is loaded by index.html and exposed on window for the static app.
-    const pdfjsLib = window.pdfjsLib || window['pdfjs-dist/build/pdf'];
-    if (!pdfjsLib) throw new Error('PDF.js not loaded');
+    const pdfjsLib = await ensurePdfJsLoaded();
     // Use the vendored worker module so PDF.js works without CDN access.
     pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_SRC;
     const loadingTask = pdfjsLib.getDocument({ data: uint8Array, disableWorker: true });
@@ -314,6 +346,9 @@ function setFile(f) {
   document.getElementById('sourceAuthor').value = '';
   updateSourceRulesetDecisionDisplay();
   checkExtractReady();
+  ensurePdfJsLoaded()
+    .then(checkExtractReady)
+    .catch(() => checkExtractReady());
 }
 
 function clearFile() {
@@ -341,8 +376,19 @@ function getSelectedTypes() {
 }
 
 function checkExtractReady() {
-  const ready = pdfFile && getSelectedTypes().length > 0;
-  document.getElementById('extractBtn').disabled = !ready;
+  const pdfReady = Boolean(getPdfJsLib());
+  const selectedTypeCount = getSelectedTypes().length;
+  const ready = pdfFile && selectedTypeCount > 0 && pdfReady;
+  const button = document.getElementById('extractBtn');
+  if (button) button.disabled = !ready;
+  const hint = document.getElementById('extractHint');
+  if (hint) {
+    if (pdfFile && selectedTypeCount > 0 && !pdfReady) {
+      hint.textContent = 'PDF parser is still loading. If this does not clear, refresh the served app page and try again.';
+    } else {
+      hint.textContent = 'Button is enabled when a PDF is uploaded and at least one element type is selected.';
+    }
+  }
 }
 
 // ---------------------------------------------
@@ -620,8 +666,7 @@ async function deterministicExtract(file, types, progressCallback) {
 }
 
 async function extractPdfPages(file) {
-  const pdfjsLib = window.pdfjsLib || window['pdfjs-dist/build/pdf'];
-  if (!pdfjsLib) throw new Error('PDF.js is not loaded.');
+  const pdfjsLib = await ensurePdfJsLoaded();
   pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_SRC;
   const data = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data, disableWorker: true }).promise;
@@ -6547,7 +6592,10 @@ window.AuroraXMLHelper = {
   validateAll,
   analyzeRepairXmlText,
   renderRepairPreviewHtml,
-  repairSeverityCounts
+  repairSeverityCounts,
+  switchWorkspaceView,
+  ensurePdfJsLoaded,
+  extractPdfPages
 };
 
 if (document.documentElement?.dataset) {

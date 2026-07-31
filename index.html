@@ -10,6 +10,7 @@
   import * as pdfjsLib from './vendor/pdf.min.mjs';
   window.pdfjsLib = pdfjsLib;
   document.documentElement.dataset.pdfjsLoaded = 'true';
+  window.dispatchEvent(new CustomEvent('aurora:pdfjs-loaded'));
 </script>
 <script src="./vendor/pdf-lib.min.js" onload="document.documentElement.dataset.pdfLibLoaded='true'"></script>
 <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600&family=Crimson+Pro:ital,wght@0,300;0,400;0,600;1,300;1,400&display=swap" rel="stylesheet" />
@@ -342,6 +343,43 @@
 
   .tab-panel { display: none; }
   .tab-panel.active { display: block; }
+
+  .workspace-tabs {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin-bottom: 1.5rem;
+  }
+
+  .workspace-tab {
+    font-family: 'Cinzel', serif;
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 0.65rem 1rem;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: rgba(255,255,255,0.65);
+    color: var(--muted);
+    cursor: pointer;
+    box-shadow: var(--shadow);
+  }
+
+  .workspace-tab:hover {
+    color: var(--gold);
+    background: #fff;
+  }
+
+  .workspace-tab.active {
+    color: #fff;
+    background: var(--gold);
+    border-color: var(--gold);
+  }
+
+  .workspace-view {
+    display: block;
+  }
 
   .manual-author {
     border: 1px solid var(--border-light);
@@ -740,9 +778,16 @@
 
 <main>
 
-  <!-- Step 1: Parser mode -->
+  <nav class="workspace-tabs" aria-label="Aurora XML Helper workflows">
+    <button class="workspace-tab active" type="button" data-workspace-tab="parse" aria-selected="true" onclick="switchWorkspaceView('parse')">Upload &amp; Parse</button>
+    <button class="workspace-tab" type="button" data-workspace-tab="repair" aria-selected="false" onclick="switchWorkspaceView('repair')">Lint &amp; Repair</button>
+    <button class="workspace-tab" type="button" data-workspace-tab="author" aria-selected="false" onclick="switchWorkspaceView('author')">Create &amp; Author</button>
+  </nav>
+
+  <section class="workspace-view" id="viewParse" data-workspace-view="parse">
+  <!-- Parser mode -->
   <div class="card" id="stepKey">
-    <div class="card-title">1. Deterministic Parser</div>
+    <div class="card-title">Deterministic Parser</div>
     <p class="text-muted" style="margin-bottom:0.75rem;">PDF text is read locally in the browser and matched with repeatable D&amp;D layout rules. No API key, model, or network extraction step is required.</p>
     <p class="text-muted" style="font-size:0.85rem; margin-bottom:0;">This first deterministic pass is intentionally conservative: it prefers fewer high-confidence elements over guessed content. Anything it finds still flows through the existing review, validation, XML preview, and ZIP export tools.</p>
     <div id="geminiSection" class="hidden"></div>
@@ -754,9 +799,9 @@
     <div id="ollamaTestResult" class="hidden"></div>
   </div>
 
-  <!-- Step 2: Upload -->
+  <!-- Upload -->
   <div class="card" id="stepUpload">
-    <div class="card-title">2. Upload Supplement PDF</div>
+    <div class="card-title">Upload Supplement PDF</div>
 
     <div class="upload-zone" id="uploadZone" onclick="document.getElementById('pdfFile').click()" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event)">
       <input type="file" id="pdfFile" accept=".pdf" onchange="handleFileSelect(event)" />
@@ -777,9 +822,9 @@
     </div>
   </div>
 
-  <!-- Step 3: Options -->
+  <!-- Options -->
   <div class="card" id="stepOptions">
-    <div class="card-title">3. Extraction Options</div>
+    <div class="card-title">Extraction Options</div>
 
     <div class="section-label" style="margin-top:0;">Source Details <span style="font-weight:400; text-transform:none; font-style:italic; font-size:0.8rem;">(auto-filled from PDF - override if needed)</span></div>
     <div class="field-row">
@@ -849,26 +894,9 @@
     </p>
   </div>
 
-  <!-- Step 4: XML repair preview -->
-  <div class="card repair-preview" id="stepRepair">
-    <div class="card-title">4. Inspect / Repair Existing XML</div>
-    <p class="text-muted" style="margin-bottom:0.75rem;">
-      Paste or upload Aurora XML to inspect observed element shapes, authoring hints, and repair suggestions.
-      This preview is read-only; it does not rewrite XML yet.
-    </p>
-    <textarea id="repairXmlInput" placeholder="Paste Aurora XML here, or upload an .xml file below."></textarea>
-    <div class="repair-preview-actions">
-      <input type="file" id="repairXmlFile" accept=".xml,text/xml,application/xml" onchange="handleRepairXmlFileSelect(event)" />
-      <button class="btn btn-secondary" onclick="inspectRepairXml()">Inspect XML</button>
-      <button class="btn btn-secondary" onclick="clearRepairXmlPreview()">Clear</button>
-    </div>
-    <div class="alert alert-info manual-status hidden" id="repairPreviewStatus"></div>
-    <div id="repairPreviewResults" class="repair-results hidden"></div>
-  </div>
-
-  <!-- Step 5: Review -->
+  <!-- Review -->
   <div class="card hidden" id="stepReview">
-    <div class="card-title">5. Review &amp; Edit Extracted Elements</div>
+    <div class="card-title">Review &amp; Edit Extracted Elements</div>
 
     <div id="extractProgress" class="hidden">
       <div class="alert alert-info" id="progressAlert">
@@ -929,6 +957,39 @@
       </div>
     </div>
   </div>
+
+  </section>
+
+  <section class="workspace-view hidden" id="viewRepair" data-workspace-view="repair">
+  <!-- XML repair preview -->
+  <div class="card repair-preview" id="stepRepair">
+    <div class="card-title">Lint &amp; Repair Existing XML</div>
+    <p class="text-muted" style="margin-bottom:0.75rem;">
+      Paste or upload Aurora XML to inspect diagnostics, flagged nodes, repair suggestions, and relevant authoring context.
+      This preview is read-only; it does not rewrite XML yet.
+    </p>
+    <textarea id="repairXmlInput" placeholder="Paste Aurora XML here, or upload an .xml file below."></textarea>
+    <div class="repair-preview-actions">
+      <input type="file" id="repairXmlFile" accept=".xml,text/xml,application/xml" onchange="handleRepairXmlFileSelect(event)" />
+      <button class="btn btn-secondary" onclick="inspectRepairXml()">Inspect XML</button>
+      <button class="btn btn-secondary" onclick="clearRepairXmlPreview()">Clear</button>
+    </div>
+    <div class="alert alert-info manual-status hidden" id="repairPreviewStatus"></div>
+    <div id="repairPreviewResults" class="repair-results hidden"></div>
+  </div>
+  </section>
+
+  <section class="workspace-view hidden" id="viewAuthor" data-workspace-view="author">
+  <div class="card" id="stepAuthoring">
+    <div class="card-title">Create &amp; Author</div>
+    <p class="text-muted" style="margin-bottom:0.75rem;">
+      This workspace will use observed Aurora XML patterns to help build new homebrew elements from known-good shapes.
+    </p>
+    <p class="text-muted" style="font-size:0.85rem; margin-bottom:0;">
+      Planned next: load/reference example XML, choose an element type, inspect common attributes/setters/rules/supports, and generate a copyable starter template.
+    </p>
+  </div>
+  </section>
 
 </main>
 

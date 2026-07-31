@@ -134,6 +134,9 @@ test('browser namespace exposes parser and generator API', () => {
   assert.equal(typeof context.window.AuroraXMLHelper.generateXml, 'function');
   assert.equal(typeof context.window.AuroraXMLHelper.analyzeRepairXmlText, 'function');
   assert.equal(typeof context.window.AuroraXMLHelper.renderRepairPreviewHtml, 'function');
+  assert.equal(typeof context.window.AuroraXMLHelper.switchWorkspaceView, 'function');
+  assert.equal(typeof context.window.AuroraXMLHelper.ensurePdfJsLoaded, 'function');
+  assert.equal(typeof context.window.AuroraXMLHelper.extractPdfPages, 'function');
 });
 
 test('repair preview analyzes pasted Aurora XML without rewriting it', () => {

@@ -191,7 +191,7 @@ async function run() {
     });
     await page.waitForLoadState('networkidle', { timeout: navigationTimeoutMs }).catch(() => null);
 
-    const result = await page.evaluate(() => {
+    const result = await page.evaluate(async () => {
       const smokeXml = `<elements>
         <element name="Smoke Spell" type="Spell" source="Smoke Fixture" id="ID_SMOKE_SPELL">
           <supports>Wizard, 1</supports>
@@ -204,6 +204,35 @@ async function run() {
           return analysis.catalog.totalElements === 1
             && analysis.diagnostics.some(finding => finding.category === 'spell-supports-level-token');
         })();
+      const workspaceLabels = Array.from(document.querySelectorAll('[data-workspace-tab]'))
+        .map(button => button.textContent.trim());
+      const hasWorkspaceViews = ['parse', 'repair', 'author']
+        .every(name => Boolean(document.querySelector(`[data-workspace-view="${name}"]`)));
+      const workspaceCanSwitch = Boolean(window.AuroraXMLHelper?.switchWorkspaceView)
+        && (() => {
+          window.AuroraXMLHelper.switchWorkspaceView('repair');
+          const repairVisible = !document.querySelector('[data-workspace-view="repair"]').classList.contains('hidden');
+          const parseHiddenAfterRepair = document.querySelector('[data-workspace-view="parse"]').classList.contains('hidden');
+          window.AuroraXMLHelper.switchWorkspaceView('author');
+          const authorVisible = !document.querySelector('[data-workspace-view="author"]').classList.contains('hidden');
+          window.AuroraXMLHelper.switchWorkspaceView('parse');
+          const parseVisible = !document.querySelector('[data-workspace-view="parse"]').classList.contains('hidden');
+          return repairVisible && parseHiddenAfterRepair && authorVisible && parseVisible;
+        })();
+      let pdfExtractionCanReadText = false;
+      let pdfExtractionError = '';
+      try {
+        const pdfDoc = await window.PDFLib.PDFDocument.create();
+        const page = pdfDoc.addPage([300, 200]);
+        const font = await pdfDoc.embedFont(window.PDFLib.StandardFonts.Helvetica);
+        page.drawText('Smoke PDF Text', { x: 40, y: 140, size: 12, font });
+        const bytes = await pdfDoc.save();
+        const file = new File([bytes], 'smoke.pdf', { type: 'application/pdf' });
+        const pages = await window.AuroraXMLHelper.extractPdfPages(file);
+        pdfExtractionCanReadText = pages.length === 1 && /Smoke PDF Text/.test(pages[0].text);
+      } catch (error) {
+        pdfExtractionError = String(error && error.message ? error.message : error);
+      }
 
       return {
         title: document.title,
@@ -222,7 +251,12 @@ async function run() {
         hasRepairXmlInput: Boolean(document.querySelector('#repairXmlInput')),
         hasRepairInspectButton: Array.from(document.querySelectorAll('button'))
           .some(button => button.textContent.trim() === 'Inspect XML'),
-        repairPreviewCanAnalyze
+        workspaceLabels,
+        hasWorkspaceViews,
+        workspaceCanSwitch,
+        repairPreviewCanAnalyze,
+        pdfExtractionCanReadText,
+        pdfExtractionError
       };
     });
 
@@ -244,7 +278,13 @@ async function run() {
       || !result.hasExtractButton
       || !result.hasRepairXmlInput
       || !result.hasRepairInspectButton
+      || !result.workspaceLabels.includes('Upload & Parse')
+      || !result.workspaceLabels.includes('Lint & Repair')
+      || !result.workspaceLabels.includes('Create & Author')
+      || !result.hasWorkspaceViews
+      || !result.workspaceCanSwitch
       || !result.repairPreviewCanAnalyze
+      || !result.pdfExtractionCanReadText
     ) {
       throw new Error(`Browser smoke failed app readiness checks: ${JSON.stringify({ missing, result }, null, 2)}`);
     }
