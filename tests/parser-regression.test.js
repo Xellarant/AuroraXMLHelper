@@ -1,4 +1,7 @@
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const { fileURLToPath, pathToFileURL } = require('node:url');
 const { loadApp: loadAppHarness, runInApp } = require('../scripts/app-vm-harness');
 
 function loadApp() {
@@ -137,6 +140,19 @@ test('browser namespace exposes parser and generator API', () => {
   assert.equal(typeof context.window.AuroraXMLHelper.switchWorkspaceView, 'function');
   assert.equal(typeof context.window.AuroraXMLHelper.ensurePdfJsLoaded, 'function');
   assert.equal(typeof context.window.AuroraXMLHelper.extractPdfPages, 'function');
+});
+
+test('PDF.js fallback import resolves from the app script to the vendored module', () => {
+  const repoRoot = path.resolve(__dirname, '..');
+  const appPath = path.join(repoRoot, 'src', 'app.js');
+  const appSource = fs.readFileSync(appPath, 'utf8');
+  const match = appSource.match(/await import\(['"]([^'"]*pdf\.min\.mjs)['"]\)/);
+
+  assert.ok(match, 'expected ensurePdfJsLoaded to dynamically import pdf.min.mjs');
+
+  const resolvedPath = fileURLToPath(new URL(match[1], pathToFileURL(appPath)));
+  assert.equal(resolvedPath, path.join(repoRoot, 'vendor', 'pdf.min.mjs'));
+  assert.equal(fs.existsSync(resolvedPath), true);
 });
 
 test('repair preview analyzes pasted Aurora XML without rewriting it', () => {

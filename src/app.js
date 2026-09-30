@@ -66,7 +66,7 @@ async function ensurePdfJsLoaded() {
   let pdfjsLib = getPdfJsLib();
   if (pdfjsLib) return pdfjsLib;
   try {
-    pdfjsLib = await import('./vendor/pdf.min.mjs');
+    pdfjsLib = await import('../vendor/pdf.min.mjs');
     window.pdfjsLib = pdfjsLib;
     if (document.documentElement?.dataset) document.documentElement.dataset.pdfjsLoaded = 'true';
     window.dispatchEvent?.(new CustomEvent('aurora:pdfjs-loaded'));
