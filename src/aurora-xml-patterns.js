@@ -78,6 +78,15 @@
     return xml.replace(/\s*(\/?>)\s*$/, ` ${attr}="${escaped}"$1`);
   }
 
+  function setTagAttribute(tag, attr, value) {
+    const text = String(tag || '');
+    if (!text || !attr) return text;
+    const escaped = encodeAttributeValue(value);
+    const attrPattern = new RegExp(`(\\s)${escapeRegExp(attr)}\\s*=\\s*(?:"[^"]*"|'[^']*')`);
+    if (attrPattern.test(text)) return text.replace(attrPattern, (match, space) => `${space}${attr}="${escaped}"`);
+    return text.replace(/(\s*)(\/?>)$/, ` ${attr}="${escaped}"$1$2`);
+  }
+
   function xmlWithAttributes(rawXml, attrs) {
     return Object.entries(attrs || {}).reduce(
       (xml, [attr, value]) => xmlWithAttribute(xml, attr, value),
@@ -142,8 +151,8 @@
       const attrs = attrMap(match[1]);
       const rawXml = match[0];
       const openingTag = (rawXml.match(/^<element\b[^>]*>/i) || [])[0] || '';
-      const bodyOffset = rawXml.indexOf(match[3] || '');
-      const bodyStart = bodyOffset >= 0 ? match.index + bodyOffset : match.index;
+      const selfClosing = match[2] === '/>';
+      const bodyStart = match.index + openingTag.length;
       const line = lineForIndex(xml, match.index);
       const body = match[3] || '';
       const supportsMatch = body.match(/<supports\b[^>]*>([\s\S]*?)<\/supports>/i);
@@ -153,7 +162,9 @@
       const description = stripTags((body.match(/<description\b[^>]*>([\s\S]*?)<\/description>/i) || [])[1] || '');
       const setters = {};
       const setterAttrs = {};
-      const settersBody = (body.match(/<setters\b[^>]*>([\s\S]*?)<\/setters>/i) || [])[1] || '';
+      const settersMatch = body.match(/<setters\b[^>]*>([\s\S]*?)<\/setters>/i);
+      const settersBody = (settersMatch || [])[1] || '';
+      const settersOpenTag = settersMatch ? settersMatch[0].match(/^<setters\b[^>]*>/i)[0] : '';
       for (const setter of settersBody.matchAll(/<set\b([^>]*?)(?:\/>|>([\s\S]*?)<\/set>)/gi)) {
         const setAttrs = attrMap(setter[1]);
         if (!setAttrs.name) continue;
@@ -168,16 +179,19 @@
       for (const rule of rulesBody.matchAll(/<(grant|select|stat|append)\b([^>]*?)(?:\/>|>([\s\S]*?)<\/\1>)/gi)) {
         const kind = rule[1].toLowerCase();
         const ruleAttrs = attrMap(rule[2]);
+        const ruleStart = bodyStart + rulesBodyOffset + rule.index;
         const ruleLine = rulesBodyOffset >= 0
-          ? lineForIndex(xml, bodyStart + rulesBodyOffset + rule.index)
+          ? lineForIndex(xml, ruleStart)
           : line;
+        const ruleOpenTag = (rule[0].match(/^<[^>]*>/) || [])[0] || rule[0];
         ruleRecords.push({
           kind,
           attrs: ruleAttrs,
           text: stripTags(rule[3] || ''),
           signature: ruleSignature(kind, ruleAttrs),
           rawXml: trimSnippet(rule[0]),
-          line: ruleLine
+          line: ruleLine,
+          openTagRange: { start: ruleStart, end: ruleStart + ruleOpenTag.length, text: ruleOpenTag }
         });
       }
 
@@ -200,7 +214,16 @@
         setterAttrs,
         ruleRecords,
         rules: ruleRecords.map(rule => rule.signature).sort(),
-        key: `${normalizeName(attrs.type)}::${normalizeName(attrs.name)}`
+        key: `${normalizeName(attrs.type)}::${normalizeName(attrs.name)}`,
+        selfClosing,
+        range: { start: match.index, end: match.index + rawXml.length },
+        openTagRange: { start: match.index, end: match.index + openingTag.length, text: openingTag },
+        supportsRange: supportsMatch
+          ? { start: bodyStart + supportsMatch.index, end: bodyStart + supportsMatch.index + supportsRawXml.length, text: supportsRawXml }
+          : null,
+        settersOpenTagRange: settersMatch
+          ? { start: bodyStart + settersMatch.index, end: bodyStart + settersMatch.index + settersOpenTag.length, text: settersOpenTag }
+          : null
       });
     }
     return elements;
@@ -546,6 +569,11 @@
     return { ...target, ...extra };
   }
 
+  function anchorFor(element, range, extra = {}) {
+    if (!range || !Number.isFinite(range.start)) return null;
+    return { fileName: element?.fileName || '', start: range.start, end: range.end, text: range.text, ...extra };
+  }
+
   function nodeFromElement(element, fallbackKind = 'element') {
     const node = {
       kind: element?.nodeKind || fallbackKind
@@ -647,6 +675,7 @@
             [repair('set-element-attribute', `Set a non-empty ${attr} attribute on the element.`, {
               confidence: 'manual',
               target: elementTarget(element),
+              anchor: anchorFor(element, element.openTagRange),
               attribute: attr,
               valuePlaceholder: attr === 'id' ? 'ID_SOURCE_TYPE_NAME' : attr.toUpperCase(),
               sample: xmlWithAttribute(element.openingTag || '<element />', attr, attr === 'id' ? 'ID_SOURCE_TYPE_NAME' : attr.toUpperCase())
@@ -669,8 +698,12 @@
           [repair('insert-setter', 'Insert a hit die setter under <setters>.', {
             confidence: 'manual',
             target: elementTarget(element),
+            anchor: element.settersOpenTagRange
+              ? anchorFor(element, element.settersOpenTagRange, { mode: 'after-setters-open' })
+              : anchorFor(element, element.openTagRange, { mode: 'after-element-open' }),
             setterName: 'hd',
             valuePlaceholder: 'd8',
+            candidateValues: ['d6', 'd8', 'd10', 'd12'].map(value => ({ value, reason: 'standard hit die' })),
             snippet: '<set name="hd">d8</set>',
             sample: '<setters>\n  <set name="hd">d8</set>\n</setters>'
           })]
@@ -690,6 +723,7 @@
             [repair('replace-supports-text', 'Remove numeric spell-level tokens from <supports>.', {
               confidence: 'high',
               target: elementTarget(element),
+              anchor: anchorFor(element, element.supportsRange),
               currentValue: element.supports,
               replacementValue: cleanedTokens.join(', '),
               removedTokens: numericTokens,
@@ -713,6 +747,7 @@
               missing.map(attr => repair('set-rule-attribute', `Set grant ${attr} attribute.`, {
                 confidence: 'manual',
                 target: elementTarget(element, { ruleKind: rule.kind, ruleSignature: rule.signature }),
+                anchor: anchorFor(element, rule.openTagRange),
                 attribute: attr,
                 valuePlaceholder: attr === 'id' ? 'ID_TARGET_ELEMENT' : 'TARGET TYPE',
                 sample: xmlWithAttribute(rule.rawXml || '<grant />', attr, attr === 'id' ? 'ID_TARGET_ELEMENT' : 'TARGET TYPE')
@@ -730,6 +765,7 @@
               [repair('set-rule-attribute', 'Change the grant type from Condition Immunity to Condition.', {
                 confidence: 'high',
                 target: elementTarget(element, { ruleKind: rule.kind, ruleSignature: rule.signature }),
+                anchor: anchorFor(element, rule.openTagRange),
                 attribute: 'type',
                 currentValue: 'Condition Immunity',
                 replacementValue: 'Condition',
@@ -756,6 +792,7 @@
               missing.map(attr => repair('set-rule-attribute', `Set select ${attr} attribute.`, {
                 confidence: attr === 'supports' && inferredSupports ? 'high' : 'manual',
                 target: elementTarget(element, { ruleKind: rule.kind, ruleSignature: rule.signature }),
+                anchor: anchorFor(element, rule.openTagRange),
                 attribute: attr,
                 ...(attr === 'supports' && inferredSupports
                   ? {
@@ -788,6 +825,7 @@
               missing.map(attr => repair('set-rule-attribute', `Set stat ${attr} attribute.`, {
                 confidence: 'manual',
                 target: elementTarget(element, { ruleKind: rule.kind, ruleSignature: rule.signature }),
+                anchor: anchorFor(element, rule.openTagRange),
                 attribute: attr,
                 valuePlaceholder: attr === 'name' ? 'stat:name' : 'VALUE',
                 sample: xmlWithAttribute(rule.rawXml || '<stat />', attr, attr === 'name' ? 'stat:name' : 'VALUE'),
@@ -812,6 +850,8 @@
           locations.slice(1).map((element, index) => repair('regenerate-element-id', `Regenerate duplicate element id occurrence ${index + 2}.`, {
             confidence: 'manual',
             target: elementTarget(element),
+            anchor: anchorFor(element, element.openTagRange),
+            attribute: 'id',
             currentValue: id,
             valuePlaceholder: `${id}_${index + 2}`,
             sample: xmlWithAttribute(element.openingTag || '<element />', 'id', `${id}_${index + 2}`)
@@ -834,9 +874,14 @@
     for (const doc of docs || []) {
       elements.push(...parseAuroraElements(doc.xml || '', doc.fileName || ''));
     }
+    const diagnostics = diagnoseAuroraElements(elements, docs);
+    let repairIndex = 0;
+    for (const finding of diagnostics) {
+      for (const item of finding.repairs || []) item.id = `r${++repairIndex}`;
+    }
     return {
       catalog: summarizePatternCatalog(elements, options),
-      diagnostics: diagnoseAuroraElements(elements, docs),
+      diagnostics,
       authoringProfiles: buildAuthoringProfiles(elements, options),
       elements
     };
@@ -927,6 +972,7 @@
     decodeXml,
     diagnoseAuroraElements,
     elementTarget,
+    encodeAttributeValue,
     normalizeName,
     normalizeSpace,
     parseAuroraElements,
@@ -934,6 +980,7 @@
     repair,
     renderPatternReport,
     ruleSignature,
+    setTagAttribute,
     splitSupportTokens,
     stripTags,
     summarizePatternCatalog
