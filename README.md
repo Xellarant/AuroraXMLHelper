@@ -187,9 +187,54 @@ diagnostics such as duplicate element IDs, missing element attributes, malformed
 grant/select/stat rules, damage resistance encoded as `Condition Immunity`,
 numeric spell-level support tokens, class elements without hit dice, and
 ID-shaped placeholders in comments. Diagnostics include machine-readable repair
-records where the fix shape is known, but the tool does not rewrite XML yet.
-This report is intended to become the shared evidence layer for custom authoring
-and broken-XML repair assistance.
+records (with exact source offsets) where the fix shape is known. This report is
+the shared evidence layer for custom authoring and broken-XML repair assistance.
+
+Pass `--reference src/aurora-reference-index.js` to also check content against
+the bundled first-party reference index:
+
+- unresolved `ID_*` references in grant ids and requirements, with
+  same-name/different-source-prefix and close-spelling suggestions
+- unknown grant/select types
+- grant types that do not match the granted element
+- near-miss stat and setter names
+- setters that almost every first-party element of that type sets
+
+`<info><n>` and a missing `<info><update>` are reported without the index.
+
+### Reference index
+
+`src/aurora-reference-index.js` is generated from a local first-party Aurora
+content folder and contains structure only:
+
+- element ids, types, and names
+- ids built into the Aurora app (referenced by first-party content but never
+  defined in XML)
+- observed grant/select/stat/setter counts
+
+It contains no descriptions or rules text. Rebuild it with:
+
+```powershell
+$custom = "$env:USERPROFILE/Documents/5e Character Builder/custom"
+npm run reference:build -- --xml "$custom/core" --xml "$custom/supplements"
+```
+
+Add `--no-names` to drop element names if the file needs to be smaller.
+
+### Lint & Repair workspace
+
+The **Lint & Repair** tab runs the same diagnostics in the browser against
+pasted XML or one or more uploaded files.
+
+- Each repair that can be applied automatically has an **Apply** checkbox.
+  High-confidence repairs are preselected.
+- Repairs that need a value show an input, prefilled when there is a single
+  candidate.
+- **Apply Selected Repairs** edits only the targeted text and skips any target
+  that changed since inspection. It then re-runs the diagnostics and shows what
+  was resolved, what remains, and any new findings, plus a diff against the
+  original.
+- You can download or copy the fixed files, or undo all repairs.
 
 ---
 

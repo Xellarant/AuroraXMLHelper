@@ -3532,7 +3532,8 @@ const repairState = {
 };
 
 function repairAnalysisOptions(options = {}) {
-  return { top: 6, ...options };
+  const reference = globalThis.AuroraReferenceIndex || window.AuroraReferenceIndex;
+  return { top: 6, ...(reference ? { reference } : {}), ...options };
 }
 
 function normalizeRepairDocs(docs) {
@@ -3756,6 +3757,14 @@ function renderRepairApplyResultHtml(lastApply, state = repairState) {
   </div>`;
 }
 
+function referenceIndexSummary() {
+  const reference = globalThis.AuroraReferenceIndex || window.AuroraReferenceIndex;
+  if (!reference?.ids) {
+    return 'No first-party reference index is loaded, so id references, grant/select types, and setter names were not checked.';
+  }
+  return `Checked id references, grant/select types, stat names, and setters against the bundled first-party index (${escHtml(Object.keys(reference.ids).length)} ids from ${escHtml(reference.fileCount || 0)} files).`;
+}
+
 function renderRepairPreviewHtml(analysis, options = {}) {
   const catalog = analysis?.catalog || { totalElements: 0, files: [], types: {} };
   const diagnostics = analysis?.diagnostics || [];
@@ -3773,6 +3782,7 @@ function renderRepairPreviewHtml(analysis, options = {}) {
     <p><strong>Files:</strong> ${escHtml((catalog.files || []).join(', ') || 'pasted.xml')}</p>
     <p><strong>Elements:</strong> ${escHtml(catalog.totalElements || 0)}</p>
     <p><strong>Diagnostics:</strong> errors=${escHtml(counts.error)}, warnings=${escHtml(counts.warning)}, review=${escHtml(counts.review)}</p>
+    <p class="text-muted">${referenceIndexSummary()}</p>
     ${typeRows ? `<ul>${typeRows}</ul>` : '<p class="text-muted">No element type patterns were found.</p>'}
   </div>
   <div class="repair-result-section">

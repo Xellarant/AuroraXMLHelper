@@ -17,7 +17,8 @@
     "benchmark:corpus": "node scripts/run-node20.js scripts/benchmark-corpus.js",
     "source:fixture": "node scripts/run-node20.js scripts/source-fixture-report.js",
     "corpus:local": "node scripts/run-node20.js scripts/run-local-corpus-benchmarks.js",
-    "patterns:xml": "node scripts/aurora-pattern-report.js"
+    "patterns:xml": "node scripts/aurora-pattern-report.js",
+    "reference:build": "node scripts/aurora-pattern-report.js --emit-reference src/aurora-reference-index.js"
   },
   "devDependencies": {
     "jszip": "^3.10.1",

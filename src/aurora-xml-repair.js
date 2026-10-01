@@ -25,6 +25,7 @@
     'set-element-attribute': 0,
     'regenerate-element-id': 0,
     'set-rule-attribute': 0,
+    'rename-setter': 0,
     'replace-reference-id': 0,
     'replace-supports-text': 0,
     'rename-tag': 0,
@@ -71,6 +72,7 @@
       case 'set-element-attribute':
       case 'set-rule-attribute':
       case 'regenerate-element-id':
+      case 'rename-setter':
         return setTagAttribute(text, repair.attribute, value);
       case 'replace-reference-id': {
         const current = String(repair.currentValue || '');
@@ -99,6 +101,12 @@
         }
         if (repair.anchor.mode === 'after-element-open') {
           if (/\/>\s*$/.test(text)) return null;
+          // A previous insert in this group already created the setters block.
+          const created = text.match(/\n[ \t]*<setters>/);
+          if (created) {
+            const insertAt = created.index + created[0].length;
+            return `${text.slice(0, insertAt)}\n${context.indent}    ${setter}${text.slice(insertAt)}`;
+          }
           return `${text}\n${context.indent}  <setters>\n${context.indent}    ${setter}\n${context.indent}  </setters>`;
         }
         return null;

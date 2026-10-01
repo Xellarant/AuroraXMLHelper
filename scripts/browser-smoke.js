@@ -225,8 +225,8 @@ async function run() {
         Array.from(document.querySelectorAll('button'))
           .find(button => button.textContent.trim() === 'Inspect XML')
           .click();
-        const checkbox = document.querySelector('#repairPreviewResults input[data-repair-select]');
-        if (!checkbox || !checkbox.checked) return false;
+        const preselected = document.querySelectorAll('#repairPreviewResults input[data-repair-select]:checked');
+        if (preselected.length !== 1) return false;
         Array.from(document.querySelectorAll('#repairPreviewResults button'))
           .find(button => button.textContent.trim() === 'Apply Selected Repairs')
           .click();
@@ -266,6 +266,7 @@ async function run() {
         auroraShapeLoaded: document.documentElement.dataset.auroraShapeLoaded,
         auroraPatternsLoaded: document.documentElement.dataset.auroraPatternsLoaded,
         auroraRepairLoaded: document.documentElement.dataset.auroraRepairLoaded,
+        auroraReferenceLoaded: document.documentElement.dataset.auroraReferenceLoaded,
         pdfTextLayoutLoaded: document.documentElement.dataset.pdfTextLayoutLoaded,
         pdfPageRangeLoaded: document.documentElement.dataset.pdfPageRangeLoaded,
         auroraAppLoaded: document.documentElement.dataset.auroraAppLoaded,
@@ -292,6 +293,7 @@ async function run() {
       'auroraShapeLoaded',
       'auroraPatternsLoaded',
       'auroraRepairLoaded',
+      'auroraReferenceLoaded',
       'pdfTextLayoutLoaded',
       'pdfPageRangeLoaded',
       'auroraAppLoaded'

@@ -165,11 +165,19 @@
       const settersMatch = body.match(/<setters\b[^>]*>([\s\S]*?)<\/setters>/i);
       const settersBody = (settersMatch || [])[1] || '';
       const settersOpenTag = settersMatch ? settersMatch[0].match(/^<setters\b[^>]*>/i)[0] : '';
+      const setterRanges = {};
+      const settersBodyStart = settersMatch ? bodyStart + settersMatch.index + settersOpenTag.length : -1;
       for (const setter of settersBody.matchAll(/<set\b([^>]*?)(?:\/>|>([\s\S]*?)<\/set>)/gi)) {
         const setAttrs = attrMap(setter[1]);
         if (!setAttrs.name) continue;
         setters[setAttrs.name] = stripTags(setter[2] || '');
         setterAttrs[setAttrs.name] = setAttrs;
+        const setOpenTag = (setter[0].match(/^<set\b[^>]*>/i) || [])[0] || setter[0];
+        setterRanges[setAttrs.name] = {
+          start: settersBodyStart + setter.index,
+          end: settersBodyStart + setter.index + setOpenTag.length,
+          text: setOpenTag
+        };
       }
 
       const rulesMatch = body.match(/<rules\b[^>]*>([\s\S]*?)<\/rules>/i);
@@ -212,6 +220,7 @@
         description,
         setters,
         setterAttrs,
+        setterRanges,
         ruleRecords,
         rules: ruleRecords.map(rule => rule.signature).sort(),
         key: `${normalizeName(attrs.type)}::${normalizeName(attrs.name)}`,
@@ -617,8 +626,408 @@
     };
   }
 
-  function diagnoseAuroraElements(elements, docs = []) {
+  function editDistance(a, b, maxDistance = Infinity) {
+    const left = String(a || '');
+    const right = String(b || '');
+    if (Math.abs(left.length - right.length) > maxDistance) return maxDistance + 1;
+    let previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+    for (let i = 1; i <= left.length; i += 1) {
+      const current = [i];
+      let rowMin = i;
+      for (let j = 1; j <= right.length; j += 1) {
+        const cost = left[i - 1] === right[j - 1] ? 0 : 1;
+        current[j] = Math.min(previous[j] + 1, current[j - 1] + 1, previous[j - 1] + cost);
+        if (current[j] < rowMin) rowMin = current[j];
+      }
+      if (rowMin > maxDistance) return maxDistance + 1;
+      previous = current;
+    }
+    return previous[right.length];
+  }
+
+  function typeNameDistance(value) {
+    return Math.max(1, Math.floor(String(value || '').length / 4));
+  }
+
+  function closestNames(value, names, options = {}) {
+    const target = String(value || '');
+    const maxDistance = Number.isFinite(options.maxDistance)
+      ? options.maxDistance
+      : Math.max(2, Math.floor(target.length * 0.12));
+    const caseInsensitive = options.caseInsensitive !== false;
+    const probe = caseInsensitive ? target.toLowerCase() : target;
+    const matches = [];
+    for (const name of names || []) {
+      if (!name || name === target) continue;
+      const distance = editDistance(probe, caseInsensitive ? String(name).toLowerCase() : name, maxDistance);
+      if (distance <= maxDistance) matches.push({ value: name, distance });
+    }
+    return matches
+      .sort((a, b) => a.distance - b.distance || a.value.localeCompare(b.value))
+      .slice(0, options.limit || 3);
+  }
+
+  // Bundled index shape: { types: [...], ids: { ID: [typeIndex, name] }, builtinIds: [...],
+  // grantTypes, selectTypes, statNames: { name: count }, setterNamesByType: { type: { name: count } },
+  // typeCounts: { type: count } }.
+  function normalizeReferenceIndex(reference) {
+    if (!reference) return null;
+    if (reference.__normalized) return reference;
+    const types = reference.types || [];
+    const idTypes = new Map();
+    const idNames = new Map();
+    for (const [id, entry] of Object.entries(reference.ids || {})) {
+      const [typeIndex, name] = Array.isArray(entry) ? entry : [entry, ''];
+      idTypes.set(id, types[typeIndex] ?? typeIndex ?? '');
+      if (name) idNames.set(id, name);
+    }
+    const normalized = {
+      __normalized: true,
+      idTypes,
+      idNames,
+      builtinIds: new Set(reference.builtinIds || []),
+      grantTypes: Object.keys(reference.grantTypes || {}),
+      selectTypes: Object.keys(reference.selectTypes || {}),
+      statNames: Object.keys(reference.statNames || {}),
+      setterNamesByType: new Map(Object.entries(reference.setterNamesByType || {})
+        .map(([type, counts]) => [type, counts || {}])),
+      typeCounts: reference.typeCounts || {},
+      idsByType: new Map()
+    };
+    for (const [id, type] of idTypes.entries()) {
+      if (!normalized.idsByType.has(type)) normalized.idsByType.set(type, []);
+      normalized.idsByType.get(type).push(id);
+    }
+    return normalized;
+  }
+
+  function attributeValueRanges(tagRange, attr) {
+    if (!tagRange?.text) return [];
+    const pattern = new RegExp(`\\s${escapeRegExp(attr)}\\s*=\\s*"([^"]*)"`);
+    const match = tagRange.text.match(pattern);
+    if (!match) return [];
+    const valueStart = tagRange.start + match.index + match[0].length - match[1].length - 1;
+    const ranges = [];
+    for (const token of match[1].matchAll(/ID_[A-Za-z0-9_]+/g)) {
+      ranges.push({ start: valueStart + token.index, end: valueStart + token.index + token[0].length, text: token[0] });
+    }
+    return ranges;
+  }
+
+  // Same element name under a different source prefix, e.g. ID_PHB_SPELL_X -> ID_XGTE_SPELL_X.
+  function sameNameDifferentPrefix(id, pool) {
+    const parts = String(id || '').split('_');
+    // The shared suffix must cover at least half of the id so generic tails like _ORIGIN_SPELLS don't match.
+    const minSegments = Math.max(2, Math.ceil((parts.length - 1) / 2));
+    for (let start = 2; parts.length - start >= minSegments; start += 1) {
+      const suffix = `_${parts.slice(start).join('_')}`;
+      const matches = pool.filter(candidate => candidate !== id && candidate.endsWith(suffix));
+      if (matches.length) return matches.slice(0, 3).map(value => ({ value, distance: 0 }));
+    }
+    return [];
+  }
+
+  function referenceCandidates(id, expectedType, reference, localIds) {
+    const pool = [];
+    if (expectedType && reference.idsByType.has(expectedType)) pool.push(...reference.idsByType.get(expectedType));
+    for (const [localId, localType] of localIds.entries()) {
+      if (!expectedType || localType === expectedType) pool.push(localId);
+    }
+    const allIds = () => Array.from(reference.idTypes.keys()).concat(Array.from(localIds.keys()));
+    let matches = closestNames(id, pool, { caseInsensitive: false });
+    if (!matches.length) matches = sameNameDifferentPrefix(id, expectedType ? pool : allIds());
+    if (!matches.length && expectedType) {
+      matches = closestNames(id, allIds(), { caseInsensitive: false });
+    }
+    return matches.map(match => ({
+      value: match.value,
+      distance: match.distance,
+      reason: [reference.idTypes.get(match.value) || localIds.get(match.value), reference.idNames.get(match.value)]
+        .filter(Boolean)
+        .join(': ') || 'similar id'
+    }));
+  }
+
+  function diagnoseReferences(elements, docs, referenceInput) {
     const findings = [];
+    const reference = normalizeReferenceIndex(referenceInput);
+
+    for (const doc of docs || []) {
+      const xml = String(doc.xml || '');
+      const infoMatch = xml.match(/<info\b[^>]*>([\s\S]*?)<\/info>/i);
+      if (infoMatch) {
+        const infoBodyStart = infoMatch.index + infoMatch[0].indexOf(infoMatch[1]);
+        const nameTag = infoMatch[1].match(/<n\b[^>]*>[\s\S]*?<\/n>/i);
+        if (nameTag) {
+          const start = infoBodyStart + nameTag.index;
+          const node = { kind: 'info', line: lineForIndex(xml, start), xml: nameTag[0] };
+          findings.push(diagnostic(
+            { fileName: doc.fileName, nodeKind: 'info', nodeXml: nameTag[0], line: node.line },
+            'error',
+            'info-uses-n-tag',
+            'The <info> block uses <n> for the content name; Aurora reads <name>.',
+            'Rename <n> to <name>.',
+            [repair('rename-tag', 'Rename <n> to <name> inside <info>.', {
+              confidence: 'high',
+              target: { fileName: doc.fileName },
+              anchor: { fileName: doc.fileName, start, end: start + nameTag[0].length, text: nameTag[0] },
+              fromTag: 'n',
+              toTag: 'name',
+              replacementValue: 'name',
+              sample: nameTag[0].replace(/^<n\b/, '<name').replace(/<\/n>$/, '</name>')
+            })],
+            { node }
+          ));
+        }
+        if (!/<update\b/i.test(infoMatch[1])) {
+          const fileLabel = String(doc.fileName || 'content.xml').split(/[\\/]/).pop();
+          findings.push(diagnostic(
+            { fileName: doc.fileName, nodeKind: 'info', nodeXml: trimSnippet(infoMatch[0], 400), line: lineForIndex(xml, infoMatch.index) },
+            'warning',
+            'missing-info-update',
+            'The <info> block has no <update> node, so Aurora cannot track this file for updates.',
+            'Add an <update version="..."> node with a <file name="..." url="..." /> entry.',
+            [repair('insert-update-node', 'Add an <update> block inside <info>; fill in the URL where the file is hosted.', {
+              confidence: 'manual',
+              target: { fileName: doc.fileName },
+              sample: `<update version="0.0.1">\n  <file name="${fileLabel}" url="https://example.com/${fileLabel}" />\n</update>`
+            })]
+          ));
+        }
+      }
+    }
+
+    if (!reference) return findings;
+
+    const localIds = new Map();
+    for (const element of elements || []) {
+      if (element.id) localIds.set(element.id, element.type);
+    }
+    for (const doc of docs || []) {
+      for (const match of String(doc.xml || '').matchAll(/<multiclass\b[^>]*\bid="([^"]+)"/gi)) {
+        if (!localIds.has(match[1])) localIds.set(match[1], 'Multiclass');
+      }
+    }
+    const typeOf = id => localIds.get(id) || reference.idTypes.get(id) || '';
+    const isKnown = id => localIds.has(id) || reference.idTypes.has(id) || reference.builtinIds.has(id);
+    const knownGrantTypes = new Set(reference.grantTypes);
+    const knownSelectTypes = new Set(reference.selectTypes);
+    const knownStatNames = new Set(reference.statNames);
+
+    for (const element of elements || []) {
+      for (const rule of element.ruleRecords || []) {
+        const ruleNode = nodeFromRule(rule);
+        const ruleTarget = elementTarget(element, { ruleKind: rule.kind, ruleSignature: rule.signature });
+
+        const grantTypeUnknown = rule.kind === 'grant' && rule.attrs.type && knownGrantTypes.size && !knownGrantTypes.has(rule.attrs.type);
+        if (grantTypeUnknown) {
+          // The granted element's own type is the strongest evidence; fall back to spelling.
+          const grantedTypes = Array.from(new Set((String(rule.attrs.id || '').match(/ID_[A-Za-z0-9_]+/g) || [])
+            .map(typeOf)
+            .filter(type => type && type !== 'Multiclass')));
+          const fromTarget = grantedTypes.length === 1 && knownGrantTypes.has(grantedTypes[0]) ? grantedTypes[0] : '';
+          const candidates = fromTarget
+            ? [{ value: fromTarget, reason: `granted id is a ${fromTarget} element` }]
+            : closestNames(rule.attrs.type, reference.grantTypes, { maxDistance: typeNameDistance(rule.attrs.type) })
+              .map(candidate => ({ value: candidate.value, reason: 'known grant type' }));
+          findings.push(diagnostic(
+            element,
+            'error',
+            'unknown-grant-type',
+            `Grant type '${rule.attrs.type}' is not used by any first-party content.`,
+            candidates.length ? `Did you mean '${candidates[0].value}'?` : 'Use a grant type Aurora recognizes.',
+            [repair('set-rule-attribute', 'Change the grant type to a known Aurora grant type.', {
+              confidence: candidates.length === 1 ? 'high' : 'manual',
+              target: ruleTarget,
+              anchor: anchorFor(element, rule.openTagRange),
+              attribute: 'type',
+              currentValue: rule.attrs.type,
+              ...(candidates.length === 1 ? { replacementValue: candidates[0].value } : { valuePlaceholder: 'GRANT TYPE' }),
+              ...(fromTarget ? { inferenceReason: candidates[0].reason } : {}),
+              candidateValues: candidates.length
+                ? candidates
+                : reference.grantTypes.slice(0, 6).map(value => ({ value, reason: 'known grant type' })),
+              sample: xmlWithAttribute(rule.rawXml, 'type', candidates[0]?.value || 'GRANT TYPE')
+            })],
+            { node: ruleNode }
+          ));
+        }
+
+        if (rule.kind === 'select' && rule.attrs.type && knownSelectTypes.size && !knownSelectTypes.has(rule.attrs.type)) {
+          const candidates = closestNames(rule.attrs.type, reference.selectTypes, { maxDistance: typeNameDistance(rule.attrs.type) });
+          findings.push(diagnostic(
+            element,
+            'warning',
+            'unknown-select-type',
+            `Select type '${rule.attrs.type}' is not used by any first-party content.`,
+            candidates.length ? `Did you mean '${candidates[0].value}'?` : 'Use a select type Aurora recognizes.',
+            [repair('set-rule-attribute', 'Change the select type to a known Aurora select type.', {
+              confidence: candidates.length === 1 ? 'high' : 'manual',
+              target: ruleTarget,
+              anchor: anchorFor(element, rule.openTagRange),
+              attribute: 'type',
+              currentValue: rule.attrs.type,
+              ...(candidates.length === 1 ? { replacementValue: candidates[0].value } : { valuePlaceholder: 'SELECT TYPE' }),
+              candidateValues: candidates.map(candidate => ({ value: candidate.value, reason: 'known select type' })),
+              sample: xmlWithAttribute(rule.rawXml, 'type', candidates[0]?.value || 'SELECT TYPE')
+            })],
+            { node: ruleNode }
+          ));
+        }
+
+        if (rule.kind === 'stat' && rule.attrs.name && knownStatNames.size && !knownStatNames.has(rule.attrs.name)) {
+          // Custom stat names are legitimate; only flag near-misses of a known name.
+          const candidates = rule.attrs.name.length >= 6
+            ? closestNames(rule.attrs.name, reference.statNames, { maxDistance: 1 })
+            : [];
+          if (candidates.length) {
+            findings.push(diagnostic(
+              element,
+              'review',
+              'unknown-stat-name',
+              `Stat name '${rule.attrs.name}' is close to known stat '${candidates[0].value}'.`,
+              'If this was meant to modify the known stat, correct the spelling; custom stat names are otherwise fine.',
+              [repair('set-rule-attribute', 'Use the known stat name.', {
+                confidence: 'manual',
+                target: ruleTarget,
+                anchor: anchorFor(element, rule.openTagRange),
+                attribute: 'name',
+                currentValue: rule.attrs.name,
+                valuePlaceholder: candidates[0].value,
+                candidateValues: candidates.map(candidate => ({ value: candidate.value, reason: 'known stat name' })),
+                sample: xmlWithAttribute(rule.rawXml, 'name', candidates[0].value)
+              })],
+              { node: ruleNode }
+            ));
+          }
+        }
+
+        const referenceRanges = [];
+        if (rule.kind === 'grant') {
+          for (const range of attributeValueRanges(rule.openTagRange, 'id')) referenceRanges.push({ range, attr: 'id', expectedType: rule.attrs.type });
+        }
+        for (const range of attributeValueRanges(rule.openTagRange, 'requirements')) referenceRanges.push({ range, attr: 'requirements', expectedType: '' });
+
+        for (const { range, attr, expectedType } of referenceRanges) {
+          const id = range.text;
+          if (isKnown(id)) {
+            const actualType = typeOf(id);
+            if (attr === 'id' && !grantTypeUnknown && expectedType && actualType && actualType !== 'Multiclass' && actualType !== expectedType) {
+              findings.push(diagnostic(
+                element,
+                'warning',
+                'grant-type-mismatch',
+                `Grant type '${expectedType}' does not match '${id}', which is a ${actualType} element.`,
+                `Use grant type="${actualType}" so Aurora resolves the granted element.`,
+                [repair('set-rule-attribute', `Change the grant type to ${actualType}.`, {
+                  confidence: 'medium',
+                  target: ruleTarget,
+                  anchor: anchorFor(element, rule.openTagRange),
+                  attribute: 'type',
+                  currentValue: expectedType,
+                  replacementValue: actualType,
+                  inferenceReason: `${id} is defined as type="${actualType}"`,
+                  sample: xmlWithAttribute(rule.rawXml, 'type', actualType)
+                })],
+                { node: ruleNode }
+              ));
+            }
+            continue;
+          }
+          const candidates = referenceCandidates(id, attr === 'id' ? expectedType : '', reference, localIds);
+          const single = candidates.length === 1 || (candidates.length > 1 && candidates[0].distance < candidates[1].distance);
+          findings.push(diagnostic(
+            element,
+            'warning',
+            'unresolved-id-reference',
+            `${rule.kind} ${attr} references '${id}', which is not defined in the loaded files or first-party content.`,
+            candidates.length
+              ? `Did you mean '${candidates[0].value}'? If the id comes from another content pack, load that file too or ignore this.`
+              : 'Check the id spelling. If it comes from another content pack, load that file too or ignore this.',
+            [repair('replace-reference-id', 'Replace the unresolved id with a known id.', {
+              confidence: candidates.length && single ? 'high' : 'manual',
+              target: ruleTarget,
+              anchor: anchorFor(element, range),
+              currentValue: id,
+              ...(candidates.length && single ? { replacementValue: candidates[0].value } : { valuePlaceholder: 'ID_KNOWN_ELEMENT' }),
+              candidateValues: candidates,
+              sample: rule.rawXml.replace(id, candidates[0]?.value || 'ID_KNOWN_ELEMENT')
+            })],
+            { node: ruleNode }
+          ));
+        }
+      }
+
+      const setterCounts = reference.setterNamesByType.get(element.type);
+      const typeCount = Number(reference.typeCounts[element.type] || 0);
+      if (setterCounts && typeCount >= 10) {
+        const knownSetters = Object.keys(setterCounts);
+        const renameTargets = new Set();
+        for (const setterName of Object.keys(element.setters || {})) {
+          if (setterCounts[setterName]) continue;
+          const candidates = closestNames(setterName, knownSetters, { maxDistance: 2 });
+          if (!candidates.length) continue;
+          renameTargets.add(candidates[0].value);
+          const range = element.setterRanges?.[setterName];
+          findings.push(diagnostic(
+            element,
+            'warning',
+            'unexpected-setter',
+            `Setter '${setterName}' is never used on first-party ${element.type} elements; '${candidates[0].value}' is.`,
+            `Rename the setter to '${candidates[0].value}' if that was intended.`,
+            [repair('rename-setter', `Rename the setter to ${candidates[0].value}.`, {
+              confidence: candidates.length === 1 ? 'high' : 'manual',
+              target: elementTarget(element),
+              anchor: range ? anchorFor(element, range) : null,
+              attribute: 'name',
+              currentValue: setterName,
+              ...(candidates.length === 1 ? { replacementValue: candidates[0].value } : { valuePlaceholder: candidates[0].value }),
+              candidateValues: candidates.map(candidate => ({ value: candidate.value, reason: `first-party ${element.type} setter` })),
+              sample: `<set name="${candidates[0].value}">${escapeXmlText(element.setters[setterName])}</set>`
+            })],
+            { node: range ? { kind: 'setter', line: lineForIndex(docXml(docs, element.fileName), range.start), xml: range.text } : nodeFromElement(element) }
+          ));
+        }
+        if (!element.selfClosing) {
+          for (const [setterName, count] of Object.entries(setterCounts)) {
+            if (count / typeCount < 0.95 || Object.prototype.hasOwnProperty.call(element.setters || {}, setterName)) continue;
+            if (renameTargets.has(setterName)) continue;
+            if (element.type === 'Class' && setterName === 'hd') continue;
+            findings.push(diagnostic(
+              element,
+              'review',
+              'missing-common-setter',
+              `${element.type} '${element.name}' has no '${setterName}' setter, which ${Math.round((count / typeCount) * 100)}% of first-party ${element.type} elements set.`,
+              `Add <set name="${setterName}"> if it applies to this element.`,
+              [repair('insert-setter', `Insert a ${setterName} setter.`, {
+                confidence: 'manual',
+                target: elementTarget(element),
+                anchor: element.settersOpenTagRange
+                  ? anchorFor(element, element.settersOpenTagRange, { mode: 'after-setters-open' })
+                  : anchorFor(element, element.openTagRange, { mode: 'after-element-open' }),
+                setterName,
+                valuePlaceholder: setterName.toUpperCase(),
+                snippet: `<set name="${setterName}">VALUE</set>`,
+                sample: `<setters>\n  <set name="${setterName}">VALUE</set>\n</setters>`
+              })]
+            ));
+          }
+        }
+      }
+    }
+    return findings;
+  }
+
+  function escapeXmlText(value) {
+    return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  function docXml(docs, fileName) {
+    return String((docs || []).find(doc => doc.fileName === fileName)?.xml || '');
+  }
+
+  function diagnoseAuroraElements(elements, docs = [], options = {}) {
+    const findings = diagnoseReferences(elements, docs, options.reference);
     const idLocations = new Map();
     const selectSupportsCandidates = buildSelectSupportsCandidates(elements);
 
@@ -874,7 +1283,7 @@
     for (const doc of docs || []) {
       elements.push(...parseAuroraElements(doc.xml || '', doc.fileName || ''));
     }
-    const diagnostics = diagnoseAuroraElements(elements, docs);
+    const diagnostics = diagnoseAuroraElements(elements, docs, { reference: options.reference });
     let repairIndex = 0;
     for (const finding of diagnostics) {
       for (const item of finding.repairs || []) item.id = `r${++repairIndex}`;
@@ -884,6 +1293,72 @@
       diagnostics,
       authoringProfiles: buildAuthoringProfiles(elements, options),
       elements
+    };
+  }
+
+  // Builds the bundled first-party reference index: ids, types, and observed shape counts only.
+  // Descriptions and other prose are deliberately excluded.
+  function buildReferenceIndex(docs, options = {}) {
+    const elements = [];
+    for (const doc of docs || []) elements.push(...parseAuroraElements(doc.xml || '', doc.fileName || ''));
+    const types = [];
+    const typeIndex = new Map();
+    const indexForType = type => {
+      if (!typeIndex.has(type)) {
+        typeIndex.set(type, types.length);
+        types.push(type);
+      }
+      return typeIndex.get(type);
+    };
+    const ids = {};
+    const typeCounts = {};
+    const grantTypes = {};
+    const selectTypes = {};
+    const statNames = {};
+    const setterNamesByType = {};
+    const referenced = new Set();
+    for (const element of elements) {
+      if (element.id) ids[element.id] = options.includeNames === false ? [indexForType(element.type)] : [indexForType(element.type), element.name];
+      increment(typeCounts, element.type);
+      if (!setterNamesByType[element.type]) setterNamesByType[element.type] = {};
+      for (const setterName of Object.keys(element.setters || {})) increment(setterNamesByType[element.type], setterName);
+      for (const rule of element.ruleRecords || []) {
+        if (rule.kind === 'grant') {
+          increment(grantTypes, rule.attrs.type);
+          for (const token of String(rule.attrs.id || '').match(/ID_[A-Za-z0-9_]+/g) || []) referenced.add(token);
+        }
+        if (rule.kind === 'select') increment(selectTypes, rule.attrs.type);
+        if (rule.kind === 'stat') increment(statNames, rule.attrs.name);
+        for (const token of String(rule.attrs.requirements || '').match(/ID_[A-Za-z0-9_]+/g) || []) referenced.add(token);
+      }
+    }
+    const multiclassType = indexForType('Multiclass');
+    for (const doc of docs || []) {
+      for (const match of String(doc.xml || '').matchAll(/<multiclass\b[^>]*\bid="([^"]+)"/gi)) {
+        if (!ids[match[1]]) ids[match[1]] = [multiclassType];
+      }
+    }
+    // Ids first-party content relies on but never defines are built into the Aurora app itself.
+    const builtinIds = Array.from(referenced).filter(id => !ids[id]).sort();
+    const profiles = buildAuthoringProfiles(elements, { top: 8 }).map(profile => ({
+      ...profile,
+      examples: profile.examples.map(example => ({ name: example.name, id: example.id }))
+    }));
+    return {
+      version: 1,
+      generatedAt: options.generatedAt || new Date().toISOString(),
+      corpus: options.corpusLabel || '',
+      fileCount: (docs || []).length,
+      elementCount: elements.length,
+      types,
+      ids,
+      builtinIds,
+      typeCounts: sortedCounts(typeCounts),
+      grantTypes: sortedCounts(grantTypes),
+      selectTypes: sortedCounts(selectTypes),
+      statNames: sortedCounts(statNames),
+      setterNamesByType: Object.fromEntries(Object.entries(setterNamesByType).map(([type, counts]) => [type, sortedCounts(counts)])),
+      profiles
     };
   }
 
@@ -969,11 +1444,15 @@
     attrMap,
     buildAuthoringProfile,
     buildAuthoringProfiles,
+    buildReferenceIndex,
+    closestNames,
     decodeXml,
     diagnoseAuroraElements,
     elementTarget,
+    editDistance,
     encodeAttributeValue,
     normalizeName,
+    normalizeReferenceIndex,
     normalizeSpace,
     parseAuroraElements,
     parseElements: parseAuroraElements,
