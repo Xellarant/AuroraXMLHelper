@@ -189,7 +189,9 @@ test('repair preview analyzes pasted Aurora XML without rewriting it', () => {
     context,
     `window.AuroraXMLHelper.renderRepairPreviewHtml(${JSON.stringify(analysis)})`
   );
-  assert.match(html, /Repair Preview Summary/);
+  assert.match(html, /Repair Summary/);
+  assert.match(html, /Apply Selected Repairs/);
+  assert.match(html, /data-repair-select="r\d+" checked/);
   assert.match(html, /Diagnostics &amp; Repair Suggestions/);
   assert.match(html, /Flagged node/);
   assert.match(html, /&lt;supports&gt;Wizard, 1&lt;\/supports&gt;/);
@@ -200,6 +202,67 @@ test('repair preview analyzes pasted Aurora XML without rewriting it', () => {
   assert.match(html, /Showing observed patterns only for element types that have diagnostics/);
   assert.match(html, /<h4>Spell<\/h4>/);
   assert.ok(!xml.includes('type="Condition"'));
+});
+
+test('repair workflow applies selected repairs, verifies them, and diffs against the original', () => {
+  const context = loadApp();
+  const docs = [
+    {
+      fileName: 'a.xml',
+      xml: `<elements>
+  <element name="Fire Needle" type="Spell" source="Pattern Fixture" id="ID_FIXTURE_SPELL_FIRE_NEEDLE">
+    <supports>Wizard, 1</supports>
+  </element>
+  <element name="Broken Class" type="Class" source="Pattern Fixture" id="ID_FIXTURE_CLASS_BROKEN">
+    <setters>
+      <set name="short">Broken</set>
+    </setters>
+  </element>
+</elements>`
+    },
+    {
+      fileName: 'b.xml',
+      xml: `<elements>
+  <element name="Clean Feat" type="Feat" source="Pattern Fixture" id="ID_FIXTURE_FEAT_CLEAN" />
+</elements>`
+    }
+  ];
+
+  const analysis = JSON.parse(runInApp(
+    context,
+    `JSON.stringify(window.AuroraXMLHelper.inspectRepairDocs(${JSON.stringify(docs)}))`
+  ));
+  const supportsRepair = analysis.diagnostics.find(finding => finding.category === 'spell-supports-level-token').repairs[0];
+  const hdRepair = analysis.diagnostics.find(finding => finding.category === 'class-missing-hit-die').repairs[0];
+
+  const outcome = JSON.parse(runInApp(
+    context,
+    `JSON.stringify(window.AuroraXMLHelper.applyRepairSelection(
+      ${JSON.stringify([supportsRepair.id, hdRepair.id])},
+      ${JSON.stringify({ [hdRepair.id]: 'd10' })}
+    ))`
+  ));
+  assert.equal(outcome.applied.length, 2);
+  assert.equal(outcome.skipped.length, 0);
+  assert.equal(outcome.verify.resolved.length, 2);
+  assert.equal(outcome.verify.introduced.length, 0);
+
+  const changed = JSON.parse(runInApp(context, 'JSON.stringify(window.AuroraXMLHelper.changedRepairDocs())'));
+  assert.deepEqual(changed.map(doc => doc.fileName), ['a.xml']);
+  assert.match(changed[0].xml, /<supports>Wizard<\/supports>/);
+  assert.match(changed[0].xml, /<set name="hd">d10<\/set>/);
+
+  const html = runInApp(
+    context,
+    `window.AuroraXMLHelper.renderRepairPreviewHtml(
+      window.AuroraXMLHelper.repairState.analysis,
+      { lastApply: window.AuroraXMLHelper.repairState.lastApply }
+    )`
+  );
+  assert.match(html, /Applied Repairs/);
+  assert.match(html, /Download Fixed XML/);
+  assert.match(html, /repair-diff-line add/);
+  assert.match(html, /No diagnostics found/);
 });
 
 test('repair preview hides authoring profiles when there are no related diagnostics', () => {

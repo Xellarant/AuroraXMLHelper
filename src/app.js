@@ -3514,13 +3514,41 @@ function getAuroraXmlPatterns() {
   return patterns;
 }
 
+function getAuroraXmlRepair() {
+  const repairApi = globalThis.AuroraXmlRepair || window.AuroraXmlRepair;
+  if (!repairApi?.applyRepairs) {
+    throw new Error('Aurora XML repair support is not loaded.');
+  }
+  return repairApi;
+}
+
+// Loaded/pasted docs, the docs as originally inspected, and the latest analysis.
+const repairState = {
+  uploadedDocs: [],
+  originalDocs: [],
+  docs: [],
+  analysis: null,
+  lastApply: null
+};
+
+function repairAnalysisOptions(options = {}) {
+  return { top: 6, ...options };
+}
+
+function normalizeRepairDocs(docs) {
+  const normalized = (docs || [])
+    .map(doc => ({ fileName: doc.fileName || 'pasted.xml', xml: String(doc.xml || '').trim() }))
+    .filter(doc => doc.xml);
+  if (!normalized.length) throw new Error('Paste or upload Aurora XML before inspecting.');
+  return normalized;
+}
+
+function analyzeRepairXmlDocs(docs, options = {}) {
+  return getAuroraXmlPatterns().analyzeAuroraXmlDocuments(normalizeRepairDocs(docs), repairAnalysisOptions(options));
+}
+
 function analyzeRepairXmlText(xml, fileName = 'pasted.xml', options = {}) {
-  const text = String(xml || '').trim();
-  if (!text) throw new Error('Paste or upload Aurora XML before inspecting.');
-  return getAuroraXmlPatterns().analyzeAuroraXmlDocuments([{ fileName, xml: text }], {
-    top: 6,
-    ...options
-  });
+  return analyzeRepairXmlDocs([{ fileName, xml }], options);
 }
 
 function repairSeverityCounts(diagnostics = []) {
@@ -3586,6 +3614,39 @@ function renderCandidateValues(repair) {
   return `<br /><span class="text-muted">Likely candidates${reason}: ${label}.</span>`;
 }
 
+function repairIsApplicable(repair) {
+  const repairApi = globalThis.AuroraXmlRepair || window.AuroraXmlRepair;
+  return Boolean(repairApi?.isRepairApplicable?.(repair));
+}
+
+function repairNeedsUserValue(repair) {
+  if (repair.kind === 'rename-tag' || repair.kind === 'insert-snippet') return false;
+  return repair.replacementValue === undefined || repair.replacementValue === null || String(repair.replacementValue) === '';
+}
+
+function repairDefaultChecked(repair) {
+  return repairIsApplicable(repair) && repair.confidence === 'high' && !repairNeedsUserValue(repair);
+}
+
+function renderRepairControl(repair) {
+  if (!repair.id || !repairIsApplicable(repair)) {
+    return '<span class="repair-manual-tag">manual edit</span>';
+  }
+  const checked = repairDefaultChecked(repair) ? ' checked' : '';
+  const checkbox = `<label class="repair-apply-toggle"><input type="checkbox" data-repair-select="${escAttr(repair.id)}"${checked} /> Apply</label>`;
+  if (!repairNeedsUserValue(repair)) return checkbox;
+  const candidates = Array.isArray(repair.candidateValues) ? repair.candidateValues : [];
+  const listId = candidates.length ? `repairCandidates-${repair.id}` : '';
+  const datalist = candidates.length
+    ? `<datalist id="${escAttr(listId)}">${candidates.map(candidate => `<option value="${escAttr(candidate.value)}"></option>`).join('')}</datalist>`
+    : '';
+  const prefill = candidates.length === 1 ? candidates[0].value : '';
+  return `${checkbox}
+    <input type="text" class="repair-value-input" data-repair-value="${escAttr(repair.id)}" value="${escAttr(prefill)}"
+      placeholder="${escAttr(repair.valuePlaceholder || 'value')}"${listId ? ` list="${escAttr(listId)}"` : ''}
+      oninput="repairValueChanged(this)" />${datalist}`;
+}
+
 function renderRepairDiagnosticCards(diagnostics = []) {
   if (!diagnostics.length) {
     return '<p class="text-muted">No diagnostics found for the pasted XML.</p>';
@@ -3598,7 +3659,7 @@ function renderRepairDiagnosticCards(diagnostics = []) {
       const inference = repair.inferenceReason
         ? `<br /><span class="text-muted">Inferred from ${escHtml(repair.inferenceReason)}.</span>`
         : '';
-      return `<li>${escHtml(repair.kind || 'manual-review')} (${escHtml(repair.confidence || 'manual')})${detailText}<br />${escHtml(repair.description || '')}${inference}${renderCandidateValues(repair)}${renderRepairSnippet('Suggested sample', sample)}</li>`;
+      return `<li><div class="repair-control">${renderRepairControl(repair)}</div>${escHtml(repair.kind || 'manual-review')} (${escHtml(repair.confidence || 'manual')})${detailText}<br />${escHtml(repair.description || '')}${inference}${renderCandidateValues(repair)}${renderRepairSnippet('Suggested sample', sample)}</li>`;
     }).join('');
     return `<div class="repair-card ${escAttr(finding.severity || 'review')}">
       <div class="repair-meta">${escHtml(finding.severity || 'review')} / ${escHtml(finding.category || 'diagnostic')} / ${escHtml(repairElementLabel(finding))}</div>
@@ -3643,7 +3704,59 @@ function profilesRelatedToDiagnostics(profiles = [], diagnostics = []) {
   return (profiles || []).filter(profile => diagnosticTypes.has(profile.type));
 }
 
-function renderRepairPreviewHtml(analysis) {
+function renderRepairApplyBar(diagnostics = []) {
+  const applicable = diagnostics.flatMap(finding => finding.repairs || []).filter(repairIsApplicable);
+  if (!applicable.length) return '';
+  const preselected = applicable.filter(repairDefaultChecked).length;
+  return `<div class="repair-apply-bar">
+    <button class="btn btn-primary" type="button" onclick="applySelectedRepairs()">Apply Selected Repairs</button>
+    <span class="text-muted">${escHtml(applicable.length)} repair(s) can be applied automatically; ${escHtml(preselected)} high-confidence repair(s) are preselected. Repairs that need a value are applied once you enter one.</span>
+  </div>`;
+}
+
+function renderRepairDiffHtml(hunks = []) {
+  if (!hunks.length) return '<p class="text-muted">No line changes.</p>';
+  return hunks.map(hunk => `<pre class="repair-diff">${hunk.map(row => {
+    const cls = row.op === '+' ? 'add' : row.op === '-' ? 'del' : 'ctx';
+    const lineNo = row.op === '+' ? row.b : row.a;
+    return `<span class="repair-diff-line ${cls}"><span class="repair-diff-no">${escHtml(lineNo || '')}</span>${escHtml(row.op)} ${escHtml(row.line)}</span>`;
+  }).join('\n')}</pre>`).join('');
+}
+
+function changedRepairDocs(state = repairState) {
+  const originals = new Map((state.originalDocs || []).map(doc => [doc.fileName, doc.xml]));
+  return (state.docs || []).filter(doc => originals.get(doc.fileName) !== doc.xml);
+}
+
+function renderRepairApplyResultHtml(lastApply, state = repairState) {
+  if (!lastApply) return '';
+  const { applied = [], skipped = [], verify = null } = lastApply;
+  const repairApi = getAuroraXmlRepair();
+  const changed = changedRepairDocs(state);
+  const originals = new Map((state.originalDocs || []).map(doc => [doc.fileName, doc.xml]));
+  const skippedRows = skipped.map(item => `<li>${escHtml(item.repair?.kind || 'repair')} on ${escHtml(item.repair?.target?.elementName || item.repair?.anchor?.fileName || 'document')}: ${escHtml(item.reason)}</li>`).join('');
+  const introduced = verify?.introduced || [];
+  const parseErrors = verify?.shape?.parseErrorsAfter || [];
+  const diffs = changed.map(doc => `<div class="repair-snippet">
+      <div class="repair-snippet-title">${escHtml(doc.fileName)} <span class="text-muted">changes since first inspection</span></div>
+      ${renderRepairDiffHtml(repairApi.diffLines(originals.get(doc.fileName) || '', doc.xml, { context: 2 }))}
+    </div>`).join('');
+  return `<div class="repair-result-section repair-apply-result">
+    <h3>Applied Repairs</h3>
+    <p><strong>This pass:</strong> applied=${escHtml(applied.length)}, skipped=${escHtml(skipped.length)}${verify ? `, resolved findings=${escHtml(verify.resolved.length)}, remaining=${escHtml(verify.remaining.length)}, new=${escHtml(introduced.length)}` : ''}</p>
+    ${introduced.length ? `<div class="alert alert-warning">New finding(s) appeared after this pass: ${introduced.map(finding => escHtml(finding.message)).join(' ')}</div>` : ''}
+    ${parseErrors.length ? `<div class="alert alert-error">The repaired XML no longer parses: ${parseErrors.map(issue => escHtml(issue.msg)).join(' ')}</div>` : ''}
+    ${skippedRows ? `<p class="text-muted">Skipped:</p><ul>${skippedRows}</ul>` : ''}
+    ${changed.length ? `<div class="repair-preview-actions">
+      <button class="btn btn-primary" type="button" onclick="downloadRepairedXml()">Download Fixed XML</button>
+      <button class="btn btn-secondary" type="button" onclick="copyRepairedXml()">Copy Fixed XML</button>
+      <button class="btn btn-secondary" type="button" onclick="resetRepairedXml()">Undo All Repairs</button>
+    </div>` : ''}
+    ${diffs}
+  </div>`;
+}
+
+function renderRepairPreviewHtml(analysis, options = {}) {
   const catalog = analysis?.catalog || { totalElements: 0, files: [], types: {} };
   const diagnostics = analysis?.diagnostics || [];
   const counts = repairSeverityCounts(diagnostics);
@@ -3654,14 +3767,17 @@ function renderRepairPreviewHtml(analysis) {
       rules: ${repairCountList(bucket.ruleKinds)}</li>`
   )).join('');
 
-  return `<div class="repair-result-section">
-    <h3>Repair Preview Summary</h3>
+  return `${options.lastApply ? renderRepairApplyResultHtml(options.lastApply, options.state || repairState) : ''}
+  <div class="repair-result-section">
+    <h3>Repair Summary</h3>
+    <p><strong>Files:</strong> ${escHtml((catalog.files || []).join(', ') || 'pasted.xml')}</p>
     <p><strong>Elements:</strong> ${escHtml(catalog.totalElements || 0)}</p>
     <p><strong>Diagnostics:</strong> errors=${escHtml(counts.error)}, warnings=${escHtml(counts.warning)}, review=${escHtml(counts.review)}</p>
     ${typeRows ? `<ul>${typeRows}</ul>` : '<p class="text-muted">No element type patterns were found.</p>'}
   </div>
   <div class="repair-result-section">
     <h3>Diagnostics &amp; Repair Suggestions</h3>
+    ${renderRepairApplyBar(diagnostics)}
     ${renderRepairDiagnosticCards(diagnostics)}
   </div>
   ${relatedProfiles.length ? `<div class="repair-result-section">
@@ -3680,21 +3796,55 @@ function setRepairPreviewStatus(message, tone = 'info') {
 }
 
 async function handleRepairXmlFileSelect(event) {
-  const file = event?.target?.files?.[0];
-  if (!file) return;
-  document.getElementById('repairXmlInput').value = await file.text();
-  setRepairPreviewStatus(`Loaded ${file.name}. Click Inspect XML to analyze.`, 'success');
+  const files = Array.from(event?.target?.files || []);
+  if (!files.length) return;
+  const docs = await Promise.all(files.map(async file => ({ fileName: file.name, xml: await file.text() })));
+  loadRepairDocs(docs);
+  setRepairPreviewStatus(`Loaded ${docs.length === 1 ? docs[0].fileName : `${docs.length} files`}. Click Inspect XML to analyze.`, 'success');
+}
+
+function loadRepairDocs(docs) {
+  const input = document.getElementById('repairXmlInput');
+  repairState.uploadedDocs = docs.map(doc => ({ fileName: doc.fileName, xml: String(doc.xml || '') }));
+  if (!input) return;
+  if (repairState.uploadedDocs.length === 1) {
+    input.value = repairState.uploadedDocs[0].xml;
+    input.readOnly = false;
+  } else {
+    input.value = '';
+    input.readOnly = true;
+    input.placeholder = `${repairState.uploadedDocs.length} files loaded: ${repairState.uploadedDocs.map(doc => doc.fileName).join(', ')}. Clear to paste XML instead.`;
+  }
+}
+
+function currentRepairInputDocs() {
+  const input = document.getElementById('repairXmlInput');
+  if (repairState.uploadedDocs.length > 1) return repairState.uploadedDocs;
+  const fileName = repairState.uploadedDocs[0]?.fileName || 'pasted.xml';
+  return [{ fileName, xml: input?.value || '' }];
+}
+
+function renderRepairResults() {
+  const results = document.getElementById('repairPreviewResults');
+  if (!results) return;
+  results.innerHTML = renderRepairPreviewHtml(repairState.analysis, { lastApply: repairState.lastApply, state: repairState });
+  results.classList.remove('hidden');
+}
+
+function inspectRepairDocs(docs) {
+  const normalized = normalizeRepairDocs(docs);
+  repairState.originalDocs = normalized.map(doc => ({ ...doc }));
+  repairState.docs = normalized.map(doc => ({ ...doc }));
+  repairState.analysis = analyzeRepairXmlDocs(repairState.docs);
+  repairState.lastApply = null;
+  return repairState.analysis;
 }
 
 function inspectRepairXml() {
-  const input = document.getElementById('repairXmlInput');
-  const fileInput = document.getElementById('repairXmlFile');
   const results = document.getElementById('repairPreviewResults');
   try {
-    const fileName = fileInput?.files?.[0]?.name || 'pasted.xml';
-    const analysis = analyzeRepairXmlText(input?.value || '', fileName);
-    results.innerHTML = renderRepairPreviewHtml(analysis);
-    results.classList.remove('hidden');
+    const analysis = inspectRepairDocs(currentRepairInputDocs());
+    renderRepairResults();
     const counts = repairSeverityCounts(analysis.diagnostics);
     const tone = counts.error || counts.warning ? 'warning' : 'success';
     setRepairPreviewStatus(
@@ -3710,12 +3860,121 @@ function inspectRepairXml() {
   }
 }
 
+function repairValueChanged(input) {
+  const id = input?.dataset?.repairValue;
+  if (!id) return;
+  const checkbox = Array.from(document.querySelectorAll('#repairPreviewResults input[data-repair-select]'))
+    .find(candidate => candidate.dataset.repairSelect === id);
+  if (checkbox && String(input.value || '').trim()) checkbox.checked = true;
+}
+
+function collectRepairSelections() {
+  const ids = Array.from(document.querySelectorAll('#repairPreviewResults input[data-repair-select]'))
+    .filter(input => input.checked)
+    .map(input => input.dataset.repairSelect);
+  const values = {};
+  document.querySelectorAll('#repairPreviewResults input[data-repair-value]').forEach(input => {
+    values[input.dataset.repairValue] = input.value;
+  });
+  return { ids, values };
+}
+
+function applyRepairSelection(ids = [], values = {}) {
+  if (!repairState.analysis) throw new Error('Inspect XML before applying repairs.');
+  const wanted = new Set(ids);
+  const repairs = repairState.analysis.diagnostics
+    .flatMap(finding => finding.repairs || [])
+    .filter(repair => wanted.has(repair.id));
+  if (!repairs.length) throw new Error('Select at least one repair to apply.');
+  const repairApi = getAuroraXmlRepair();
+  const beforeDocs = repairState.docs;
+  const result = repairApi.applyRepairs(beforeDocs, repairs, { values });
+  const afterDocs = result.docs.map(doc => ({ fileName: doc.fileName, xml: doc.xml }));
+  const verify = repairApi.verifyRepairedXml(beforeDocs, afterDocs, {
+    beforeAnalysis: repairState.analysis,
+    analysisOptions: repairAnalysisOptions()
+  });
+  repairState.docs = afterDocs;
+  repairState.analysis = verify.analysis;
+  repairState.lastApply = { applied: result.applied, skipped: result.skipped, verify };
+  return repairState.lastApply;
+}
+
+function applySelectedRepairs() {
+  try {
+    const { ids, values } = collectRepairSelections();
+    const outcome = applyRepairSelection(ids, values);
+    renderRepairResults();
+    const tone = outcome.verify.introduced.length || outcome.skipped.length ? 'warning' : 'success';
+    setRepairPreviewStatus(
+      `Applied ${outcome.applied.length} repair(s); resolved ${outcome.verify.resolved.length} finding(s); ${outcome.verify.remaining.length} remain.`,
+      tone
+    );
+  } catch (error) {
+    setRepairPreviewStatus(error.message, 'error');
+  }
+}
+
+function downloadBlobFile(fileName, blob) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fileName;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+async function downloadRepairedXml() {
+  const changed = changedRepairDocs();
+  if (!changed.length) {
+    setRepairPreviewStatus('No repaired files to download.', 'info');
+    return;
+  }
+  if (changed.length === 1) {
+    downloadBlobFile(changed[0].fileName, new Blob([changed[0].xml], { type: 'application/xml' }));
+    return;
+  }
+  const zip = new JSZip();
+  changed.forEach(doc => zip.file(doc.fileName, doc.xml));
+  downloadBlobFile('repaired-xml.zip', await zip.generateAsync({ type: 'blob' }));
+}
+
+async function copyRepairedXml() {
+  const changed = changedRepairDocs();
+  if (!changed.length) return;
+  const text = changed.length === 1
+    ? changed[0].xml
+    : changed.map(doc => `<!-- ${doc.fileName} -->\n${doc.xml}`).join('\n\n');
+  try {
+    await navigator.clipboard.writeText(text);
+    setRepairPreviewStatus(`Copied ${changed.length === 1 ? changed[0].fileName : `${changed.length} files`} to the clipboard.`, 'success');
+  } catch (error) {
+    setRepairPreviewStatus(`Copy failed: ${error.message}`, 'error');
+  }
+}
+
+function resetRepairedXml() {
+  if (!repairState.originalDocs.length) return;
+  inspectRepairDocs(repairState.originalDocs);
+  renderRepairResults();
+  setRepairPreviewStatus('Reverted all applied repairs.', 'info');
+}
+
 function clearRepairXmlPreview() {
   const input = document.getElementById('repairXmlInput');
   const fileInput = document.getElementById('repairXmlFile');
   const status = document.getElementById('repairPreviewStatus');
   const results = document.getElementById('repairPreviewResults');
-  if (input) input.value = '';
+  repairState.uploadedDocs = [];
+  repairState.originalDocs = [];
+  repairState.docs = [];
+  repairState.analysis = null;
+  repairState.lastApply = null;
+  if (input) {
+    input.value = '';
+    input.readOnly = false;
+    input.placeholder = 'Paste Aurora XML here, or upload .xml files below.';
+  }
   if (fileInput) fileInput.value = '';
   if (status) {
     status.textContent = '';
@@ -6593,6 +6852,11 @@ window.AuroraXMLHelper = {
   analyzeRepairXmlText,
   renderRepairPreviewHtml,
   repairSeverityCounts,
+  analyzeRepairXmlDocs,
+  inspectRepairDocs,
+  applyRepairSelection,
+  changedRepairDocs,
+  repairState,
   switchWorkspaceView,
   ensurePdfJsLoaded,
   extractPdfPages

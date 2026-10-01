@@ -219,6 +219,29 @@ async function run() {
           const parseVisible = !document.querySelector('[data-workspace-view="parse"]').classList.contains('hidden');
           return repairVisible && parseHiddenAfterRepair && authorVisible && parseVisible;
         })();
+      const repairUiCanApply = (() => {
+        window.AuroraXMLHelper.switchWorkspaceView('repair');
+        document.querySelector('#repairXmlInput').value = smokeXml;
+        Array.from(document.querySelectorAll('button'))
+          .find(button => button.textContent.trim() === 'Inspect XML')
+          .click();
+        const checkbox = document.querySelector('#repairPreviewResults input[data-repair-select]');
+        if (!checkbox || !checkbox.checked) return false;
+        Array.from(document.querySelectorAll('#repairPreviewResults button'))
+          .find(button => button.textContent.trim() === 'Apply Selected Repairs')
+          .click();
+        const results = document.querySelector('#repairPreviewResults');
+        const status = document.querySelector('#repairPreviewStatus').textContent;
+        const fixed = window.AuroraXMLHelper.changedRepairDocs();
+        const ok = /resolved 1 finding/.test(status)
+          && Boolean(results.querySelector('.repair-diff-line.add'))
+          && fixed.length === 1
+          && /<supports>Wizard<\/supports>/.test(fixed[0].xml)
+          && !results.querySelector('.repair-apply-result .alert-error');
+        window.clearRepairXmlPreview();
+        window.AuroraXMLHelper.switchWorkspaceView('parse');
+        return ok;
+      })();
       let pdfExtractionCanReadText = false;
       let pdfExtractionError = '';
       try {
@@ -242,6 +265,7 @@ async function run() {
         pdfjsLoaded: document.documentElement.dataset.pdfjsLoaded,
         auroraShapeLoaded: document.documentElement.dataset.auroraShapeLoaded,
         auroraPatternsLoaded: document.documentElement.dataset.auroraPatternsLoaded,
+        auroraRepairLoaded: document.documentElement.dataset.auroraRepairLoaded,
         pdfTextLayoutLoaded: document.documentElement.dataset.pdfTextLayoutLoaded,
         pdfPageRangeLoaded: document.documentElement.dataset.pdfPageRangeLoaded,
         auroraAppLoaded: document.documentElement.dataset.auroraAppLoaded,
@@ -255,6 +279,7 @@ async function run() {
         hasWorkspaceViews,
         workspaceCanSwitch,
         repairPreviewCanAnalyze,
+        repairUiCanApply,
         pdfExtractionCanReadText,
         pdfExtractionError
       };
@@ -266,6 +291,7 @@ async function run() {
       'pdfjsLoaded',
       'auroraShapeLoaded',
       'auroraPatternsLoaded',
+      'auroraRepairLoaded',
       'pdfTextLayoutLoaded',
       'pdfPageRangeLoaded',
       'auroraAppLoaded'
@@ -284,6 +310,7 @@ async function run() {
       || !result.hasWorkspaceViews
       || !result.workspaceCanSwitch
       || !result.repairPreviewCanAnalyze
+      || !result.repairUiCanApply
       || !result.pdfExtractionCanReadText
     ) {
       throw new Error(`Browser smoke failed app readiness checks: ${JSON.stringify({ missing, result }, null, 2)}`);

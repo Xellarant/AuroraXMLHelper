@@ -94,6 +94,7 @@
       case 'insert-setter': {
         const setter = `<set name="${repair.setterName}">${escapeText(value)}</set>`;
         if (repair.anchor.mode === 'after-setters-open') {
+          if (context.inlineAfter) return `${text}${setter}`;
           return `${text}\n${context.indent}  ${setter}`;
         }
         if (repair.anchor.mode === 'after-element-open') {
@@ -172,7 +173,10 @@
           }
           continue;
         }
-        const context = { indent: lineIndent(original, group.anchor.start) };
+        const context = {
+          indent: lineIndent(original, group.anchor.start),
+          inlineAfter: !/^[ \t]*(\r?\n|$)/.test(original.slice(group.anchor.end, group.anchor.end + 200))
+        };
         let text = group.anchor.text;
         const groupApplied = [];
         const ordered = group.entries.slice().sort((a, b) => KIND_ORDER[a.repair.kind] - KIND_ORDER[b.repair.kind]);

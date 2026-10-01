@@ -111,6 +111,18 @@ test('insert-setter creates or extends the setters block with matching indentati
   assert.equal(verify.resolved.filter(finding => finding.category === 'class-missing-hit-die').length, 2);
 });
 
+test('insert-setter keeps single-line setters blocks on one line', () => {
+  const xml = `<elements>
+  <element name="Inline" type="Class" source="X" id="ID_X_CLASS_INLINE">
+    <setters><set name="short">I</set></setters>
+  </element>
+</elements>`;
+  const { docs, analysis } = analyze(xml);
+  const [hd] = repairsFor(analysis, 'class-missing-hit-die');
+  const result = applyRepairs(docs, [hd], { values: { [hd.id]: 'd6' } });
+  assert.match(result.docs[0].xml, /<setters><set name="hd">d6<\/set><set name="short">I<\/set><\/setters>/);
+});
+
 test('duplicate element ids can be regenerated with a user value', () => {
   const { docs, analysis } = analyze();
   const [regen] = repairsFor(analysis, 'duplicate-element-id');

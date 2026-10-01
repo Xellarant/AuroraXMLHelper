@@ -110,6 +110,7 @@ function loadApp(sourceMeta = {}, options = {}) {
   for (const scriptPath of [
     path.join(repoRoot, 'src', 'aurora-xml-shape.js'),
     path.join(repoRoot, 'src', 'aurora-xml-patterns.js'),
+    path.join(repoRoot, 'src', 'aurora-xml-repair.js'),
     path.join(repoRoot, 'src', 'pdf-text-layout.js'),
     path.join(repoRoot, 'src', 'pdf-page-range.js'),
     path.join(repoRoot, 'src', 'app.js')
