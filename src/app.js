@@ -28,6 +28,81 @@ const ELEMENT_TYPES = ['spell', 'archetype', 'item', 'feat', 'magic', 'race', 'b
 const MANUAL_AUTHOR_TYPES = ELEMENT_TYPES;
 const PDFJS_WORKER_SRC = './vendor/pdf.worker.min.mjs';
 const WORKSPACE_VIEWS = ['parse', 'repair', 'author'];
+let selectedAuthoringTemplateId = '';
+let selectedAuthoringTemplateFileName = 'aurora-authoring-starter.xml';
+let selectedAuthoringTemplateOriginalXml = '';
+let lastRepairPreviewXml = '';
+let repairUndoXml = null;
+
+const AUTHORING_ELEMENT_PROPERTY_OPTIONS = {
+  spell: [
+    { id: 'supports', label: 'Spell lists / supports', node: 'supports', value: 'Wizard', help: 'Replace the spell lists or supports with a comma-separated value.' },
+    { id: 'level', label: 'Spell level', key: 'level', value: '1' },
+    { id: 'school', label: 'School', key: 'school', value: 'Evocation' },
+    { id: 'time', label: 'Casting time', key: 'time', value: '1 action' },
+    { id: 'range', label: 'Range', key: 'range', value: '60 feet' },
+    { id: 'duration', label: 'Duration', key: 'duration', value: 'Instantaneous' },
+    { id: 'hasVerbalComponent', label: 'Verbal component', key: 'hasVerbalComponent', value: 'true' },
+    { id: 'hasSomaticComponent', label: 'Somatic component', key: 'hasSomaticComponent', value: 'true' },
+    { id: 'hasMaterialComponent', label: 'Material component', key: 'hasMaterialComponent', value: 'false' },
+    { id: 'materialComponent', label: 'Material component text', key: 'materialComponent', value: '' },
+    { id: 'isConcentration', label: 'Requires concentration', key: 'isConcentration', value: 'false' },
+    { id: 'isRitual', label: 'Ritual', key: 'isRitual', value: 'false' }
+  ],
+  feat: [
+    { id: 'supports', label: 'Feat category / supports', node: 'supports', value: '', help: 'Replace the support tags, such as Epic Boon. Leave empty only if the feat has no support tags.' },
+    { id: 'prerequisite', label: 'Prerequisite', node: 'prerequisite', value: '', help: 'Adds the display prerequisite text. It does not create a dynamic requirements expression.' }
+  ],
+  gear: [
+    { id: 'category', label: 'Category', key: 'category', value: 'Adventuring Gear' },
+    { id: 'cost', label: 'Cost', key: 'cost', value: '8', qualifierAttr: 'currency', qualifierLabel: 'Currency', qualifier: ['cp', 'sp', 'ep', 'gp', 'pp'], defaultQualifier: 'gp' },
+    { id: 'weight', label: 'Weight', key: 'weight', value: '2', qualifierAttr: 'lb', qualifierLabel: 'Unit', qualifier: ['lb'], defaultQualifier: 'lb', weightValue: true },
+    { id: 'stackable', label: 'Stackable', key: 'stackable', value: 'true' }
+  ],
+  weapon: [
+    { id: 'supports', label: 'Weapon supports', node: 'supports', value: '', help: 'Replace the category, damage type, and property support IDs together.' },
+    { id: 'category', label: 'Category', key: 'category', value: 'Weapons' },
+    { id: 'cost', label: 'Cost', key: 'cost', value: '10', qualifierAttr: 'currency', qualifierLabel: 'Currency', qualifier: ['cp', 'sp', 'ep', 'gp', 'pp'], defaultQualifier: 'gp' },
+    { id: 'weight', label: 'Weight', key: 'weight', value: '3', qualifierAttr: 'lb', qualifierLabel: 'Unit', qualifier: ['lb'], defaultQualifier: 'lb', weightValue: true },
+    { id: 'slot', label: 'Grip / slot', key: 'slot', value: 'onehand' },
+    { id: 'range', label: 'Range', key: 'range', value: '100/400' },
+    { id: 'damage', label: 'Damage', key: 'damage', value: '1d8', qualifierAttr: 'type', qualifierLabel: 'Damage type', qualifier: ['acid', 'bludgeoning', 'cold', 'fire', 'force', 'lightning', 'necrotic', 'piercing', 'poison', 'psychic', 'radiant', 'slashing', 'thunder'], defaultQualifier: 'slashing' },
+    { id: 'versatile', label: 'Versatile damage', key: 'versatile', value: '1d10' },
+    { id: 'proficiency', label: 'Proficiency ID', key: 'proficiency', value: 'ID_PROFICIENCY_WEAPON_PROFICIENCY_LONGSWORD' }
+  ],
+  armor: [
+    { id: 'supports', label: 'Armor group support', node: 'supports', value: 'ID_INTERNAL_ARMOR_GROUP_LIGHT' },
+    { id: 'category', label: 'Category', key: 'category', value: 'Armor' },
+    { id: 'cost', label: 'Cost', key: 'cost', value: '40', qualifierAttr: 'currency', qualifierLabel: 'Currency', qualifier: ['cp', 'sp', 'ep', 'gp', 'pp'], defaultQualifier: 'gp' },
+    { id: 'weight', label: 'Weight', key: 'weight', value: '10', qualifierAttr: 'lb', qualifierLabel: 'Unit', qualifier: ['lb'], defaultQualifier: 'lb', weightValue: true },
+    { id: 'slot', label: 'Slot', key: 'slot', value: 'body' },
+    { id: 'armor', label: 'Armor group', key: 'armor', value: 'Light' },
+    { id: 'armorClass', label: 'Armor class', key: 'armorClass', value: '12 + Dex modifier', acRuleName: 'ac:armored:armor', help: 'Updates the matching AC rule value when its stat is present.' },
+    { id: 'proficiency', label: 'Proficiency ID', key: 'proficiency', value: 'ID_PROFICIENCY_ARMOR_PROFICIENCY_LIGHT_ARMOR' }
+  ],
+  shield: [
+    { id: 'supports', label: 'Armor group support', node: 'supports', value: 'ID_INTERNAL_ARMOR_GROUP_SHIELD' },
+    { id: 'category', label: 'Category', key: 'category', value: 'Armor' },
+    { id: 'cost', label: 'Cost', key: 'cost', value: '15', qualifierAttr: 'currency', qualifierLabel: 'Currency', qualifier: ['cp', 'sp', 'ep', 'gp', 'pp'], defaultQualifier: 'gp' },
+    { id: 'weight', label: 'Weight', key: 'weight', value: '3', qualifierAttr: 'lb', qualifierLabel: 'Unit', qualifier: ['lb'], defaultQualifier: 'lb', weightValue: true },
+    { id: 'slot', label: 'Slot', key: 'slot', value: 'onehand,secondary' },
+    { id: 'type', label: 'Type', key: 'type', value: 'Shield' },
+    { id: 'armor', label: 'Armor group', key: 'armor', value: 'Shield' },
+    { id: 'armorClass', label: 'Armor class', key: 'armorClass', value: '+1', acRuleName: 'ac:shield', help: 'Updates the matching AC rule value when its stat is present.' },
+    { id: 'proficiency', label: 'Proficiency ID', key: 'proficiency', value: 'ID_PROFICIENCY_ARMOR_PROFICIENCY_SHIELD' }
+  ],
+  magic: [
+    { id: 'keywords', label: 'Keywords', key: 'keywords', value: '' },
+    { id: 'category', label: 'Category', key: 'category', value: 'Wondrous Items' },
+    { id: 'cost', label: 'Cost', key: 'cost', value: '0', qualifierAttr: 'currency', qualifierLabel: 'Currency', qualifier: ['cp', 'sp', 'ep', 'gp', 'pp'], defaultQualifier: 'gp' },
+    { id: 'weight', label: 'Weight', key: 'weight', value: '0', qualifierAttr: 'lb', qualifierLabel: 'Unit', qualifier: ['lb'], defaultQualifier: 'lb', weightValue: true },
+    { id: 'type', label: 'Item type', key: 'type', value: 'Wondrous Item' },
+    { id: 'rarity', label: 'Rarity', key: 'rarity', value: 'Uncommon' },
+    { id: 'slot', label: 'Slot', key: 'slot', value: 'neck' },
+    { id: 'attunement', label: 'Attunement', key: 'attunement', value: 'true' },
+    { id: 'charges', label: 'Charges', key: 'charges', value: '3' }
+  ]
+};
 
 // ---------------------------------------------
 // Init
@@ -39,10 +114,12 @@ window.addEventListener('DOMContentLoaded', () => {
   window.addEventListener('aurora:pdfjs-loaded', checkExtractReady);
   updateTypeCheck();
   checkExtractReady();
+  setupRepairPreviewActions();
   // Mark initially checked boxes
   document.querySelectorAll('.type-check input:checked').forEach(cb => {
     cb.closest('.type-check').classList.add('checked');
   });
+  renderAuthoringTemplates();
   switchWorkspaceView('parse');
 });
 
@@ -3586,19 +3663,39 @@ function renderCandidateValues(repair) {
   return `<br /><span class="text-muted">Likely candidates${reason}: ${label}.</span>`;
 }
 
+function renderRepairActionControls(finding, repair, findingIndex, repairIndex) {
+  if (repair?.kind !== 'set-rule-attribute' || !Number.isInteger(finding?.node?.start)) return '';
+  const actionData = `data-repair-action="apply" data-repair-finding-index="${findingIndex}" data-repair-index="${repairIndex}"`;
+  if (repair.confidence === 'high' && repair.replacementValue) {
+    return `<div class="repair-action-controls"><button class="btn btn-secondary" type="button" ${actionData} data-repair-value="${escAttr(repair.replacementValue)}">Apply suggested value</button></div>`;
+  }
+
+  const candidates = Array.isArray(repair.candidateValues) ? repair.candidateValues : [];
+  if (candidates.length) {
+    return `<div class="repair-action-controls"><span class="text-muted">Choose an observed value:</span>${candidates.map(candidate => (
+      `<button class="btn btn-secondary" type="button" ${actionData} data-repair-value="${escAttr(candidate.value)}">Use ${escHtml(candidate.value)}${candidate.count ? ` (${candidate.count})` : ''}</button>`
+    )).join('')}</div>`;
+  }
+
+  const inputId = `repair-value-${findingIndex}-${repairIndex}`;
+  return `<div class="repair-action-controls"><label class="repair-value-entry" for="${inputId}">Value for ${escHtml(repair.attribute)}
+    <input id="${inputId}" type="text" autocomplete="off" placeholder="${escAttr(repair.valuePlaceholder || '')}" />
+  </label><button class="btn btn-secondary" type="button" ${actionData} data-repair-value-input="${inputId}">Apply value</button></div>`;
+}
+
 function renderRepairDiagnosticCards(diagnostics = []) {
   if (!diagnostics.length) {
     return '<p class="text-muted">No diagnostics found for the pasted XML.</p>';
   }
-  return `<div class="repair-list">${diagnostics.map(finding => {
-    const repairs = (finding.repairs || []).map(repair => {
+  return `<div class="repair-list">${diagnostics.map((finding, findingIndex) => {
+    const repairs = (finding.repairs || []).map((repair, repairIndex) => {
       const detail = repairDetailValue(repair);
       const detailText = detail ? ` <span class="text-muted">-&gt; ${escHtml(detail)}</span>` : '';
       const sample = repairSampleXml(repair);
       const inference = repair.inferenceReason
         ? `<br /><span class="text-muted">Inferred from ${escHtml(repair.inferenceReason)}.</span>`
         : '';
-      return `<li>${escHtml(repair.kind || 'manual-review')} (${escHtml(repair.confidence || 'manual')})${detailText}<br />${escHtml(repair.description || '')}${inference}${renderCandidateValues(repair)}${renderRepairSnippet('Suggested sample', sample)}</li>`;
+      return `<li>${escHtml(repair.kind || 'manual-review')} (${escHtml(repair.confidence || 'manual')})${detailText}<br />${escHtml(repair.description || '')}${inference}${renderCandidateValues(repair)}${renderRepairSnippet('Suggested sample', sample)}${renderRepairActionControls(finding, repair, findingIndex, repairIndex)}</li>`;
     }).join('');
     return `<div class="repair-card ${escAttr(finding.severity || 'review')}">
       <div class="repair-meta">${escHtml(finding.severity || 'review')} / ${escHtml(finding.category || 'diagnostic')} / ${escHtml(repairElementLabel(finding))}</div>
@@ -3679,10 +3776,91 @@ function setRepairPreviewStatus(message, tone = 'info') {
   el.classList.remove('hidden');
 }
 
+function setupRepairPreviewActions() {
+  const input = document.getElementById('repairXmlInput');
+  const results = document.getElementById('repairPreviewResults');
+  const undoButton = document.getElementById('undoRepairBtn');
+  results?.addEventListener('click', event => {
+    const button = event.target?.closest?.('[data-repair-action="apply"]');
+    if (!button) return;
+    const value = button.dataset.repairValueInput
+      ? document.getElementById(button.dataset.repairValueInput)?.value
+      : button.dataset.repairValue;
+    applyRepairSuggestion(
+      Number(button.dataset.repairFindingIndex),
+      Number(button.dataset.repairIndex),
+      value
+    );
+  });
+  input?.addEventListener('input', () => {
+    if (!lastRepairPreviewXml || input.value === lastRepairPreviewXml) return;
+    results?.classList.add('hidden');
+    repairUndoXml = null;
+    if (undoButton) undoButton.disabled = true;
+    setRepairPreviewStatus('XML changed since inspection. Inspect it again to refresh repair suggestions.', 'info');
+  });
+}
+
+function applyRepairSuggestion(findingIndex, repairIndex, value) {
+  const input = document.getElementById('repairXmlInput');
+  const results = document.getElementById('repairPreviewResults');
+  if (!input || !results) return;
+  if (input.value !== lastRepairPreviewXml) {
+    results.classList.add('hidden');
+    setRepairPreviewStatus('XML changed since inspection. Inspect it again before applying a suggestion.', 'warning');
+    return;
+  }
+
+  try {
+    const fileName = document.getElementById('repairXmlFile')?.files?.[0]?.name || 'pasted.xml';
+    const finding = analyzeRepairXmlText(input.value, fileName).diagnostics[findingIndex];
+    const repair = finding?.repairs?.[repairIndex];
+    const selectedValue = String(value ?? repair?.replacementValue ?? '').trim();
+    if (!finding || !repair || !selectedValue) {
+      setRepairPreviewStatus('Choose or enter a non-empty value for this repair.', 'warning');
+      return;
+    }
+
+    const applied = getAuroraXmlPatterns().applyRepairToXml(input.value, finding, repair, selectedValue);
+    if (!applied) {
+      setRepairPreviewStatus('This repair target changed or could not be updated. Inspect the XML again.', 'warning');
+      return;
+    }
+
+    repairUndoXml = input.value;
+    const undoButton = document.getElementById('undoRepairBtn');
+    if (undoButton) undoButton.disabled = false;
+    input.value = applied.xml;
+    input.focus();
+    input.setSelectionRange(applied.cursor, applied.cursor);
+    inspectRepairXml();
+    setRepairPreviewStatus(`Applied ${repair.attribute} to the ${finding.node.kind} rule. Findings refreshed; undo is available.`, 'success');
+  } catch (error) {
+    setRepairPreviewStatus(error.message || 'Could not apply this suggestion.', 'error');
+  }
+}
+
+function undoLastRepair() {
+  const input = document.getElementById('repairXmlInput');
+  if (!input || repairUndoXml === null) return;
+  input.value = repairUndoXml;
+  repairUndoXml = null;
+  const undoButton = document.getElementById('undoRepairBtn');
+  if (undoButton) undoButton.disabled = true;
+  input.focus();
+  inspectRepairXml();
+  setRepairPreviewStatus('Last repair undone. Findings refreshed.', 'info');
+}
+
 async function handleRepairXmlFileSelect(event) {
   const file = event?.target?.files?.[0];
   if (!file) return;
   document.getElementById('repairXmlInput').value = await file.text();
+  lastRepairPreviewXml = '';
+  repairUndoXml = null;
+  document.getElementById('repairPreviewResults')?.classList.add('hidden');
+  const undoButton = document.getElementById('undoRepairBtn');
+  if (undoButton) undoButton.disabled = true;
   setRepairPreviewStatus(`Loaded ${file.name}. Click Inspect XML to analyze.`, 'success');
 }
 
@@ -3692,7 +3870,9 @@ function inspectRepairXml() {
   const results = document.getElementById('repairPreviewResults');
   try {
     const fileName = fileInput?.files?.[0]?.name || 'pasted.xml';
-    const analysis = analyzeRepairXmlText(input?.value || '', fileName);
+    const xml = input?.value || '';
+    const analysis = analyzeRepairXmlText(xml, fileName);
+    lastRepairPreviewXml = xml;
     results.innerHTML = renderRepairPreviewHtml(analysis);
     results.classList.remove('hidden');
     const counts = repairSeverityCounts(analysis.diagnostics);
@@ -3702,6 +3882,7 @@ function inspectRepairXml() {
       tone
     );
   } catch (error) {
+    lastRepairPreviewXml = '';
     if (results) {
       results.innerHTML = '';
       results.classList.add('hidden');
@@ -3717,6 +3898,10 @@ function clearRepairXmlPreview() {
   const results = document.getElementById('repairPreviewResults');
   if (input) input.value = '';
   if (fileInput) fileInput.value = '';
+  lastRepairPreviewXml = '';
+  repairUndoXml = null;
+  const undoButton = document.getElementById('undoRepairBtn');
+  if (undoButton) undoButton.disabled = true;
   if (status) {
     status.textContent = '';
     status.classList.add('hidden');
@@ -3725,6 +3910,762 @@ function clearRepairXmlPreview() {
     results.innerHTML = '';
     results.classList.add('hidden');
   }
+}
+
+function renderAuthoringTemplates() {
+  const api = window.AuroraAuthoringTemplates || globalThis.AuroraAuthoringTemplates;
+  const choices = document.getElementById('authoringTemplateChoices');
+  if (!api?.list || !choices) return;
+  const templates = api.list();
+
+  choices.innerHTML = templates.map(template => [
+    '<button class="authoring-template-choice" type="button" data-authoring-template="',
+    escAttr(template.id),
+    '" aria-pressed="false"><strong>',
+    escHtml(template.title),
+    '</strong><span>',
+    escHtml(template.summary),
+    '</span></button>'
+  ].join('')).join('');
+
+  choices.querySelectorAll('[data-authoring-template]').forEach(button => {
+    button.addEventListener('click', () => loadAuthoringTemplate(button.dataset.authoringTemplate));
+  });
+
+  document.getElementById('authoringTemplateXml')?.addEventListener('input', () => {
+    document.getElementById('authoringTemplateValidation').classList.add('hidden');
+    if (selectedAuthoringTemplateId) {
+      setAuthoringTemplateStatus('XML changed since the last check. Check its shape again before using it. Switching templates will ask before discarding edits.', 'info');
+    }
+  });
+
+  setupAuthoringRuleSnippetPicker();
+  setupAuthoringElementPropertyPicker();
+
+  const first = templates[0];
+  if (first) loadAuthoringTemplate(first.id);
+}
+
+function getAuthoringElementPropertyGroup(templateId = selectedAuthoringTemplateId) {
+  if (templateId.startsWith('spell-')) return 'spell';
+  if (templateId.startsWith('feat-')) return 'feat';
+  if (templateId === 'item-equipment') return 'gear';
+  if (templateId.startsWith('weapon-')) return 'weapon';
+  if (templateId === 'armor-shield') return 'shield';
+  if (templateId.startsWith('armor-')) return 'armor';
+  if (templateId === 'item-magic') return 'magic';
+  return '';
+}
+
+function setupAuthoringElementPropertyPicker() {
+  const propertySelect = document.getElementById('authoringElementProperty');
+  const valueInput = document.getElementById('authoringElementPropertyValue');
+  const qualifierSelect = document.getElementById('authoringElementQualifier');
+  if (!propertySelect || !valueInput || !qualifierSelect) return;
+
+  propertySelect.addEventListener('change', () => updateAuthoringElementPropertyPreview(true));
+  valueInput.addEventListener('input', () => updateAuthoringElementPropertyPreview());
+  qualifierSelect.addEventListener('change', () => updateAuthoringElementPropertyPreview());
+  renderAuthoringElementPropertyOptions();
+}
+
+function renderAuthoringElementPropertyOptions() {
+  const propertySelect = document.getElementById('authoringElementProperty');
+  if (!propertySelect) return;
+  const options = AUTHORING_ELEMENT_PROPERTY_OPTIONS[getAuthoringElementPropertyGroup()] || [];
+  propertySelect.innerHTML = options.map(option => `<option value="${escAttr(option.id)}">${escHtml(option.label)}</option>`).join('');
+  updateAuthoringElementPropertyPreview(true);
+}
+
+function getSelectedAuthoringElementProperty() {
+  const propertyId = document.getElementById('authoringElementProperty')?.value || '';
+  const options = AUTHORING_ELEMENT_PROPERTY_OPTIONS[getAuthoringElementPropertyGroup()] || [];
+  return options.find(option => option.id === propertyId) || null;
+}
+
+function authoringArmorClassBase(value) {
+  const match = /^\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+))/.exec(String(value || ''));
+  if (!match) return null;
+  const base = Number(match[1]);
+  return Number.isFinite(base) ? base : null;
+}
+
+function getSelectedAuthoringElementPropertySnippet() {
+  const property = getSelectedAuthoringElementProperty();
+  const value = document.getElementById('authoringElementPropertyValue')?.value.trim() || '';
+  if (!property || !value) return '';
+  if (property.acRuleName && authoringArmorClassBase(value) === null) return '';
+
+  if (property.node) return `<${property.node}>${escXml(value)}</${property.node}>`;
+
+  let content = value;
+  let qualifier = '';
+  if (property.qualifierAttr) {
+    qualifier = document.getElementById('authoringElementQualifier')?.value || property.defaultQualifier || '';
+    if (!qualifier) return '';
+  }
+  if (property.weightValue) {
+    if (!/^(?:\d+(?:\.\d*)?|\.\d+)$/.test(value)) return '';
+    content = `${value} ${qualifier}`;
+  }
+  const qualifierAttr = property.qualifierAttr
+    ? ` ${property.qualifierAttr}="${escAttrXml(qualifier)}"`
+    : '';
+  return `<set name="${escAttrXml(property.key)}"${qualifierAttr}>${escXml(content)}</set>`;
+}
+
+function updateAuthoringElementPropertyPreview(resetValue = false) {
+  const property = getSelectedAuthoringElementProperty();
+  const valueInput = document.getElementById('authoringElementPropertyValue');
+  const qualifierWrap = document.getElementById('authoringElementQualifierWrap');
+  const qualifierSelect = document.getElementById('authoringElementQualifier');
+  const qualifierLabel = document.getElementById('authoringElementQualifierLabel');
+  const preview = document.getElementById('authoringElementPropertyPreview');
+  const help = document.getElementById('authoringElementPropertyHelp');
+  const applyButton = document.getElementById('applyAuthoringElementPropertyBtn');
+  if (!valueInput || !qualifierSelect || !preview || !applyButton) return;
+
+  const qualifiers = property?.qualifier || [];
+  const currentQualifier = qualifierSelect.value;
+  qualifierWrap?.classList.toggle('hidden', qualifiers.length < 2);
+  if (qualifierLabel) qualifierLabel.textContent = property?.qualifierLabel || 'Qualifier';
+  qualifierSelect.innerHTML = qualifiers.map(value => `<option value="${escAttr(value)}">${escHtml(value)}</option>`).join('');
+  if (qualifiers.includes(currentQualifier)) qualifierSelect.value = currentQualifier;
+  else if (property?.defaultQualifier && qualifiers.includes(property.defaultQualifier)) qualifierSelect.value = property.defaultQualifier;
+  if (resetValue) {
+    valueInput.value = property?.value || '';
+    valueInput.placeholder = property?.placeholder || 'Enter a value';
+  }
+
+  const snippet = getSelectedAuthoringElementPropertySnippet();
+  const invalidArmorClass = property?.acRuleName
+    && valueInput.value.trim()
+    && authoringArmorClassBase(valueInput.value) === null;
+  preview.textContent = snippet || (invalidArmorClass
+    ? 'Enter a numeric AC base, such as 13 or 13 + Dex modifier.'
+    : property?.weightValue && valueInput.value.trim()
+    ? 'Enter a numeric weight to preview this setter.'
+    : 'Enter a value to preview the element detail.');
+  if (help) help.textContent = property?.help || (property?.node
+    ? 'Replaces the existing element detail if it is already present.'
+    : `Adds or replaces the “${property?.key || ''}” setter on this element.`);
+  applyButton.disabled = !snippet;
+}
+
+function findAuthoringElementTarget(xml, cursor) {
+  const elementRanges = [];
+  const elementPattern = /<element\b[^>]*>[\s\S]*?<\/element\s*>/gi;
+  let match;
+  while ((match = elementPattern.exec(xml))) {
+    elementRanges.push({ start: match.index, end: match.index + match[0].length, xml: match[0] });
+  }
+  const target = elementRanges.find(element => cursor >= element.start && cursor <= element.end)
+    || (elementRanges.length === 1 ? elementRanges[0] : null);
+  return {
+    target,
+    message: elementRanges.length
+      ? 'Place the cursor inside the element you want to update, then insert the snippet.'
+      : 'Could not find a complete element in the XML. Add or repair an <element> block first.'
+  };
+}
+
+function insertAuthoringElementChild(xml, target, renderBlock, marker) {
+  const closingTag = /<\/element\s*>/i.exec(target.xml);
+  if (!closingTag) return null;
+  const closeStart = target.start + closingTag.index;
+  const closeLineStart = xml.lastIndexOf('\n', closeStart - 1) + 1;
+  const closePrefix = xml.slice(closeLineStart, closeStart);
+  const elementLineStart = xml.lastIndexOf('\n', target.start - 1) + 1;
+  const elementPrefix = xml.slice(elementLineStart, target.start);
+  const elementIndent = /^[\t ]*$/.test(elementPrefix) ? elementPrefix : '';
+  const parentIndent = /^[\t ]*$/.test(closePrefix) ? closePrefix : elementIndent;
+  const childIndent = parentIndent + '\t';
+  const block = renderBlock(childIndent);
+  const insertionStart = /^[\t ]*$/.test(closePrefix) ? closeLineStart : closeStart;
+  const insertionText = /^[\t ]*$/.test(closePrefix)
+    ? `${block}\n`
+    : `\n${block}\n${parentIndent}`;
+  return {
+    xml: xml.slice(0, insertionStart) + insertionText + xml.slice(insertionStart),
+    cursor: insertionStart + insertionText.indexOf(marker) + marker.length,
+    action: 'inserted'
+  };
+}
+
+function applyAuthoringElementNode(xml, target, tagName, snippet) {
+  const fullPattern = new RegExp(`<${tagName}\\b[^>]*>[\\s\\S]*?<\\/${tagName}\\s*>`, 'i');
+  const selfPattern = new RegExp(`<${tagName}\\b([^>]*)\\/>`, 'i');
+  const fullMatch = fullPattern.exec(target.xml);
+  if (fullMatch) {
+    const start = target.start + fullMatch.index;
+    return { xml: xml.slice(0, start) + snippet + xml.slice(start + fullMatch[0].length), cursor: start + snippet.length, action: 'updated' };
+  }
+  const selfMatch = selfPattern.exec(target.xml);
+  if (selfMatch) {
+    const start = target.start + selfMatch.index;
+    return { xml: xml.slice(0, start) + snippet + xml.slice(start + selfMatch[0].length), cursor: start + snippet.length, action: 'updated' };
+  }
+  return insertAuthoringElementChild(xml, target, childIndent => `${childIndent}${snippet}`, snippet);
+}
+
+function findAuthoringSetter(settersXml, propertyName) {
+  const openingPattern = /<set\b[^>]*>/gi;
+  let opening;
+  while ((opening = openingPattern.exec(settersXml))) {
+    const nameMatch = opening[0].match(/\bname\s*=\s*(["'])(.*?)\1/i);
+    if (!nameMatch || nameMatch[2] !== propertyName) continue;
+    if (/\/\s*>$/.test(opening[0])) return { index: opening.index, length: opening[0].length };
+    const closePattern = /<\/set\s*>/ig;
+    closePattern.lastIndex = openingPattern.lastIndex;
+    const closing = closePattern.exec(settersXml);
+    if (closing) return { index: opening.index, length: closing.index + closing[0].length - opening.index };
+  }
+  return null;
+}
+
+function applyAuthoringSetter(xml, target, propertyName, snippet) {
+  const settersPattern = /<setters\b[^>]*>[\s\S]*?<\/setters\s*>/i;
+  const settersMatch = settersPattern.exec(target.xml);
+  if (settersMatch) {
+    const existing = findAuthoringSetter(settersMatch[0], propertyName);
+    if (existing) {
+      const start = target.start + settersMatch.index + existing.index;
+      return { xml: xml.slice(0, start) + snippet + xml.slice(start + existing.length), cursor: start + snippet.length, action: 'updated' };
+    }
+
+    const settersStart = target.start + settersMatch.index;
+    const localCloseStart = settersMatch.index + settersMatch[0].lastIndexOf('</setters');
+    const closeStart = target.start + localCloseStart;
+    const closeLineStart = xml.lastIndexOf('\n', closeStart - 1) + 1;
+    const closePrefix = xml.slice(closeLineStart, closeStart);
+    const settersLineStart = xml.lastIndexOf('\n', settersStart - 1) + 1;
+    const settersPrefix = xml.slice(settersLineStart, settersStart);
+    const settersIndent = /^[\t ]*$/.test(settersPrefix) ? settersPrefix : '';
+    const firstSetter = settersMatch[0].match(/\n([\t ]*)<set\b/i);
+    const setterIndent = firstSetter ? firstSetter[1] : settersIndent + '\t';
+    const insertionStart = /^[\t ]*$/.test(closePrefix) ? closeLineStart : closeStart;
+    const insertionText = /^[\t ]*$/.test(closePrefix)
+      ? `${setterIndent}${snippet}\n`
+      : `\n${setterIndent}${snippet}\n${settersIndent}`;
+    return {
+      xml: xml.slice(0, insertionStart) + insertionText + xml.slice(insertionStart),
+      cursor: insertionStart + insertionText.indexOf(snippet) + snippet.length,
+      action: 'inserted'
+    };
+  }
+
+  const emptySetters = /<setters\b([^>]*)\/>/i.exec(target.xml);
+  if (emptySetters) {
+    const start = target.start + emptySetters.index;
+    const lineStart = xml.lastIndexOf('\n', start - 1) + 1;
+    const prefix = xml.slice(lineStart, start);
+    const settersIndent = /^[\t ]*$/.test(prefix) ? prefix : '';
+    const innerIndent = settersIndent + '\t';
+    const replacement = `<setters${emptySetters[1]}>\n${innerIndent}${snippet}\n${settersIndent}</setters>`;
+    return { xml: xml.slice(0, start) + replacement + xml.slice(start + emptySetters[0].length), cursor: start + replacement.indexOf(snippet) + snippet.length, action: 'inserted' };
+  }
+
+  return insertAuthoringElementChild(xml, target, settersIndent => {
+    const innerIndent = settersIndent + '\t';
+    return `${settersIndent}<setters>\n${innerIndent}${snippet}\n${settersIndent}</setters>`;
+  }, snippet);
+}
+
+function updateAuthoringACRule(xml, target, ruleName, armorClass, cursor) {
+  const armorClassBase = authoringArmorClassBase(armorClass);
+  const rules = /<rules\b[^>]*>[\s\S]*?<\/rules\s*>/i.exec(target.xml);
+  if (armorClassBase === null || !rules) return { xml, synced: false, cursorDelta: 0 };
+
+  const safeRuleName = ruleName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const stat = new RegExp(`<stat\\b[^>]*\\bname\\s*=\\s*["']${safeRuleName}["'][^>]*>`, 'i').exec(rules[0]);
+  const valueAttribute = stat && /(\bvalue\s*=\s*)(["'])[^"']*\2/i.exec(stat[0]);
+  if (!stat || !valueAttribute) return { xml, synced: false, cursorDelta: 0 };
+
+  const replacement = `${valueAttribute[1]}${valueAttribute[2]}${armorClassBase}${valueAttribute[2]}`;
+  const start = target.start + rules.index + stat.index + valueAttribute.index;
+  const end = start + valueAttribute[0].length;
+  return {
+    xml: xml.slice(0, start) + replacement + xml.slice(end),
+    synced: true,
+    cursorDelta: start < cursor ? replacement.length - valueAttribute[0].length : 0
+  };
+}
+
+function applyAuthoringElementProperty() {
+  const input = document.getElementById('authoringTemplateXml');
+  const property = getSelectedAuthoringElementProperty();
+  const snippet = getSelectedAuthoringElementPropertySnippet();
+  if (!input || !snippet || !property) {
+    setAuthoringTemplateStatus('Enter a value that matches the selected element detail.', 'warning');
+    return;
+  }
+
+  const { target, message } = findAuthoringElementTarget(input.value, input.selectionStart ?? 0);
+  if (!target) {
+    setAuthoringTemplateStatus(message, 'warning');
+    return;
+  }
+  let result = property.node
+    ? applyAuthoringElementNode(input.value, target, property.node, snippet)
+    : applyAuthoringSetter(input.value, target, property.key, snippet);
+  if (!result) {
+    setAuthoringTemplateStatus('Could not find the closing element tag to add this detail.', 'warning');
+    return;
+  }
+  let acRuleSynced = false;
+  if (property.acRuleName) {
+    const updatedTarget = findAuthoringElementTarget(result.xml, result.cursor).target;
+    if (updatedTarget) {
+      const ruleResult = updateAuthoringACRule(
+        result.xml,
+        updatedTarget,
+        property.acRuleName,
+        document.getElementById('authoringElementPropertyValue')?.value.trim() || '',
+        result.cursor
+      );
+      result = { ...result, xml: ruleResult.xml, cursor: result.cursor + ruleResult.cursorDelta };
+      acRuleSynced = ruleResult.synced;
+    }
+  }
+  input.value = result.xml;
+  input.focus();
+  input.setSelectionRange(result.cursor, result.cursor);
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  if (property.acRuleName && !acRuleSynced) {
+    setAuthoringTemplateStatus(`${property.label} ${result.action} on the element, but its matching AC rule could not be updated. Check the numeric value and <rules> block.`, 'warning');
+    return;
+  }
+  setAuthoringTemplateStatus(`${property.label} ${result.action} on the element${acRuleSynced ? ' and matching AC rule' : ''}. Check the XML shape when ready.`, 'success');
+}
+
+function setupAuthoringRuleSnippetPicker() {
+  const typeSelect = document.getElementById('authoringRuleType');
+  const amountInput = document.getElementById('authoringRuleAmount');
+  const skillSelect = document.getElementById('authoringRuleSkill');
+  const abilitySelect = document.getElementById('authoringRuleAbility');
+  const spellFields = ['authoringRuleSpellId', 'authoringRuleSpellcasting', 'authoringRulePrepared', 'authoringRuleAction', 'authoringRuleUsage', 'authoringRuleEffect'];
+  if (!typeSelect || !amountInput) return;
+
+  typeSelect.addEventListener('change', () => updateAuthoringRuleSnippetPreview(true));
+  amountInput.addEventListener('input', () => updateAuthoringRuleSnippetPreview());
+  skillSelect?.addEventListener('change', () => updateAuthoringRuleSnippetPreview());
+  abilitySelect?.addEventListener('change', () => updateAuthoringRuleSnippetPreview());
+  spellFields.forEach(id => {
+    const field = document.getElementById(id);
+    field?.addEventListener(field.tagName === 'SELECT' ? 'change' : 'input', () => updateAuthoringRuleSnippetPreview());
+  });
+  updateAuthoringRuleSnippetPreview();
+}
+
+function getSelectedAuthoringRuleSnippet() {
+  const type = document.getElementById('authoringRuleType')?.value || '';
+  if (type === 'spell-grant') {
+    const spellId = document.getElementById('authoringRuleSpellId')?.value.trim() || '';
+    if (!/^ID_[A-Za-z0-9_]+$/.test(spellId)) return '';
+    const spellcasting = document.getElementById('authoringRuleSpellcasting')?.value.trim() || '';
+    const prepared = document.getElementById('authoringRulePrepared')?.value === 'true';
+    if (prepared && !spellcasting) return '';
+    return `<grant type="Spell" id="${escAttrXml(spellId)}"${spellcasting ? ` spellcasting="${escAttrXml(spellcasting)}"` : ''}${prepared ? ' prepared="true"' : ''} />`;
+  }
+  if (type === 'spell-effect') {
+    const description = getSelectedAuthoringSheetDescription();
+    return description ? `<sheet>\n\t${description}\n</sheet>` : '';
+  }
+
+  const amount = Number(document.getElementById('authoringRuleAmount')?.value);
+  if (!Number.isSafeInteger(amount) || amount < 1) return '';
+
+  if (type === 'ac') return `<stat name="ac:misc" value="${amount}" />`;
+  if (type === 'fly-increase') return `<stat name="speed:fly:misc" value="${amount}" requirements="[speed:fly:1]" />`;
+  if (type === 'fly-increase-innate') return `<stat name="innate speed:fly:misc" value="${amount}" requirements="[innate speed:fly:1]" />`;
+  if (type === 'fly-grant') return `<stat name="innate speed:fly" value="${amount}" bonus="base" />`;
+  if (type === 'skill') {
+    const skill = document.getElementById('authoringRuleSkill')?.value || '';
+    return skill ? `<stat name="${skill}:misc" value="${amount}" />` : '';
+  }
+  if (type === 'ability') {
+    const ability = document.getElementById('authoringRuleAbility')?.value || '';
+    return ability ? `<stat name="${ability}" value="${amount}" />` : '';
+  }
+  return '';
+}
+
+function getSelectedAuthoringSheetDescription() {
+  const action = document.getElementById('authoringRuleAction')?.value || '';
+  const usage = document.getElementById('authoringRuleUsage')?.value.trim() || '';
+  const effect = document.getElementById('authoringRuleEffect')?.value.trim() || '';
+  if (!effect) return '';
+  const actionAttr = action ? ` action="${escAttrXml(action)}"` : '';
+  const usageAttr = usage ? ` usage="${escAttrXml(usage)}"` : '';
+  return `<description${actionAttr}${usageAttr}>${escXml(effect)}</description>`;
+}
+
+function updateAuthoringRuleSnippetPreview(resetAmount = false) {
+  const type = document.getElementById('authoringRuleType')?.value || '';
+  const amountInput = document.getElementById('authoringRuleAmount');
+  const amountWrap = document.getElementById('authoringRuleAmountWrap');
+  const skillWrap = document.getElementById('authoringRuleSkillWrap');
+  const abilityWrap = document.getElementById('authoringRuleAbilityWrap');
+  const spellIdWrap = document.getElementById('authoringRuleSpellIdWrap');
+  const spellcastingWrap = document.getElementById('authoringRuleSpellcastingWrap');
+  const preparedWrap = document.getElementById('authoringRulePreparedWrap');
+  const actionWrap = document.getElementById('authoringRuleActionWrap');
+  const usageWrap = document.getElementById('authoringRuleUsageWrap');
+  const effectWrap = document.getElementById('authoringRuleEffectWrap');
+  const help = document.getElementById('authoringRuleHelp');
+  const preview = document.getElementById('authoringRuleSnippetPreview');
+  const insertButton = document.getElementById('insertAuthoringRuleSnippetBtn');
+
+  if (!amountInput || !preview || !insertButton) return;
+  if (resetAmount) {
+    const defaults = { ac: 1, 'fly-increase': 10, 'fly-increase-innate': 10, 'fly-grant': 30, skill: 1, ability: 1 };
+    amountInput.value = String(defaults[type] || 1);
+  }
+  const numericRule = !['spell-grant', 'spell-effect'].includes(type);
+  amountWrap?.classList.toggle('hidden', !numericRule);
+  skillWrap?.classList.toggle('hidden', type !== 'skill');
+  abilityWrap?.classList.toggle('hidden', type !== 'ability');
+  spellIdWrap?.classList.toggle('hidden', type !== 'spell-grant');
+  spellcastingWrap?.classList.toggle('hidden', type !== 'spell-grant');
+  preparedWrap?.classList.toggle('hidden', type !== 'spell-grant');
+  actionWrap?.classList.toggle('hidden', type !== 'spell-effect');
+  usageWrap?.classList.toggle('hidden', type !== 'spell-effect');
+  effectWrap?.classList.toggle('hidden', type !== 'spell-effect');
+
+  const snippet = getSelectedAuthoringRuleSnippet();
+  const emptyMessage = type === 'spell-grant'
+    ? document.getElementById('authoringRulePrepared')?.value === 'true' && !document.getElementById('authoringRuleSpellcasting')?.value.trim()
+      ? 'Add a spellcasting class for a prepared spell grant.'
+      : 'Enter a spell element ID such as ID_PHB_SPELL_MISTY_STEP.'
+    : type === 'spell-effect'
+      ? 'Describe the item effect to preview its sheet action.'
+      : 'Enter a positive whole number to preview this rule.';
+  preview.textContent = snippet || emptyMessage;
+  if (help) {
+    help.textContent = type === 'spell-grant'
+      ? 'Use the spell element ID. The optional class scopes it to a spellcasting feature; choose “Grant as prepared” only when the spell should count as prepared.'
+      : type === 'spell-effect'
+        ? 'Adds an action and usage note to the character sheet. For an item that casts a spell, add its spell grant separately if you want the spell listed. Effect text is descriptive; add rules for mechanics Aurora should calculate.'
+        : 'Choose a positive whole number amount. The preview shows the Aurora rule that will be inserted.';
+  }
+  insertButton.disabled = !snippet;
+}
+
+function insertAuthoringRuleSnippet() {
+  const input = document.getElementById('authoringTemplateXml');
+  const snippet = getSelectedAuthoringRuleSnippet();
+  if (!input || !snippet) {
+    const type = document.getElementById('authoringRuleType')?.value || '';
+    const preparedWithoutClass = type === 'spell-grant'
+      && document.getElementById('authoringRulePrepared')?.value === 'true'
+      && !document.getElementById('authoringRuleSpellcasting')?.value.trim();
+    const message = type === 'spell-grant'
+      ? preparedWithoutClass
+        ? 'Enter a spellcasting class when granting a spell as prepared.'
+        : 'Enter a valid spell element ID beginning with ID_.'
+      : type === 'spell-effect'
+        ? 'Enter effect text before inserting the sheet action.'
+        : 'Choose a valid rule amount before inserting a snippet.';
+    setAuthoringTemplateStatus(message, 'warning');
+    return;
+  }
+
+  const xml = input.value;
+  const { target, message } = findAuthoringElementTarget(xml, input.selectionStart ?? 0);
+  if (!target) {
+    setAuthoringTemplateStatus(message, 'warning');
+    return;
+  }
+
+  if (document.getElementById('authoringRuleType')?.value === 'spell-effect') {
+    insertAuthoringSheetDescription(input, target, getSelectedAuthoringSheetDescription());
+    return;
+  }
+
+  const elementLineStart = xml.lastIndexOf('\n', target.start - 1) + 1;
+  const elementPrefix = xml.slice(elementLineStart, target.start);
+  const elementIndent = /^[\t ]*$/.test(elementPrefix) ? elementPrefix : '';
+  const rulesMatch = /<rules\b[^>]*>[\s\S]*?<\/rules\s*>/i.exec(target.xml);
+  const emptyRulesMatch = rulesMatch ? null : /<rules\b([^>]*)\/>/i.exec(target.xml);
+  let insertionStart;
+  let insertionText;
+
+  if (rulesMatch) {
+    const localCloseStart = rulesMatch.index + rulesMatch[0].lastIndexOf('</rules');
+    const closeStart = target.start + localCloseStart;
+    const closeLineStart = xml.lastIndexOf('\n', closeStart - 1) + 1;
+    const closePrefix = xml.slice(closeLineStart, closeStart);
+
+    if (/^[\t ]*$/.test(closePrefix)) {
+      const firstRule = rulesMatch[0].match(/\n([\t ]*)<(?:grant|select|stat|append)\b/i);
+      const ruleIndent = firstRule ? firstRule[1] : closePrefix + '\t';
+      insertionStart = closeLineStart;
+      insertionText = `${ruleIndent}${snippet}\n`;
+    } else {
+      const rulesStart = target.start + rulesMatch.index;
+      const rulesLineStart = xml.lastIndexOf('\n', rulesStart - 1) + 1;
+      const rulesPrefix = xml.slice(rulesLineStart, rulesStart);
+      const rulesIndent = /^[\t ]*$/.test(rulesPrefix) ? rulesPrefix : elementIndent + '\t';
+      insertionStart = closeStart;
+      insertionText = `\n${rulesIndent}\t${snippet}\n${rulesIndent}`;
+    }
+  } else if (emptyRulesMatch) {
+    const emptyRulesStart = target.start + emptyRulesMatch.index;
+    const rulesLineStart = xml.lastIndexOf('\n', emptyRulesStart - 1) + 1;
+    const rulesPrefix = xml.slice(rulesLineStart, emptyRulesStart);
+    const rulesIndent = /^[\t ]*$/.test(rulesPrefix) ? rulesPrefix : elementIndent + '\t';
+    const ruleIndent = rulesIndent + '\t';
+    const rulesAttributes = emptyRulesMatch[1].trimEnd();
+    const replacement = `<rules${rulesAttributes}>\n${ruleIndent}${snippet}\n${rulesIndent}</rules>`;
+    const nextXml = xml.slice(0, emptyRulesStart)
+      + replacement
+      + xml.slice(emptyRulesStart + emptyRulesMatch[0].length);
+    const snippetCursor = emptyRulesStart + replacement.indexOf(snippet) + snippet.length;
+    input.value = nextXml;
+    input.focus();
+    input.setSelectionRange(snippetCursor, snippetCursor);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    setAuthoringTemplateStatus('Rule snippet inserted into the existing empty <rules> block. Check that the description matches, then check the XML shape.', 'success');
+    return;
+  } else {
+    const closingTag = /<\/element\s*>/i.exec(target.xml);
+    if (!closingTag) {
+      setAuthoringTemplateStatus('Could not find the closing element tag to add a rules block.', 'warning');
+      return;
+    }
+
+    const closeStart = target.start + closingTag.index;
+    const closeLineStart = xml.lastIndexOf('\n', closeStart - 1) + 1;
+    const closePrefix = xml.slice(closeLineStart, closeStart);
+    if (/^[\t ]*$/.test(closePrefix)) {
+      const rulesIndent = closePrefix + '\t';
+      insertionStart = closeLineStart;
+      insertionText = `${rulesIndent}<rules>\n${rulesIndent}\t${snippet}\n${rulesIndent}</rules>\n`;
+    } else {
+      const rulesIndent = elementIndent + '\t';
+      insertionStart = closeStart;
+      insertionText = `\n${rulesIndent}<rules>\n${rulesIndent}\t${snippet}\n${rulesIndent}</rules>`;
+    }
+  }
+
+  const nextXml = xml.slice(0, insertionStart) + insertionText + xml.slice(insertionStart);
+  const snippetCursor = insertionStart + insertionText.indexOf(snippet) + snippet.length;
+  input.value = nextXml;
+  input.focus();
+  input.setSelectionRange(snippetCursor, snippetCursor);
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  setAuthoringTemplateStatus('Rule snippet inserted. Check that the description matches, then check the XML shape.', 'success');
+}
+
+function insertAuthoringSheetDescription(input, target, description) {
+  if (!description) return;
+  const xml = input.value;
+  const elementLineStart = xml.lastIndexOf('\n', target.start - 1) + 1;
+  const elementPrefix = xml.slice(elementLineStart, target.start);
+  const elementIndent = /^[\t ]*$/.test(elementPrefix) ? elementPrefix : '';
+  const fullSheet = /<sheet\b[^>]*>[\s\S]*?<\/sheet\s*>/i.exec(target.xml);
+  const emptySheet = /<sheet\b([^>]*)\/>/i.exec(target.xml);
+  let insertionStart;
+  let insertionText;
+  let snippetCursor;
+
+  if (fullSheet) {
+    const sheetStart = target.start + fullSheet.index;
+    const sheetLineStart = xml.lastIndexOf('\n', sheetStart - 1) + 1;
+    const sheetPrefix = xml.slice(sheetLineStart, sheetStart);
+    const sheetIndent = /^[\t ]*$/.test(sheetPrefix) ? sheetPrefix : elementIndent + '\t';
+    const firstDescription = fullSheet[0].match(/\n([\t ]*)<description\b/i);
+    const descriptionIndent = firstDescription ? firstDescription[1] : sheetIndent + '\t';
+    const localCloseStart = fullSheet.index + fullSheet[0].lastIndexOf('</sheet');
+    const closeStart = target.start + localCloseStart;
+    const closeLineStart = xml.lastIndexOf('\n', closeStart - 1) + 1;
+    const closePrefix = xml.slice(closeLineStart, closeStart);
+
+    if (/^[\t ]*$/.test(closePrefix)) {
+      insertionStart = closeLineStart;
+      insertionText = `${descriptionIndent}${description}\n`;
+    } else {
+      insertionStart = closeStart;
+      insertionText = `\n${descriptionIndent}${description}\n${sheetIndent}`;
+    }
+
+    let nextXml = xml.slice(0, insertionStart) + insertionText + xml.slice(insertionStart);
+    const updatedEnd = target.end + insertionText.length;
+    let updatedElement = nextXml.slice(target.start, updatedEnd);
+    const visibleElement = updatedElement.replace(
+      /<sheet\b[^>]*>/i,
+      openTag => openTag.replace(/\sdisplay\s*=\s*(["'])false\1/i, ' display="true"')
+    );
+    const sheetMadeVisible = visibleElement !== updatedElement;
+    updatedElement = visibleElement;
+    nextXml = nextXml.slice(0, target.start) + updatedElement + nextXml.slice(updatedEnd);
+    snippetCursor = insertionStart + insertionText.indexOf(description) + description.length - (sheetMadeVisible ? 1 : 0);
+    setAuthoringSheetSnippetXml(input, nextXml, snippetCursor, sheetMadeVisible);
+    return;
+  }
+
+  if (emptySheet) {
+    const sheetStart = target.start + emptySheet.index;
+    const sheetLineStart = xml.lastIndexOf('\n', sheetStart - 1) + 1;
+    const sheetPrefix = xml.slice(sheetLineStart, sheetStart);
+    const sheetIndent = /^[\t ]*$/.test(sheetPrefix) ? sheetPrefix : elementIndent + '\t';
+    const descriptionIndent = sheetIndent + '\t';
+    const attributes = emptySheet[1].replace(/\sdisplay\s*=\s*(["'])false\1/i, ' display="true"');
+    const wasHidden = /\sdisplay\s*=\s*(["'])false\1/i.test(emptySheet[1]);
+    insertionStart = sheetStart;
+    insertionText = `<sheet${attributes}>\n${descriptionIndent}${description}\n${sheetIndent}</sheet>`;
+    snippetCursor = insertionStart + insertionText.indexOf(description) + description.length;
+    const nextXml = xml.slice(0, insertionStart) + insertionText + xml.slice(insertionStart + emptySheet[0].length);
+    setAuthoringSheetSnippetXml(input, nextXml, snippetCursor, wasHidden);
+    return;
+  }
+
+  const closingTag = /<\/element\s*>/i.exec(target.xml);
+  if (!closingTag) {
+    setAuthoringTemplateStatus('Could not find the closing element tag to add a sheet action.', 'warning');
+    return;
+  }
+  const closeStart = target.start + closingTag.index;
+  const closeLineStart = xml.lastIndexOf('\n', closeStart - 1) + 1;
+  const closePrefix = xml.slice(closeLineStart, closeStart);
+  const sheetIndent = /^[\t ]*$/.test(closePrefix) ? closePrefix + '\t' : elementIndent + '\t';
+  const descriptionIndent = sheetIndent + '\t';
+  if (/^[\t ]*$/.test(closePrefix)) {
+    insertionStart = closeLineStart;
+    insertionText = `${sheetIndent}<sheet>\n${descriptionIndent}${description}\n${sheetIndent}</sheet>\n`;
+  } else {
+    insertionStart = closeStart;
+    insertionText = `\n${sheetIndent}<sheet>\n${descriptionIndent}${description}\n${sheetIndent}</sheet>`;
+  }
+  snippetCursor = insertionStart + insertionText.indexOf(description) + description.length;
+  const nextXml = xml.slice(0, insertionStart) + insertionText + xml.slice(insertionStart);
+  setAuthoringSheetSnippetXml(input, nextXml, snippetCursor, false);
+}
+
+function setAuthoringSheetSnippetXml(input, xml, cursor, sheetMadeVisible) {
+  input.value = xml;
+  input.focus();
+  input.setSelectionRange(cursor, cursor);
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  setAuthoringTemplateStatus(
+    sheetMadeVisible
+      ? 'Spell-like sheet action inserted. Its previously hidden sheet is now visible, including any existing entries; review them, then check the XML shape.'
+      : 'Spell-like sheet action inserted. Review its text and usage, then check the XML shape.',
+    'success'
+  );
+}
+
+function loadAuthoringTemplate(id, options = {}) {
+  const api = window.AuroraAuthoringTemplates || globalThis.AuroraAuthoringTemplates;
+  const template = api?.get?.(id);
+  const input = document.getElementById('authoringTemplateXml');
+  if (!template || !input) return;
+  if (template.id === selectedAuthoringTemplateId && !options.reset) return;
+  const hasUnsavedEdits = selectedAuthoringTemplateId
+    && input.value !== selectedAuthoringTemplateOriginalXml;
+  if (hasUnsavedEdits && !options.reset
+    && !window.confirm('Switching templates will discard your current XML edits. Continue?')) return;
+
+  selectedAuthoringTemplateId = template.id;
+  selectedAuthoringTemplateFileName = template.fileName || 'aurora-authoring-starter.xml';
+  selectedAuthoringTemplateOriginalXml = template.xml;
+  input.value = template.xml;
+
+  document.querySelectorAll('[data-authoring-template]').forEach(button => {
+    button.setAttribute('aria-pressed', button.dataset.authoringTemplate === template.id ? 'true' : 'false');
+  });
+
+  const evidence = document.getElementById('authoringTemplateEvidence');
+  evidence.textContent = template.evidence;
+  if (template.evidenceUrl) {
+    const link = document.createElement('a');
+    link.href = template.evidenceUrl;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    link.textContent = ' Open reviewed Aurora XML example';
+    evidence.appendChild(link);
+  }
+  evidence.classList.remove('hidden');
+  document.getElementById('authoringTemplateValidation').classList.add('hidden');
+  renderAuthoringElementPropertyOptions();
+  setAuthoringTemplateStatus('Template loaded. Edit the example values or insert a rule or sheet action, then check the XML shape.', 'info');
+}
+
+function resetAuthoringTemplateXml() {
+  if (!selectedAuthoringTemplateId) return;
+  loadAuthoringTemplate(selectedAuthoringTemplateId, { reset: true });
+}
+
+function setAuthoringTemplateStatus(message, tone = 'info') {
+  const status = document.getElementById('authoringTemplateStatus');
+  if (!status) return;
+  status.className = 'alert alert-' + tone + ' manual-status';
+  status.textContent = message;
+  status.classList.remove('hidden');
+}
+
+function validateAuthoringTemplateXml() {
+  const xml = document.getElementById('authoringTemplateXml')?.value || '';
+  const results = document.getElementById('authoringTemplateValidation');
+  if (!xml.trim()) {
+    setAuthoringTemplateStatus('Choose a template or enter XML before checking it.', 'warning');
+    if (results) results.classList.add('hidden');
+    return;
+  }
+
+  const issues = validateAuroraXmlDocuments(
+    [{ fileName: selectedAuthoringTemplateFileName, xml }],
+    'Authoring XML'
+  );
+  if (!issues.length) {
+    results.innerHTML = '<div class="repair-result-section"><strong>XML parses and passes the available Aurora shape checks.</strong><p class="text-muted">Review the rules and replace all sample content before importing.</p></div>';
+    setAuthoringTemplateStatus('Shape check passed.', 'success');
+  } else {
+    results.innerHTML = '<div class="repair-result-section"><h3>Shape check findings</h3><ul>' +
+      issues.map(issue => '<li>' + escHtml(issue.msg) + '</li>').join('') +
+      '</ul></div>';
+    setAuthoringTemplateStatus('Shape check found ' + issues.length + ' issue' + (issues.length === 1 ? '' : 's') + '.', 'warning');
+  }
+  results.classList.remove('hidden');
+}
+
+async function copyAuthoringTemplateXml() {
+  const input = document.getElementById('authoringTemplateXml');
+  const xml = input?.value || '';
+  if (!xml.trim()) {
+    setAuthoringTemplateStatus('Choose a template or enter XML before copying it.', 'warning');
+    return;
+  }
+
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(xml);
+    } else {
+      input.focus();
+      input.select();
+      if (!document.execCommand('copy')) throw new Error('Clipboard access is unavailable.');
+    }
+    setAuthoringTemplateStatus('XML copied to the clipboard.', 'success');
+  } catch (error) {
+    setAuthoringTemplateStatus(error.message || 'Could not copy XML. Select the text and copy it manually.', 'warning');
+  }
+}
+
+function downloadAuthoringTemplateXml() {
+  const xml = document.getElementById('authoringTemplateXml')?.value || '';
+  if (!xml.trim()) {
+    setAuthoringTemplateStatus('Choose a template or enter XML before downloading it.', 'warning');
+    return;
+  }
+
+  const blob = new Blob([xml], { type: 'application/xml;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = selectedAuthoringTemplateFileName;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  setAuthoringTemplateStatus('Downloaded ' + selectedAuthoringTemplateFileName + '.', 'success');
 }
 
 

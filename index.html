@@ -511,6 +511,29 @@
     line-height: 1.4;
   }
 
+  .repair-action-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: end;
+    gap: 0.5rem;
+    margin-top: 0.65rem;
+  }
+
+  .repair-value-entry {
+    display: grid;
+    gap: 0.25rem;
+    font-size: 0.82rem;
+  }
+
+  .repair-value-entry input {
+    min-width: min(20rem, 70vw);
+    padding: 0.45rem;
+    border: 1px solid var(--border-light);
+    border-radius: 4px;
+    background: white;
+    color: var(--ink);
+  }
+
   .profile-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
@@ -531,6 +554,101 @@
 
   .profile-card p {
     margin-bottom: 0.35rem;
+  }
+
+  .authoring-template-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 0.75rem;
+    margin: 1rem 0;
+  }
+
+  .authoring-template-choice {
+    width: 100%;
+    min-height: 100%;
+    padding: 0.85rem;
+    border: 1px solid var(--border-light);
+    border-radius: 6px;
+    background: rgba(255,255,255,0.65);
+    color: var(--ink);
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .authoring-template-choice:hover,
+  .authoring-template-choice[aria-pressed="true"] {
+    border-color: var(--gold);
+    background: rgba(255,255,255,0.9);
+  }
+
+  .authoring-template-choice strong,
+  .authoring-template-choice span {
+    display: block;
+  }
+
+  .authoring-template-choice span {
+    margin-top: 0.25rem;
+    color: var(--muted);
+    font-size: 0.84rem;
+  }
+
+  .authoring-template-xml {
+    min-height: 26rem;
+    font-family: 'Cascadia Code', Consolas, monospace;
+    font-size: 0.82rem;
+    line-height: 1.45;
+    white-space: pre;
+    overflow: auto;
+  }
+
+  .authoring-snippet-panel {
+    margin: 0.9rem 0;
+    padding: 0.85rem;
+    border: 1px solid var(--border-light);
+    border-radius: 6px;
+    background: rgba(255,255,255,0.45);
+  }
+
+  .authoring-snippet-controls {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    gap: 0.65rem;
+    align-items: end;
+  }
+
+  .authoring-snippet-controls label {
+    display: block;
+    margin: 0;
+  }
+
+  .authoring-snippet-controls select,
+  .authoring-snippet-controls input {
+    width: 100%;
+    margin-top: 0.3rem;
+  }
+
+  .authoring-snippet-controls textarea {
+    width: 100%;
+    min-height: 4.5rem;
+    margin-top: 0.3rem;
+  }
+
+  .authoring-snippet-preview {
+    margin: 0.65rem 0 0;
+    padding: 0.6rem;
+    border: 1px solid var(--border-light);
+    border-radius: 4px;
+    background: rgba(0,0,0,0.04);
+    font-family: 'Cascadia Code', Consolas, monospace;
+    font-size: 0.82rem;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  @media (max-width: 760px) {
+    .authoring-snippet-controls {
+      grid-template-columns: 1fr;
+    }
   }
 
   /* Element cards in review */
@@ -966,12 +1084,13 @@
     <div class="card-title">Lint &amp; Repair Existing XML</div>
     <p class="text-muted" style="margin-bottom:0.75rem;">
       Paste or upload Aurora XML to inspect diagnostics, flagged nodes, repair suggestions, and relevant authoring context.
-      This preview is read-only; it does not rewrite XML yet.
+      Applying a suggestion updates the XML text below and refreshes the findings.
     </p>
     <textarea id="repairXmlInput" placeholder="Paste Aurora XML here, or upload an .xml file below."></textarea>
     <div class="repair-preview-actions">
       <input type="file" id="repairXmlFile" accept=".xml,text/xml,application/xml" onchange="handleRepairXmlFileSelect(event)" />
       <button class="btn btn-secondary" onclick="inspectRepairXml()">Inspect XML</button>
+      <button class="btn btn-secondary" id="undoRepairBtn" type="button" onclick="undoLastRepair()" disabled>Undo last repair</button>
       <button class="btn btn-secondary" onclick="clearRepairXmlPreview()">Clear</button>
     </div>
     <div class="alert alert-info manual-status hidden" id="repairPreviewStatus"></div>
@@ -983,11 +1102,128 @@
   <div class="card" id="stepAuthoring">
     <div class="card-title">Create &amp; Author</div>
     <p class="text-muted" style="margin-bottom:0.75rem;">
-      This workspace will use observed Aurora XML patterns to help build new homebrew elements from known-good shapes.
+      Start from a built-in Aurora XML shape reviewed against canonical content. No reference files or uploads are needed.
     </p>
     <p class="text-muted" style="font-size:0.85rem; margin-bottom:0;">
-      Planned next: load/reference example XML, choose an element type, inspect common attributes/setters/rules/supports, and generate a copyable starter template.
+      Templates cover spells, feats, adventuring gear, melee and ranged weapons, armor, shields, and magic items. All example values are synthetic; adjust supports, prerequisites, categories, and rules for your content before importing into Aurora. Weapon examples use the classic PHB shape and omit 2024 weapon mastery.
     </p>
+    <div class="authoring-template-grid" id="authoringTemplateChoices" role="group" aria-label="Curated authoring templates"></div>
+    <div class="alert alert-info hidden" id="authoringTemplateEvidence" role="status" aria-live="polite"></div>
+    <label for="authoringTemplateXml">Editable Aurora XML</label>
+    <textarea id="authoringTemplateXml" class="authoring-template-xml" wrap="off" spellcheck="false" placeholder="Choose a built-in template above, then edit its XML here."></textarea>
+    <div class="authoring-snippet-panel" aria-labelledby="authoringSnippetTitle">
+      <strong id="authoringSnippetTitle">Insert a rule or item action</strong>
+      <p class="text-muted" style="font-size:0.85rem; margin:0.25rem 0 0.65rem;">
+        Adds a rule or a limited-use sheet action to the element under the cursor. In files with multiple elements, place the cursor inside the element to update. Update the item description and rules to match.
+        Adding a sheet action to a hidden sheet makes the entire sheet visible, including its existing entries.
+      </p>
+      <div class="authoring-snippet-controls">
+        <label for="authoringRuleType">Snippet type
+          <select id="authoringRuleType">
+            <option value="ac">Increase AC</option>
+            <option value="fly-increase">Increase an existing fly speed</option>
+            <option value="fly-increase-innate">Increase an existing innate fly speed</option>
+            <option value="fly-grant">Grant a fly speed</option>
+            <option value="skill">Skill modifier</option>
+            <option value="ability">Ability score increase</option>
+            <option value="spell-grant">Grant a spell</option>
+            <option value="spell-effect">Spell-like action</option>
+          </select>
+        </label>
+        <label id="authoringRuleSkillWrap" class="hidden" for="authoringRuleSkill">Skill
+          <select id="authoringRuleSkill">
+            <option value="acrobatics">Acrobatics</option>
+            <option value="animal handling">Animal Handling</option>
+            <option value="arcana">Arcana</option>
+            <option value="athletics">Athletics</option>
+            <option value="deception">Deception</option>
+            <option value="history">History</option>
+            <option value="insight">Insight</option>
+            <option value="intimidation">Intimidation</option>
+            <option value="investigation">Investigation</option>
+            <option value="medicine">Medicine</option>
+            <option value="nature">Nature</option>
+            <option value="perception" selected>Perception</option>
+            <option value="performance">Performance</option>
+            <option value="persuasion">Persuasion</option>
+            <option value="religion">Religion</option>
+            <option value="sleight of hand">Sleight of Hand</option>
+            <option value="stealth">Stealth</option>
+            <option value="survival">Survival</option>
+          </select>
+        </label>
+        <label id="authoringRuleAbilityWrap" class="hidden" for="authoringRuleAbility">Ability
+          <select id="authoringRuleAbility">
+            <option value="strength" selected>Strength</option>
+            <option value="dexterity">Dexterity</option>
+            <option value="constitution">Constitution</option>
+            <option value="intelligence">Intelligence</option>
+            <option value="wisdom">Wisdom</option>
+            <option value="charisma">Charisma</option>
+          </select>
+        </label>
+        <label id="authoringRuleAmountWrap" for="authoringRuleAmount">Amount
+          <input id="authoringRuleAmount" type="number" min="1" step="1" value="1" />
+        </label>
+        <label id="authoringRuleSpellIdWrap" class="hidden" for="authoringRuleSpellId">Spell element ID
+          <input id="authoringRuleSpellId" type="text" placeholder="ID_PHB_SPELL_MISTY_STEP" autocomplete="off" />
+        </label>
+        <label id="authoringRuleSpellcastingWrap" class="hidden" for="authoringRuleSpellcasting">Spellcasting class (optional)
+          <input id="authoringRuleSpellcasting" type="text" placeholder="Wizard" autocomplete="off" />
+        </label>
+        <label id="authoringRulePreparedWrap" class="hidden" for="authoringRulePrepared">Spell grant option
+          <select id="authoringRulePrepared">
+            <option value="false">Grant spell</option>
+            <option value="true">Grant as prepared</option>
+          </select>
+        </label>
+        <label id="authoringRuleActionWrap" class="hidden" for="authoringRuleAction">Action
+          <select id="authoringRuleAction">
+            <option value="">No action specified</option>
+            <option value="Action" selected>Action</option>
+            <option value="Bonus Action">Bonus Action</option>
+            <option value="Reaction">Reaction</option>
+          </select>
+        </label>
+        <label id="authoringRuleUsageWrap" class="hidden" for="authoringRuleUsage">Uses / recharge
+          <input id="authoringRuleUsage" type="text" value="1/Long Rest" placeholder="1/Day, 3/Short Rest, or blank for at will" />
+        </label>
+        <label id="authoringRuleEffectWrap" class="hidden" for="authoringRuleEffect">Effect text
+          <textarea id="authoringRuleEffect" placeholder="Describe the effect the item produces."></textarea>
+        </label>
+        <button id="insertAuthoringRuleSnippetBtn" class="btn btn-secondary" type="button" onclick="insertAuthoringRuleSnippet()">Insert snippet</button>
+      </div>
+      <p id="authoringRuleHelp" class="text-muted" style="font-size:0.82rem; margin:0.55rem 0 0;"></p>
+      <pre id="authoringRuleSnippetPreview" class="authoring-snippet-preview" aria-live="polite"></pre>
+    </div>
+    <div class="authoring-snippet-panel" aria-labelledby="authoringElementPropertyTitle">
+      <strong id="authoringElementPropertyTitle">Set a common element detail</strong>
+      <p class="text-muted" style="font-size:0.85rem; margin:0.25rem 0 0.65rem;">
+        Options follow the selected starter. This adds or updates the matching supports, prerequisite, or setter on the element under the cursor.
+      </p>
+      <div class="authoring-snippet-controls">
+        <label for="authoringElementProperty">Element detail
+          <select id="authoringElementProperty"></select>
+        </label>
+        <label id="authoringElementQualifierWrap" class="hidden" for="authoringElementQualifier"><span id="authoringElementQualifierLabel">Qualifier</span>
+          <select id="authoringElementQualifier"></select>
+        </label>
+        <label for="authoringElementPropertyValue">Value
+          <input id="authoringElementPropertyValue" type="text" autocomplete="off" />
+        </label>
+        <button id="applyAuthoringElementPropertyBtn" class="btn btn-secondary" type="button" onclick="applyAuthoringElementProperty()">Add / update property</button>
+      </div>
+      <p id="authoringElementPropertyHelp" class="text-muted" style="font-size:0.82rem; margin:0.55rem 0 0;"></p>
+      <pre id="authoringElementPropertyPreview" class="authoring-snippet-preview" aria-live="polite"></pre>
+    </div>
+    <div class="repair-preview-actions">
+      <button class="btn btn-secondary" type="button" onclick="validateAuthoringTemplateXml()">Check XML shape</button>
+      <button class="btn btn-secondary" type="button" onclick="copyAuthoringTemplateXml()">Copy XML</button>
+      <button class="btn btn-secondary" type="button" onclick="downloadAuthoringTemplateXml()">Download XML</button>
+      <button class="btn btn-secondary" type="button" onclick="resetAuthoringTemplateXml()">Reset to selected template</button>
+    </div>
+    <div class="alert alert-info manual-status hidden" id="authoringTemplateStatus" role="status" aria-live="polite"></div>
+    <div class="repair-results hidden" id="authoringTemplateValidation"></div>
   </div>
   </section>
 
@@ -995,6 +1231,7 @@
 
 <script src="src/aurora-xml-shape.js" onload="document.documentElement.dataset.auroraShapeLoaded='true'"></script>
 <script src="src/aurora-xml-patterns.js" onload="document.documentElement.dataset.auroraPatternsLoaded='true'"></script>
+<script src="src/aurora-authoring-templates.js" onload="document.documentElement.dataset.auroraAuthoringTemplatesLoaded='true'"></script>
 <script src="src/pdf-text-layout.js" onload="document.documentElement.dataset.pdfTextLayoutLoaded='true'"></script>
 <script src="src/pdf-page-range.js" onload="document.documentElement.dataset.pdfPageRangeLoaded='true'"></script>
 <script src="src/app.js"></script>
