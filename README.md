@@ -76,6 +76,29 @@ screen. Pasted text is first sent through the deterministic parser for the
 selected type; if it does not match a known layout, the app creates an editable
 seed record instead of dropping the text.
 
+The **Create & Author** workspace includes built-in spell XML starters for
+2020–21 and 2024 shape conventions, plus feat, adventuring gear, melee and ranged
+weapon, armor, shield, and magic item starters based on reviewed Aurora XML
+examples. Weapon, armor, and shield starters follow classic PHB XML shapes; the
+weapon starters do not include 2024 mastery rules. All sample text is synthetic
+and no reference files need to be uploaded. Edit, check, copy, or download the
+XML in the workspace. Shape checks do not validate game mechanics or whether
+edition-specific supports, prerequisites, categories, and rules are appropriate.
+The rule picker inserts AC bonuses, increases an existing normal or innate fly
+speed, grants a fly speed, and adds skill modifiers or ability score increases
+to the selected element’s `<rules>` block, creating one when needed. It can also
+grant an existing spell element by ID or add a limited-use
+sheet action with action and recharge metadata. Sheet action text is descriptive;
+add separate rules for mechanics Aurora should calculate. In files with multiple
+elements, place the cursor inside the target element first. Expand self-closing
+element tags into opening and closing tags before inserting content. Adding a sheet action
+to a hidden sheet makes the entire sheet visible, including any existing entries.
+
+The element detail picker adapts to the selected starter: spell lists and spell
+setters, feat supports and prerequisite text, or common gear, weapon, armor, and
+magic item setters. It replaces an existing value with the same property name.
+Feat prerequisite text is for display and does not create a dynamic requirement.
+
 ### 5. Download
 
 - **Download ZIP** creates one XML file per element type plus `source.xml`.
@@ -235,6 +258,8 @@ pasted XML or one or more uploaded files.
   was resolved, what remains, and any new findings, plus a diff against the
   original.
 - You can download or copy the fixed files, or undo all repairs.
+- Applied repairs also update the XML input. After editing that input, inspect
+  it again before applying further repairs.
 
 ---
 

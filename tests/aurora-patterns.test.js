@@ -4,6 +4,7 @@ const os = require('node:os');
 const path = require('node:path');
 const {
   analyzeAuroraXmlDocuments,
+  applyRepairToXml,
   buildAuthoringProfiles,
   parseAuroraElements,
   renderPatternReport,
@@ -167,6 +168,54 @@ test('Aurora XML diagnostics include observed candidates for ambiguous select su
   );
   assert.equal(repair.candidateValues[0].reason, 'observed on select type="Proficiency"');
   assert.match(repair.sample, /supports="SUPPORT TOKEN"/);
+});
+
+test('Aurora XML repair applies a selected rule attribute to its exact source node', () => {
+  const xml = `<elements>
+  <element name="Repair Fixture" type="Class Feature" source="Pattern Fixture" id="ID_FIXTURE_CLASS_FEATURE_REPAIR">
+    <rules>
+      <select type="Feat" name="Choose a feat" />
+      <grant type="Spell" />
+    </rules>
+  </element>
+</elements>`;
+  const analysis = analyzeAuroraXmlDocuments([{ fileName: 'repair.xml', xml }]);
+  const selectFinding = analysis.diagnostics.find(item => item.category === 'select-missing-required-attribute');
+  const selectRepair = selectFinding.repairs.find(item => item.attribute === 'supports');
+  const selected = applyRepairToXml(xml, selectFinding, selectRepair, 'feat');
+
+  assert.ok(selected);
+  assert.match(selected.xml, /<select type="Feat" name="Choose a feat" supports="feat" \/>/);
+
+  const updatedAnalysis = analyzeAuroraXmlDocuments([{ fileName: 'repair.xml', xml: selected.xml }]);
+  const grantFinding = updatedAnalysis.diagnostics.find(item => item.category === 'grant-missing-required-attribute');
+  const grantRepair = grantFinding.repairs.find(item => item.attribute === 'id');
+  const completed = applyRepairToXml(selected.xml, grantFinding, grantRepair, 'ID_FIXTURE_SPELL_TARGET');
+
+  assert.ok(completed);
+  assert.match(completed.xml, /<grant type="Spell" id="ID_FIXTURE_SPELL_TARGET" \/>/);
+  assert.equal(analyzeAuroraXmlDocuments([{ fileName: 'repair.xml', xml: completed.xml }]).diagnostics.length, 0);
+});
+
+test('Aurora XML repair replaces an empty single-quoted attribute without duplicating it', () => {
+  const xml = `<elements>
+  <element name="Quoted Repair Fixture" type="Class Feature" source="Pattern Fixture" id="ID_FIXTURE_QUOTED_REPAIR">
+    <rules>
+      <select type='Feat' name='Choose a feat' supports='' />
+    </rules>
+  </element>
+</elements>`;
+  const analysis = analyzeAuroraXmlDocuments([{ fileName: 'quoted-repair.xml', xml }]);
+  const finding = analysis.diagnostics.find(item => item.category === 'select-missing-required-attribute');
+  const repair = finding?.repairs.find(item => item.attribute === 'supports');
+
+  assert.ok(repair);
+  const applied = applyRepairToXml(xml, finding, repair, '$& feat');
+
+  assert.ok(applied);
+  assert.match(applied.xml, /<select type='Feat' name='Choose a feat' supports="\$&amp; feat" \/>/);
+  assert.equal([...applied.xml.matchAll(/\bsupports\s*=/g)].length, 1);
+  assert.equal(analyzeAuroraXmlDocuments([{ fileName: 'quoted-repair.xml', xml: applied.xml }]).diagnostics.length, 0);
 });
 
 test('Aurora XML diagnostics require an actual elements root before suppressing root repair', () => {

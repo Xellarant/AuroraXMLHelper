@@ -4,10 +4,12 @@
   if (root) root.AuroraXmlPatterns = api;
   if (root?.window) root.window.AuroraXmlPatterns = api;
 }(typeof globalThis !== 'undefined' ? globalThis : this, function createAuroraXmlPatterns() {
+  const XML_ATTRIBUTE_PATTERN = /(^|\s)([A-Za-z_:][-A-Za-z0-9_:.]*)(\s*=\s*)(["'])([\s\S]*?)\4/g;
+
   function attrMap(tag) {
     const attrs = {};
-    for (const match of String(tag || '').matchAll(/([A-Za-z_:][-A-Za-z0-9_:.]*)\s*=\s*"([^"]*)"/g)) {
-      attrs[match[1]] = decodeXml(match[2]);
+    for (const match of String(tag || '').matchAll(XML_ATTRIBUTE_PATTERN)) {
+      attrs[match[2]] = decodeXml(match[5]);
     }
     return attrs;
   }
@@ -73,9 +75,20 @@
     const xml = trimSnippet(rawXml);
     if (!xml || !attr) return '';
     const escaped = encodeAttributeValue(value);
-    const attrPattern = new RegExp(`\\b${escapeRegExp(attr)}\\s*=\\s*"[^"]*"`);
-    if (attrPattern.test(xml)) return xml.replace(attrPattern, `${attr}="${escaped}"`);
-    return xml.replace(/\s*(\/?>)\s*$/, ` ${attr}="${escaped}"$1`);
+    const openingTag = /^<[^!?/][^>]*>/.exec(xml)?.[0];
+    if (!openingTag) return xml;
+    const existingAttribute = [...openingTag.matchAll(XML_ATTRIBUTE_PATTERN)]
+      .find(match => match[2] === attr);
+    if (existingAttribute) {
+      const replacement = `${existingAttribute[1]}${existingAttribute[2]}${existingAttribute[3]}"${escaped}"`;
+      const start = existingAttribute.index;
+      const end = start + existingAttribute[0].length;
+      return openingTag.slice(0, start) + replacement + openingTag.slice(end) + xml.slice(openingTag.length);
+    }
+    const closing = /(\s*)(\/?)>$/.exec(openingTag);
+    if (!closing) return xml;
+    const updatedOpeningTag = `${openingTag.slice(0, closing.index)} ${attr}="${escaped}"${closing[1]}${closing[2]}>`;
+    return updatedOpeningTag + xml.slice(openingTag.length);
   }
 
   function setTagAttribute(tag, attr, value) {
@@ -92,6 +105,31 @@
       (xml, [attr, value]) => xmlWithAttribute(xml, attr, value),
       trimSnippet(rawXml)
     );
+  }
+
+  function applyRepairToXml(xml, finding, repair, value = repair?.replacementValue) {
+    if (repair?.kind !== 'set-rule-attribute' || !repair.attribute) return null;
+    const start = finding?.node?.start;
+    const end = finding?.node?.end;
+    if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end <= start) return null;
+
+    const original = String(xml || '').slice(start, end);
+    if (!original || (finding.node.xml && original !== finding.node.xml)) return null;
+    const attrs = attrMap(original);
+    if (Object.prototype.hasOwnProperty.call(attrs, repair.attribute)
+      && attrs[repair.attribute] !== ''
+      && attrs[repair.attribute] !== repair.currentValue) return null;
+
+    const replacementValue = String(value ?? '').trim();
+    if (!replacementValue || /[\u0000-\u0008\u000B\u000C\u000E-\u001F]/.test(replacementValue)) return null;
+    const replacement = xmlWithAttribute(original, repair.attribute, replacementValue);
+    if (replacement === original) return null;
+
+    return {
+      xml: String(xml || '').slice(0, start) + replacement + String(xml || '').slice(end),
+      cursor: start + replacement.length,
+      value: replacementValue
+    };
   }
 
   function inferSelectSupports(rule) {
@@ -198,6 +236,8 @@
           text: stripTags(rule[3] || ''),
           signature: ruleSignature(kind, ruleAttrs),
           rawXml: trimSnippet(rule[0]),
+          start: ruleStart,
+          end: ruleStart + rule[0].length,
           line: ruleLine,
           openTagRange: { start: ruleStart, end: ruleStart + ruleOpenTag.length, text: ruleOpenTag }
         });
@@ -598,6 +638,8 @@
       kind: rule?.kind || 'rule'
     };
     if (rule?.line) node.line = rule.line;
+    if (Number.isInteger(rule?.start)) node.start = rule.start;
+    if (Number.isInteger(rule?.end)) node.end = rule.end;
     if (rule?.rawXml) node.xml = trimSnippet(rule.rawXml);
     return node;
   }
@@ -1441,6 +1483,7 @@
 
   return {
     analyzeAuroraXmlDocuments,
+    applyRepairToXml,
     attrMap,
     buildAuthoringProfile,
     buildAuthoringProfiles,

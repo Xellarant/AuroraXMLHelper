@@ -38,6 +38,8 @@ function createStubElement(value = '') {
     closest() { return element; },
     appendChild() {},
     insertAdjacentHTML() {},
+    setSelectionRange(start, end) { element.selectionStart = start; element.selectionEnd = end; },
+    dispatchEvent() {},
     focus() {},
     remove() {},
     scrollIntoView() {}
@@ -63,7 +65,15 @@ function loadApp(sourceMeta = {}, options = {}) {
     repairXmlInput: createStubElement(''),
     repairXmlFile: createStubElement(''),
     repairPreviewStatus: createStubElement(''),
-    repairPreviewResults: createStubElement('')
+    repairPreviewResults: createStubElement(''),
+    undoRepairBtn: createStubElement(''),
+    authoringTemplateXml: createStubElement(''),
+    authoringTemplateStatus: createStubElement(''),
+    authoringRuleType: createStubElement(''),
+    authoringRuleAmount: createStubElement(''),
+    authoringElementProperty: createStubElement(''),
+    authoringElementPropertyValue: createStubElement(''),
+    authoringElementQualifier: createStubElement('')
   };
   const fallbackElement = createStubElement();
   const document = {
@@ -91,6 +101,7 @@ function loadApp(sourceMeta = {}, options = {}) {
     window,
     localStorage: window.localStorage,
     Blob: class Blob {},
+    Event: class Event {},
     URL: {
       createObjectURL() { return ''; },
       revokeObjectURL() {}
@@ -111,6 +122,7 @@ function loadApp(sourceMeta = {}, options = {}) {
     path.join(repoRoot, 'src', 'aurora-xml-shape.js'),
     path.join(repoRoot, 'src', 'aurora-xml-patterns.js'),
     path.join(repoRoot, 'src', 'aurora-xml-repair.js'),
+    path.join(repoRoot, 'src', 'aurora-authoring-templates.js'),
     path.join(repoRoot, 'src', 'pdf-text-layout.js'),
     path.join(repoRoot, 'src', 'pdf-page-range.js'),
     path.join(repoRoot, 'src', 'app.js')
