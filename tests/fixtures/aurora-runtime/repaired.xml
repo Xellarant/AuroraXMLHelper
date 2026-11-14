@@ -1,0 +1,8 @@
+<elements>
+  <info><name>XML Helper repaired fixture</name><update version="0.1.0"><file name="repaired.xml" url="repaired.xml" /></update></info>
+  <element name="XML Helper Repair Check" type="Feat" source="Aurora XML Helper Runtime Checks" id="ID_AXHRT_FEAT_REPAIR_CHECK">
+    <description><p>You have resistance to fire damage.</p></description>
+    <sheet><description>You have resistance to fire damage.</description></sheet>
+    <rules><grant type="Condition" id="ID_INTERNAL_CONDITION_DAMAGE_RESISTANCE_FIRE" /></rules>
+  </element>
+</elements>

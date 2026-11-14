@@ -17,6 +17,18 @@ function setExtractedData(context, data) {
   runInApp(context, `extractedData = ${JSON.stringify(data)};`);
 }
 
+test('a feat ability score increase uses the first-party stat shape without a fabricated cap expression', () => {
+  for (const ability of ['Strength', 'Dexterity', 'Constitution', 'Intelligence', 'Wisdom', 'Charisma']) {
+    const context = loadApp();
+    setExtractedData(context, { feat: [{ name: 'Runtime Ability Check', description: 'A synthetic ability score benefit.', benefits: [`Increase your ${ability} score by 1, to a maximum of 20.`] }] });
+    const xml = context.window.AuroraXMLHelper.generateXml();
+    const stat = ability.toLowerCase();
+    assert.ok(xml.includes(`<stat name="${stat}" value="1" />`), `${ability} should generate its ability stat rule`);
+    assert.ok(xml.includes('to a maximum of 20.'), 'The cap should remain in the description.');
+    assert.ok(!xml.includes(`${stat}:max20`), 'Aurora cannot evaluate a fabricated cap identifier.');
+  }
+});
+
 test('leveled class and subclass features are not parsed as feats', () => {
   const context = loadApp();
   const text = [

@@ -89,7 +89,9 @@ speed, grants a fly speed, and adds skill modifiers or ability score increases
 to the selected element’s `<rules>` block, creating one when needed. It can also
 grant an existing spell element by ID or add a limited-use
 sheet action with action and recharge metadata. Sheet action text is descriptive;
-add separate rules for mechanics Aurora should calculate. In files with multiple
+add separate rules for mechanics Aurora should calculate. To list a granted spell
+on Aurora's Magic page, use the exact name of an existing spellcasting feature,
+such as Wizard or Eldritch Knight. The grant does not create that feature. In files with multiple
 elements, place the cursor inside the target element first. Expand self-closing
 element tags into opening and closing tags before inserting content. Adding a sheet action
 to a hidden sheet makes the entire sheet visible, including any existing entries.

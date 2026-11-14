@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<elements>
+	<info>
+		<name>Aurora XML Helper Runtime Checks - Feats</name>
+		<update version="0.1.0">
+			<file name="axhrt-feats.xml" url="axhrt-feats.xml" />
+		</update>
+	</info>
+
+	<element name="XML Helper Strength Check" type="Feat" source="Aurora XML Helper Runtime Checks" id="ID_AXHRT_FEAT_XML_HELPER_STRENGTH_CHECK">
+		<description>
+			<p>A synthetic feat for checking the generated ability score rule.</p>
+			<ul>
+				<li>Increase your Strength score by 1, to a maximum of 20.</li>
+			</ul>
+		</description>
+		<sheet><description>A synthetic feat for checking the generated ability score rule. Increase your Strength score by 1, to a maximum of 20.</description></sheet>
+		<rules>
+			<!-- Source rule: Increase strength by 1. -->
+			<stat name="strength" value="1" />
+		</rules>
+	</element>
+
+	<element name="XML Helper Spell Check" type="Feat" source="Aurora XML Helper Runtime Checks" id="ID_AXHRT_FEAT_XML_HELPER_SPELL_CHECK">
+		<description>
+			<p>You learn the XML Helper Beacon cantrip.</p>
+			<ul>
+				<li>The spell creates harmless light for a runtime check.</li>
+			</ul>
+		</description>
+		<sheet><description>You learn the XML Helper Beacon cantrip. The spell creates harmless light for a runtime check.</description></sheet>
+		<rules>
+			<grant type="Spell" id="ID_AXHRT_SPELL_XML_HELPER_BEACON" spellcasting="Eldritch Knight" />
+		</rules>
+	</element>
+
+</elements>

@@ -4616,7 +4616,7 @@ function updateAuthoringRuleSnippetPreview(resetAmount = false) {
   const snippet = getSelectedAuthoringRuleSnippet();
   const emptyMessage = type === 'spell-grant'
     ? document.getElementById('authoringRulePrepared')?.value === 'true' && !document.getElementById('authoringRuleSpellcasting')?.value.trim()
-      ? 'Add a spellcasting class for a prepared spell grant.'
+      ? 'Add an existing spellcasting feature for a prepared spell grant.'
       : 'Enter a spell element ID such as ID_PHB_SPELL_MISTY_STEP.'
     : type === 'spell-effect'
       ? 'Describe the item effect to preview its sheet action.'
@@ -4624,7 +4624,7 @@ function updateAuthoringRuleSnippetPreview(resetAmount = false) {
   preview.textContent = snippet || emptyMessage;
   if (help) {
     help.textContent = type === 'spell-grant'
-      ? 'Use the spell element ID. The optional class scopes it to a spellcasting feature; choose “Grant as prepared” only when the spell should count as prepared.'
+      ? 'Use the spell element ID. To list it on Aurora’s Magic page, enter the exact name of an existing spellcasting feature, such as Wizard or Eldritch Knight. This grant does not create that feature. Choose “Grant as prepared” only when appropriate.'
       : type === 'spell-effect'
         ? 'Adds an action and usage note to the character sheet. For an item that casts a spell, add its spell grant separately if you want the spell listed. Effect text is descriptive; add rules for mechanics Aurora should calculate.'
         : 'Choose a positive whole number amount. The preview shows the Aurora rule that will be inserted.';
@@ -4642,7 +4642,7 @@ function insertAuthoringRuleSnippet() {
       && !document.getElementById('authoringRuleSpellcasting')?.value.trim();
     const message = type === 'spell-grant'
       ? preparedWithoutClass
-        ? 'Enter a spellcasting class when granting a spell as prepared.'
+        ? 'Enter an existing spellcasting feature when granting a spell as prepared.'
         : 'Enter a valid spell element ID beginning with ID_.'
       : type === 'spell-effect'
         ? 'Enter effect text before inserting the sheet action.'
@@ -6181,16 +6181,13 @@ function inferFeatRules(feat, meta) {
     const txt = rawText.toLowerCase();
 
     // Ability score increase: "increase your strength score by 1"
-    const asiMatch = txt.match(/increase your (\w+(?:\s\w+)?) (?:score )?by (\d+)/i)
-      || txt.match(/increase your (\w+(?:\s\w+)?) by (\d+)/i);
+    const asiMatch = txt.match(/increase your (\w+) (?:score )?by (\d+)/i);
     if (asiMatch) {
       const ability = abilityMap[asiMatch[1].toLowerCase()];
       const val = parseInt(asiMatch[2]);
       if (ability && val) {
-        const maxMatch = rawText.match(/\bmaximum of\s+(\d+)/i);
-        const requirementAttr = maxMatch ? ` requirements="${ability}:max${parseInt(maxMatch[1], 10)}"` : '';
         rules.push(rule(
-          `\t\t\t<stat name="${ability}" value="${val}"${requirementAttr} />`,
+          `\t\t\t<stat name="${ability}" value="${val}" />`,
           `Increase ${ability} by ${val}.`,
           rawText
         ));

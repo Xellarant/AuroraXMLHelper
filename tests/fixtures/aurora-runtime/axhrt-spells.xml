@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<elements>
+	<info>
+		<name>Aurora XML Helper Runtime Checks - Spells</name>
+		<update version="0.1.0">
+			<file name="axhrt-spells.xml" url="axhrt-spells.xml" />
+		</update>
+	</info>
+
+	<element name="XML Helper Beacon" type="Spell" source="Aurora XML Helper Runtime Checks" id="ID_AXHRT_SPELL_XML_HELPER_BEACON">
+		<supports>Wizard</supports>
+		<description>
+			<p>A touched object sheds a harmless blue light for one minute.</p>
+		</description>
+		<setters>
+			<set name="level">0</set>
+			<set name="school">Evocation</set>
+			<set name="time">1 action</set>
+			<set name="duration">1 minute</set>
+			<set name="range">Touch</set>
+			<set name="hasVerbalComponent">true</set>
+			<set name="hasSomaticComponent">true</set>
+			<set name="hasMaterialComponent">false</set>
+		</setters>
+	</element>
+
+</elements>
