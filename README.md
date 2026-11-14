@@ -353,6 +353,10 @@ reported XML shape issues.
   rule edits after import.
 - Spell list tables are not treated as full spell definitions unless complete
   spell blocks are present.
+- Named creature stat blocks can be retained as editable spell reference text
+  when they precede the continued description in a selected or continuation
+  column. Missing named blocks are flagged before export. This does not create
+  an automated companion, and recovered statistics still need source review.
 
 ---
 

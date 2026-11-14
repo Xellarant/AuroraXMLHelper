@@ -294,8 +294,11 @@ function sourceContextForName(records, name) {
     words.slice(0, 4).join(' ')
   ].filter(needle => needle.length >= 8);
 
-  let matchIndex = -1;
+  // A spell-list or contents row can mention an entity before its definition.
+  // Prefer an actual title line so source reports point at the captured body.
+  let matchIndex = records.findIndex(record => normalizeSearchText(record.text) === normalizedName);
   for (const needle of needles) {
+    if (matchIndex !== -1) break;
     matchIndex = records.findIndex(record => normalizeSearchText(record.text).includes(needle));
     if (matchIndex !== -1) break;
   }

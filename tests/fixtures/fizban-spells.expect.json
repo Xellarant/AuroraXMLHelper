@@ -1,0 +1,27 @@
+{
+  "types": ["spell"],
+  "minCounts": { "spell": 7 },
+  "expected": {
+    "spell": [
+      "Ashardalon's Stride", "Draconic Transformation", "Fizban's Platinum Shield",
+      "Nathair's Mischief", "Raulothim's Psychic Lance", "Rime's Binding Ice", "Summon Draconic Spirit"
+    ]
+  },
+  "requireTextTypes": ["spell"],
+  "maxWarnings": 0,
+  "maxReview": 0,
+  "requiredText": {
+    "spell": {
+      "Ashardalon's Stride": ["speed increases by 20 feet", "1d6 fire damage", "each spell slot level above 3rd"],
+      "Draconic Transformation": ["Blindsight.", "Breath Weapon.", "Wings.", "6d8 force damage", "flying speed of 60 feet"],
+      "Fizban's Platinum Shield": ["Cover.", "Damage Resistance.", "Evasion.", "60 feet of the field"],
+      "Nathair's Mischief": ["d4 Effect 1", "2 Bouquets", "3 Each creature", "4 Drops", "incapacitated", "difficult terrain"],
+      "Raulothim's Psychic Lance": ["7d6 psychic damage", "incapacitated", "increases by 1d6"],
+      "Rime's Binding Ice": ["30-foot cone", "3d8 cold damage", "speed reduced to 0", "increase the cold damage by 1d8"],
+      "Summon Draconic Spirit": [
+        "Armor Class 14", "Hit Points 50", "STR DEX CON INT WIS CHA", "19 (+4) 14 (+2) 17 (+3)",
+        "d10s", "Shared Resistances.", "chosen damage type", "Rend.", "Hit: 1d6 + 4", "2d6", "6th level or higher"
+      ]
+    }
+  }
+}

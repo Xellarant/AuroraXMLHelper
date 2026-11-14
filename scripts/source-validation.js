@@ -4,6 +4,7 @@ const TEXT_KEYS = new Set([
   'description',
   'fullText',
   'higherLevels',
+  'statBlock',
   'equipment',
   'prerequisite',
   'action',
@@ -98,6 +99,7 @@ function pickMetadata(type, entity) {
     'castingTime',
     'range',
     'duration',
+    'statBlockName',
     'abilityScores',
     'feat',
     'skillProficiencies',
@@ -168,6 +170,7 @@ function normalizeEntity(type, entity, sourceRecords, sourceContextForName) {
     sourceContext: sourceContextForName(sourceRecords, entity.name || ''),
     metadata: pickMetadata(type, entity),
     description: entity.description || '',
+    statBlock: entity.statBlock || '',
     descriptionLength: normalizeSpace(entity.description || '').length,
     bodyText,
     textLength: bodyText.length,
@@ -278,6 +281,7 @@ function artifactFindings(text) {
   const checks = [
     { pattern: /\uFFFD|\u00c2|\u00c3|\u00e2\u20ac|\u25a1/, label: 'encoding artifact' },
     { pattern: /\bCant rip\b/i, label: 'OCR split for Cantrip' },
+    { pattern: /\b[lI]d(?:100|20|12|10|8|6|4)\b|\bd[lI](?:0|2)s?\b/, label: 'ambiguous dice notation' },
     { pattern: /\b\d+\s+CHAPTER\s+\d+\s+I\s+[A-Z][A-Z\s]+\b/i, label: 'PDF page header/footer artifact' },
     { pattern: /\b(?:Conc\.|Concentration|Cone\.)?\s*Ritual\s+Class\b/i, label: 'spell table class-column artifact' },
     { pattern: /[<{~][^A-Za-z0-9]{0,4}|[-–]?nzban\b/i, label: 'sidebar OCR artifact' },
@@ -379,6 +383,11 @@ function validateSourceModel(model, expectations = {}) {
         sourceContext: entity.sourceContext
       });
     }
+    if (entity.metadata?.statBlockName && !String(entity.statBlock || '').trim()) {
+      add('warning', 'missing-stat-block', `${entity.type} "${entity.name}" references ${entity.metadata.statBlockName}, but its creature statistics were not captured.`, {
+        type: entity.type, name: entity.name, sourceContext: entity.sourceContext
+      });
+    }
     if (requireFeaturesForTypes.has(entity.type) && !entity.features.length) {
       add('warning', 'missing-feature', `${entity.type} "${entity.name}" has no parsed features or traits.`, {
         type: entity.type,
@@ -424,6 +433,20 @@ function validateSourceModel(model, expectations = {}) {
     ).some(feature => normalizeKey(feature.name) === normalizeKey(expected.feature)));
     if (!hasFeature) {
       add('error', 'missing-feature', `Expected ${expected.type} "${expected.name}" feature "${expected.feature}" was not extracted.`, expected);
+    }
+  }
+
+  for (const [type, entities] of Object.entries(expectations.requiredText || {})) {
+    for (const [name, phrases] of Object.entries(entities)) {
+      const captured = groups.get(`${normalizeKey(type)}::${normalizeKey(name)}`) || [];
+      const body = normalizeKey(captured.map(entity => entity.bodyText).join('\n'));
+      for (const phrase of phrases) {
+        if (!body.includes(normalizeKey(phrase))) {
+          add('error', 'missing-source-text', `Expected ${type} "${name}" text was not captured: ${phrase}`, {
+            type, name, requiredText: phrase, sourceContext: captured[0]?.sourceContext
+          });
+        }
+      }
     }
   }
 

@@ -30,6 +30,36 @@ function syntheticSourceModel() {
   });
 }
 
+test('source references prefer a definition over an earlier spell-list entry', () => {
+  const records = sourceLineRecords([
+    { page: 1, text: '2nd Copper Flash Evocation' },
+    { page: 3, text: 'COPPER FLASH\n2nd-level evocation\nCasting Time: 1 action' }
+  ]);
+  const context = sourceContextForName(records, 'Copper Flash');
+  assert.equal(context.page, 3);
+  assert.equal(context.text, 'COPPER FLASH');
+});
+
+test('a source gate catches missing mechanics text, ambiguous dice, and omitted creature statistics', () => {
+  const model = syntheticSourceModel();
+  const spell = model.entitiesByType.spell[0];
+  spell.bodyText = 'It deals ld6 damage.';
+  spell.metadata.statBlockName = 'Copper Wisp';
+  spell.statBlock = '';
+  const expectations = {
+    requiredText: { spell: { [spell.name]: ['1d6 damage', 'Armor Class 12'] } },
+    maxWarnings: 0
+  };
+  const incomplete = validateSourceModel(model, expectations);
+  assert.equal(incomplete.summary.pass, false);
+  assert.equal(incomplete.issues.filter(issue => issue.category === 'missing-source-text').length, 2);
+  assert.ok(incomplete.issues.some(issue => issue.category === 'ocr-artifact' && /dice/.test(issue.message)));
+  assert.ok(incomplete.issues.some(issue => issue.category === 'missing-stat-block'));
+  spell.bodyText = 'It deals 1d6 damage. Armor Class 12.';
+  spell.statBlock = 'Armor Class 12.';
+  assert.equal(validateSourceModel(model, expectations).summary.pass, true);
+});
+
 test('source model preserves parser output, descriptions, tables, and source context', () => {
   const model = syntheticSourceModel();
   const mark = model.entitiesByType.feat.find(entity => entity.name === 'Mark of Storm');

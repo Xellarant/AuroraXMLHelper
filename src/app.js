@@ -959,6 +959,62 @@ function continuationProseStartIndex(lines, options = {}) {
     .sort((a, b) => a - b)[0] ?? -1;
 }
 
+function normalizeSpellProse(text) {
+  // Join only known split words. Unknown compounds keep their hyphen rather than
+  // guessing that a meaningful word boundary should disappear.
+  const wrappedWords = new Set([
+    'action', 'chosen', 'companions', 'creature', 'determines', 'difficult', 'dissipates',
+    'incapacitated', 'increases', 'mischievous', 'object', 'piercing', 'successful', 'using'
+  ]);
+  return String(text || '')
+    .replace(/\b([A-Za-z]{2,})[ \t]*-[ \t]*\n[ \t]*([a-z][A-Za-z]*)\b/g, (_, left, right) =>
+      wrappedWords.has((left + right).toLowerCase()) ? left + right : `${left}-${right}`)
+    .replace(/\b(\d+)[ \t]*-[ \t]*\n[ \t]*(?=[A-Za-z0-9])/g, '$1-')
+    .replace(/\b[lI]d(100|20|12|10|8|6|4)\b/g, '1d$1')
+    .replace(/\bd[lI](0|2)(s?)\b/g, 'd1$1$2')
+    .replace(/\bfly\s+i\s+ng\b/gi, 'flying')
+    .replace(/\bnecrot\s+ic\b/gi, 'necrotic')
+    .replace(/\bH\s+it(?=:)/g, 'Hit')
+    .replace(/\bofflowers\b/gi, 'of flowers')
+    .replace(/[ \t]+([.,;:!?])/g, '$1');
+}
+
+function restoreSpellRollTableLabels(text) {
+  const lines = text.split('\n');
+  for (let i = 0; i < lines.length - 1; i++) {
+    const header = lines[i].match(/^d(4|6|8|10|12|20|100)\s+(?:Effect|Result)$/i);
+    if (!header || !/^[A-Za-z]/.test(lines[i + 1])) continue;
+    const sides = Number(header[1]);
+    const labels = lines.slice(i + 1).flatMap(line => {
+      const match = line.match(/^(\d+)\s+[A-Za-z]/);
+      return match ? [Number(match[1])] : [];
+    });
+    // Infer the missing 1 only when every remaining result appears exactly once.
+    if (labels.length === sides - 1 && labels.every((label, index) => label === index + 2)) {
+      lines[i + 1] = '1 ' + lines[i + 1];
+    }
+  }
+  return lines.join('\n');
+}
+
+function spellStatBlockText(name, body, pages) {
+  if (!name || !body) return '';
+  const prosePrefix = spellTableKey(body.split('\n')[0].split(/\s+/).slice(0, 5).join(' '));
+  if (prosePrefix.length < 10) return '';
+  for (const page of pages || []) {
+    for (const column of page.layout?.columns || []) {
+      const lines = column.rows.map(row => normalizeTextLine(row.text));
+      const start = lines.findIndex(line => spellTableKey(line) === spellTableKey(name));
+      if (start < 0 || !/^(?:Tiny|Small|Medium|Large|Huge|Gargantuan)\b/i.test(lines[start + 1] || '')) continue;
+      const end = lines.findIndex((line, index) => index > start && spellTableKey(line).startsWith(prosePrefix));
+      if (end < 0) continue;
+      const block = normalizeSpellProse(lines.slice(start + 1, end).join('\n'));
+      if (/\bArmor Class\b/.test(block) && /\bHit Points\b/.test(block) && /\bSpeed\b/.test(block)) return block;
+    }
+  }
+  return '';
+}
+
 function spellNextPageText(name, pages, candidatePages, options = {}) {
   const location = findSpellLayoutLocation(name, pages);
   if (!location) return '';
@@ -1019,6 +1075,11 @@ function parseSpellsFromText(text, options = {}) {
       const selectedPageContinuation = spellNextPageText(lines[i], options.pages, options.pages, { preferEarliestFeature: true });
       if (selectedPageContinuation) body = `${body}\n${selectedPageContinuation}`;
     }
+    body = restoreSpellRollTableLabels(normalizeSpellProse(body));
+    const statBlockReference = body.match(/\buses?\s+the\s+([A-Za-z][A-Za-z' \n-]*?)\s+stat\s+block\b/i);
+    const statBlockName = statBlockReference && /^[A-Z]/.test(statBlockReference[1])
+      ? normalizeTextLine(statBlockReference[1]) : '';
+    const statBlock = spellStatBlockText(statBlockName, body, [...(options.pages || []), ...(options.continuationPages || [])]);
     const higher = body.match(/(?:At Higher Levels?\.?|At Higher Levels:|Using a Higher-Level Spell Slot\.?)\s*(.+)$/is);
     const description = higher ? body.slice(0, higher.index).trim() : body.trim();
     const components = parseComponents(fields.components);
@@ -1040,6 +1101,7 @@ function parseSpellsFromText(text, options = {}) {
       classes: tableEntry?.classes?.length ? tableEntry.classes : (kind.classes?.length ? kind.classes : inferClasses(`${lines.slice(Math.max(0, i - 8), i).join(' ')}\n${body}`)),
       tableMetadata: tableEntry || null,
       description,
+      ...(statBlockName ? { statBlockName, statBlock } : {}),
       higherLevels: higher ? higher[1].trim() : ''
     });
     i = Math.max(i, descEnd - 1);
@@ -2947,7 +3009,10 @@ function buildSpellFields(s, id) {
       ${chk('isTechnomagic','Technomagic',s.isTechnomagic,id)}
     </div>
     <div><label>Description</label><textarea rows="4" data-field="description" data-id="${id}" oninput="updateField(this)">${escHtml(s.description||'')}</textarea></div>
-    <div><label>At Higher Levels (leave blank if none)</label><textarea rows="2" data-field="higherLevels" data-id="${id}" oninput="updateField(this)">${escHtml(s.higherLevels||'')}</textarea></div>`;
+    <div><label>At Higher Levels (leave blank if none)</label><textarea rows="2" data-field="higherLevels" data-id="${id}" oninput="updateField(this)">${escHtml(s.higherLevels||'')}</textarea></div>
+    ${s.statBlockName ? `<div><label>Referenced creature name</label><input type="text" data-field="statBlockName" data-id="${id}" value="${escAttr(s.statBlockName)}" oninput="updateField(this)" /></div>
+    <div><label>Creature stat block (review against your source)</label><textarea rows="10" data-field="statBlock" data-id="${id}" oninput="updateField(this)" placeholder="Paste the referenced creature statistics if they could not be recovered.">${escHtml(s.statBlock||'')}</textarea></div>
+    <p class="text-muted">These statistics are included in the spell description as reference text.</p>` : ''}`;
 }
 
 function buildArchetypeFields(a, id) {
@@ -5221,6 +5286,8 @@ function validateAll() {
           issues.push({ type, i, field: 'school', msg: `${label} (${name}): school is blank` });
         if (!item.description)
           issues.push({ type, i, field: 'description', msg: `${label} (${name}): description is blank` });
+        if (item.statBlockName && !String(item.statBlock || '').trim())
+          issues.push({ type, i, field: 'statBlock', msg: `${label} (${name}): ${item.statBlockName} creature stat block is missing; add its reference text before exporting.` });
       }
 
       if (type === 'archetype') {
@@ -5828,6 +5895,10 @@ function genSpellXml(s, source, prefix, meta) {
   if (s.higherLevels) {
     const upcastLabel = isModernRuleset(meta) ? 'Using a Higher-Level Spell Slot.' : 'At Higher Levels.';
     lines.push(`\t\t\t<p class="indent"><b><i>${upcastLabel}</i></b> ${escXml(s.higherLevels)}</p>`);
+  }
+  if (s.statBlock) {
+    lines.push(`\t\t\t<h4>${escXml(s.statBlockName || 'Referenced creature')}</h4>`);
+    lines.push(`\t\t\t<p>${String(s.statBlock).split(/\r?\n/).map(escXml).join('<br />')}</p>`);
   }
   lines.push(`\t\t</description>`);
   lines.push(`\t\t<setters>`);
