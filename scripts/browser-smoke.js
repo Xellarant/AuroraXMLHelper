@@ -6,6 +6,7 @@ const net = require('node:net');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { chromium } = require('playwright');
+const { checkDraftRecovery, checkPdfExport } = require('./browser-draft-checks');
 
 const repoRoot = path.resolve(__dirname, '..');
 const host = process.env.HOST || '127.0.0.1';
@@ -75,9 +76,14 @@ function startStaticServer(port) {
   return child;
 }
 
-function stopStaticServer(child) {
-  if (!child || child.killed) return;
-  child.kill();
+async function stopStaticServer(child) {
+  if (!child || child.exitCode !== null || child.signalCode !== null) return;
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('The smoke-test server did not stop.')), 5000);
+    child.once('exit', () => { clearTimeout(timer); resolve(); });
+    child.once('error', error => { clearTimeout(timer); reject(error); });
+    child.kill();
+  });
 }
 
 function browserLaunchCandidates() {
@@ -163,16 +169,21 @@ function explainLaunchFailure(error) {
 }
 
 async function run() {
-  const port = await findOpenPort();
-  const url = `http://${host}:${port}/`;
-  const server = startStaticServer(port);
+  const remoteUrl = process.env.SMOKE_BASE_URL;
+  const port = remoteUrl ? null : await findOpenPort();
+  const url = remoteUrl || `http://${host}:${port}/`;
+  const server = remoteUrl ? null : startStaticServer(port);
+  const reportDirectory = process.env.SMOKE_REPORT_DIR ? path.resolve(process.env.SMOKE_REPORT_DIR) : null;
+  if (reportDirectory) fs.mkdirSync(reportDirectory, { recursive: true });
   let browser;
   let browserName;
+  let page;
+  const report = { ok: false, url, checkedAt: new Date().toISOString() };
 
   try {
-    await waitForServer(url);
+    if (server) await waitForServer(url);
     ({ browser, browserName } = await launchBrowser());
-    const page = await browser.newPage();
+    page = await browser.newPage();
     const consoleIssues = [];
     const pageErrors = [];
 
@@ -186,6 +197,7 @@ async function run() {
     });
 
     const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: navigationTimeoutMs });
+    if (response?.status() !== 200) throw new Error(`App returned HTTP ${response?.status()}.`);
     await page.waitForFunction(() => document.documentElement.dataset.auroraAppLoaded === 'true', null, {
       timeout: navigationTimeoutMs
     });
@@ -494,6 +506,8 @@ async function run() {
         pdfTextLayoutLoaded: document.documentElement.dataset.pdfTextLayoutLoaded,
         pdfPageRangeLoaded: document.documentElement.dataset.pdfPageRangeLoaded,
         auroraAppLoaded: document.documentElement.dataset.auroraAppLoaded,
+        draftStorageLoaded: document.documentElement.dataset.draftStorageLoaded,
+        draftRecoveryLoaded: document.documentElement.dataset.draftRecoveryLoaded,
         hasPdfInput: Boolean(document.querySelector('input[type=file]')),
         hasPageRange: Boolean(document.querySelector('#pageRange')),
         hasExtractButton: Boolean(document.querySelector('#extractBtn')),
@@ -524,7 +538,9 @@ async function run() {
       'auroraAuthoringTemplatesLoaded',
       'pdfTextLayoutLoaded',
       'pdfPageRangeLoaded',
-      'auroraAppLoaded'
+      'auroraAppLoaded',
+      'draftStorageLoaded',
+      'draftRecoveryLoaded'
     ];
     const missing = expectedFlags.filter(flag => result[flag] !== 'true');
     if (
@@ -574,21 +590,35 @@ async function run() {
       throw new Error(`Browser smoke saw page errors: ${JSON.stringify(pageErrors, null, 2)}`);
     }
 
-    console.log(JSON.stringify({
+    const draftChecks = await checkDraftRecovery(browser, url, reportDirectory);
+    const exportCheck = await checkPdfExport(browser, url, reportDirectory);
+    Object.assign(report, {
       ok: true,
       url,
       browser: browserName,
       httpStatus: response && response.status(),
       title: result.title,
       flags: expectedFlags.reduce((flags, flag) => ({ ...flags, [flag]: result[flag] }), {}),
+      draftChecks,
+      exportCheck,
       consoleIssues
-    }, null, 2));
+    });
+    if (reportDirectory) {
+      await page.locator('#draftRecovery').screenshot({ path: path.join(reportDirectory, 'draft-recovery.png') });
+      await page.screenshot({ path: path.join(reportDirectory, 'workspace.png') });
+    }
+    console.log(JSON.stringify(report, null, 2));
   } catch (error) {
+    report.error = explainLaunchFailure(error);
+    if (reportDirectory && page && !page.isClosed()) {
+      await page.screenshot({ path: path.join(reportDirectory, 'failure.png'), fullPage: true }).catch(() => {});
+    }
     console.error(explainLaunchFailure(error));
     process.exitCode = 1;
   } finally {
-    if (browser) await browser.close();
-    stopStaticServer(server);
+    if (reportDirectory) fs.writeFileSync(path.join(reportDirectory, 'browser-smoke.json'), JSON.stringify(report, null, 2) + '\n');
+    try { if (browser) await browser.close(); }
+    finally { await stopStaticServer(server); }
   }
 }
 

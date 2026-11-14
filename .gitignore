@@ -1,4 +1,5 @@
 node_modules/
+artifacts/
 
 tests/fixtures/local-corpus.json
 tests/fixtures/local-corpus.*.json

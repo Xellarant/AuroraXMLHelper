@@ -939,6 +939,17 @@
 
 <main>
 
+  <div class="card" id="draftRecovery" aria-label="Workspace draft">
+    <p id="draftStatus" class="text-muted" role="status" aria-live="polite">Your work is saved automatically in this browser. Export a draft to keep a separate backup; PDF files are not saved.</p>
+    <div class="repair-preview-actions">
+      <button class="btn btn-secondary" id="draftExport" type="button">Export draft</button>
+      <button class="btn btn-secondary" id="draftImportButton" type="button">Import draft</button>
+      <input id="draftImport" class="hidden" type="file" accept=".json,application/json" />
+      <button class="btn btn-secondary" id="draftClear" type="button">Clear saved draft</button>
+      <button class="btn btn-secondary hidden" id="draftRetry" type="button">Save this tab</button>
+    </div>
+  </div>
+
   <nav class="workspace-tabs" aria-label="Aurora XML Helper workflows">
     <button class="workspace-tab active" type="button" data-workspace-tab="parse" aria-selected="true" onclick="switchWorkspaceView('parse')">Upload &amp; Parse</button>
     <button class="workspace-tab" type="button" data-workspace-tab="repair" aria-selected="false" onclick="switchWorkspaceView('repair')">Lint &amp; Repair</button>
@@ -1280,6 +1291,8 @@
 <script src="src/aurora-authoring-templates.js" onload="document.documentElement.dataset.auroraAuthoringTemplatesLoaded='true'"></script>
 <script src="src/pdf-text-layout.js" onload="document.documentElement.dataset.pdfTextLayoutLoaded='true'"></script>
 <script src="src/pdf-page-range.js" onload="document.documentElement.dataset.pdfPageRangeLoaded='true'"></script>
+<script src="src/draft-storage.js" onload="document.documentElement.dataset.draftStorageLoaded='true'"></script>
 <script src="src/app.js"></script>
+<script src="src/draft-recovery.js" onload="document.documentElement.dataset.draftRecoveryLoaded='true'"></script>
 </body>
 </html>

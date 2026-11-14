@@ -1,4 +1,4 @@
-﻿// ---------------------------------------------
+// ---------------------------------------------
 // State
 // ---------------------------------------------
 let pdfFile = null;
@@ -28,6 +28,7 @@ const ELEMENT_TYPES = ['spell', 'archetype', 'item', 'feat', 'magic', 'race', 'b
 const MANUAL_AUTHOR_TYPES = ELEMENT_TYPES;
 const PDFJS_WORKER_SRC = './vendor/pdf.worker.min.mjs';
 const WORKSPACE_VIEWS = ['parse', 'repair', 'author'];
+let activeWorkspaceView = 'parse';
 let selectedAuthoringTemplateId = '';
 let selectedAuthoringTemplateFileName = 'aurora-authoring-starter.xml';
 let selectedAuthoringTemplateOriginalXml = '';
@@ -123,6 +124,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
 function switchWorkspaceView(viewName) {
   const selected = WORKSPACE_VIEWS.includes(viewName) ? viewName : 'parse';
+  activeWorkspaceView = selected;
   document.querySelectorAll('[data-workspace-view]').forEach(view => {
     view.classList.toggle('hidden', view.dataset.workspaceView !== selected);
   });
@@ -131,6 +133,7 @@ function switchWorkspaceView(viewName) {
     tab.classList.toggle('active', isActive);
     tab.setAttribute('aria-selected', isActive ? 'true' : 'false');
   });
+  window.AuroraDraftRecovery?.changed();
 }
 
 function getPdfJsLib() {
@@ -424,6 +427,7 @@ function setFile(f) {
   ensurePdfJsLoaded()
     .then(checkExtractReady)
     .catch(() => checkExtractReady());
+  window.AuroraDraftRecovery?.changed();
 }
 
 function clearFile() {
@@ -436,6 +440,7 @@ function clearFile() {
   if (yearEl) delete yearEl.dataset.rulesetEvidence;
   updateSourceRulesetDecisionDisplay();
   checkExtractReady();
+  window.AuroraDraftRecovery?.changed();
 }
 
 // ---------------------------------------------
@@ -2909,28 +2914,28 @@ function buildSpellFields(s, id) {
   const schools = ['Abjuration','Conjuration','Divination','Enchantment','Evocation','Illusion','Necromancy','Transmutation'];
   return `
     <div class="field-row">
-      <div><label>Name</label><input type="text" value="${escAttr(s.name)}" data-field="name" data-id="${id}" onchange="updateField(this)" /></div>
+      <div><label>Name</label><input type="text" value="${escAttr(s.name)}" data-field="name" data-id="${id}" oninput="updateField(this)" /></div>
       <div>
         <label>School</label>
-        <select data-field="school" data-id="${id}" onchange="updateField(this)">
+        <select data-field="school" data-id="${id}" oninput="updateField(this)">
           <option value="" ${!s.school?'selected':''}>Select school</option>
           ${schools.map(sc => `<option ${s.school===sc?'selected':''}>${sc}</option>`).join('')}
         </select>
       </div>
     </div>
     <div class="field-row-3">
-      <div><label>Level (0=cantrip)</label><input type="text" value="${s.level}" data-field="level" data-id="${id}" onchange="updateField(this)" /></div>
-      <div><label>Casting Time</label><input type="text" value="${escAttr(s.castingTime)}" data-field="castingTime" data-id="${id}" onchange="updateField(this)" /></div>
-      <div><label>Range</label><input type="text" value="${escAttr(s.range)}" data-field="range" data-id="${id}" onchange="updateField(this)" /></div>
+      <div><label>Level (0=cantrip)</label><input type="text" value="${escAttr(s.level)}" data-field="level" data-id="${id}" oninput="updateField(this)" /></div>
+      <div><label>Casting Time</label><input type="text" value="${escAttr(s.castingTime)}" data-field="castingTime" data-id="${id}" oninput="updateField(this)" /></div>
+      <div><label>Range</label><input type="text" value="${escAttr(s.range)}" data-field="range" data-id="${id}" oninput="updateField(this)" /></div>
     </div>
     <div class="field-row">
-      <div><label>Duration</label><input type="text" value="${escAttr(s.duration)}" data-field="duration" data-id="${id}" onchange="updateField(this)" /></div>
-      <div><label>Material Component</label><input type="text" value="${escAttr(s.material||'')}" data-field="material" data-id="${id}" onchange="updateField(this)" /></div>
+      <div><label>Duration</label><input type="text" value="${escAttr(s.duration)}" data-field="duration" data-id="${id}" oninput="updateField(this)" /></div>
+      <div><label>Material Component</label><input type="text" value="${escAttr(s.material||'')}" data-field="material" data-id="${id}" oninput="updateField(this)" /></div>
     </div>
     <div class="field-row">
       <div>
         <label>Classes (comma-separated)</label>
-        <input type="text" value="${escAttr((s.classes||[]).join(', '))}" data-field="classes" data-id="${id}" onchange="updateFieldArr(this)" />
+        <input type="text" value="${escAttr((s.classes||[]).join(', '))}" data-field="classes" data-id="${id}" oninput="updateFieldArr(this)" />
       </div>
     </div>
     <div style="display:flex; gap:1.5rem; flex-wrap:wrap; margin-bottom:1rem;">
@@ -2941,25 +2946,25 @@ function buildSpellFields(s, id) {
       ${chk('isRitual','Ritual',s.isRitual,id)}
       ${chk('isTechnomagic','Technomagic',s.isTechnomagic,id)}
     </div>
-    <div><label>Description</label><textarea rows="4" data-field="description" data-id="${id}" onchange="updateField(this)">${escHtml(s.description||'')}</textarea></div>
-    <div><label>At Higher Levels (leave blank if none)</label><textarea rows="2" data-field="higherLevels" data-id="${id}" onchange="updateField(this)">${escHtml(s.higherLevels||'')}</textarea></div>`;
+    <div><label>Description</label><textarea rows="4" data-field="description" data-id="${id}" oninput="updateField(this)">${escHtml(s.description||'')}</textarea></div>
+    <div><label>At Higher Levels (leave blank if none)</label><textarea rows="2" data-field="higherLevels" data-id="${id}" oninput="updateField(this)">${escHtml(s.higherLevels||'')}</textarea></div>`;
 }
 
 function buildArchetypeFields(a, id) {
   const supports = ['Primal Path','Bard College','Divine Domain','Druid Circle','Martial Archetype','Monastic Tradition','Sacred Oath','Ranger Archetype','Roguish Archetype','Sorcerous Origin','Otherworldly Patron','Arcane Tradition'];
   return `
     <div class="field-row">
-      <div><label>Name</label><input type="text" value="${escAttr(a.name)}" data-field="name" data-id="${id}" onchange="updateField(this)" /></div>
-      <div><label>Class</label><input type="text" value="${escAttr(a.class||'')}" data-field="class" data-id="${id}" onchange="updateField(this)" /></div>
+      <div><label>Name</label><input type="text" value="${escAttr(a.name)}" data-field="name" data-id="${id}" oninput="updateField(this)" /></div>
+      <div><label>Class</label><input type="text" value="${escAttr(a.class||'')}" data-field="class" data-id="${id}" oninput="updateField(this)" /></div>
     </div>
     <div>
       <label>Supports (Aurora archetype category)</label>
-      <select data-field="supports" data-id="${id}" onchange="updateField(this)">
+      <select data-field="supports" data-id="${id}" oninput="updateField(this)">
         <option value="" ${!a.supports?'selected':''}>Select support</option>
         ${supports.map(s => `<option ${a.supports===s?'selected':''}>${s}</option>`).join('')}
       </select>
     </div>
-    <div><label>Subclass Description</label><textarea rows="3" data-field="description" data-id="${id}" onchange="updateField(this)">${escHtml(a.description||'')}</textarea></div>
+    <div><label>Subclass Description</label><textarea rows="3" data-field="description" data-id="${id}" oninput="updateField(this)">${escHtml(a.description||'')}</textarea></div>
     <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:0.5rem;">
       <span class="section-label" style="margin:0; border:none; padding:0;">Features</span>
       <button class="btn btn-secondary" style="font-size:0.7rem; padding:0.3rem 0.75rem;" onclick="addFeature('${id}')">+ Add Feature</button>
@@ -2967,37 +2972,37 @@ function buildArchetypeFields(a, id) {
     <div id="features-${id}">${(a.features||[]).map((f,fi) => `
       <div style="border:1px solid var(--border-light); border-radius:3px; padding:0.75rem; margin-bottom:0.75rem; background:var(--parchment);">
         <div class="field-row">
-          <div><label>Feature Name</label><input type="text" value="${escAttr(f.name)}" data-field="features.${fi}.name" data-id="${id}" onchange="updateNestedField(this)" /></div>
-          <div><label>Level</label><input type="text" value="${f.level}" data-field="features.${fi}.level" data-id="${id}" onchange="updateNestedField(this)" /></div>
+          <div><label>Feature Name</label><input type="text" value="${escAttr(f.name)}" data-field="features.${fi}.name" data-id="${id}" oninput="updateNestedField(this)" /></div>
+          <div><label>Level</label><input type="text" value="${escAttr(f.level)}" data-field="features.${fi}.level" data-id="${id}" oninput="updateNestedField(this)" /></div>
         </div>
         <div class="field-row">
-          <div><label>Action (e.g. Bonus Action)</label><input type="text" value="${escAttr(f.action||'')}" data-field="features.${fi}.action" data-id="${id}" onchange="updateNestedField(this)" /></div>
-          <div><label>Usage (e.g. 1/Short Rest)</label><input type="text" value="${escAttr(f.usage||'')}" data-field="features.${fi}.usage" data-id="${id}" onchange="updateNestedField(this)" /></div>
+          <div><label>Action (e.g. Bonus Action)</label><input type="text" value="${escAttr(f.action||'')}" data-field="features.${fi}.action" data-id="${id}" oninput="updateNestedField(this)" /></div>
+          <div><label>Usage (e.g. 1/Short Rest)</label><input type="text" value="${escAttr(f.usage||'')}" data-field="features.${fi}.usage" data-id="${id}" oninput="updateNestedField(this)" /></div>
         </div>
-        <div><label>Description</label><textarea rows="3" data-field="features.${fi}.description" data-id="${id}" onchange="updateNestedField(this)">${escHtml(f.description||'')}</textarea></div>
+        <div><label>Description</label><textarea rows="3" data-field="features.${fi}.description" data-id="${id}" oninput="updateNestedField(this)">${escHtml(f.description||'')}</textarea></div>
       </div>`).join('')}</div>`;
 }
 
 function buildItemFields(item, id) {
   return `
     <div class="field-row">
-      <div><label>Name</label><input type="text" value="${escAttr(item.name)}" data-field="name" data-id="${id}" onchange="updateField(this)" /></div>
-      <div><label>Category</label><input type="text" value="${escAttr(item.category||'')}" data-field="category" data-id="${id}" onchange="updateField(this)" /></div>
+      <div><label>Name</label><input type="text" value="${escAttr(item.name)}" data-field="name" data-id="${id}" oninput="updateField(this)" /></div>
+      <div><label>Category</label><input type="text" value="${escAttr(item.category||'')}" data-field="category" data-id="${id}" oninput="updateField(this)" /></div>
     </div>
     <div class="field-row-3">
-      <div><label>Cost</label><input type="text" value="${escAttr(item.cost||'')}" data-field="cost" data-id="${id}" onchange="updateField(this)" /></div>
+      <div><label>Cost</label><input type="text" value="${escAttr(item.cost||'')}" data-field="cost" data-id="${id}" oninput="updateField(this)" /></div>
       <div><label>Currency</label>
-        <select data-field="currency" data-id="${id}" onchange="updateField(this)">
+        <select data-field="currency" data-id="${id}" oninput="updateField(this)">
           ${['gp','sp','cp','pp'].map(c=>`<option ${item.currency===c?'selected':''}>${c}</option>`).join('')}
         </select>
       </div>
-      <div><label>Weight (lb)</label><input type="text" value="${escAttr(item.weight||'')}" data-field="weight" data-id="${id}" onchange="updateField(this)" /></div>
+      <div><label>Weight (lb)</label><input type="text" value="${escAttr(item.weight||'')}" data-field="weight" data-id="${id}" oninput="updateField(this)" /></div>
     </div>
     <div class="field-row">
-      <div><label>Damage (if weapon)</label><input type="text" value="${escAttr(item.damage||'')}" data-field="damage" data-id="${id}" onchange="updateField(this)" /></div>
-      <div><label>Properties</label><input type="text" value="${escAttr(item.properties||'')}" data-field="properties" data-id="${id}" onchange="updateField(this)" /></div>
+      <div><label>Damage (if weapon)</label><input type="text" value="${escAttr(item.damage||'')}" data-field="damage" data-id="${id}" oninput="updateField(this)" /></div>
+      <div><label>Properties</label><input type="text" value="${escAttr(item.properties||'')}" data-field="properties" data-id="${id}" oninput="updateField(this)" /></div>
     </div>
-    <div><label>Description</label><textarea rows="3" data-field="description" data-id="${id}" onchange="updateField(this)">${escHtml(item.description||'')}</textarea></div>`;
+    <div><label>Description</label><textarea rows="3" data-field="description" data-id="${id}" oninput="updateField(this)">${escHtml(item.description||'')}</textarea></div>`;
 }
 
 function buildFeatFields(feat, id) {
@@ -3006,15 +3011,15 @@ function buildFeatFields(feat, id) {
     ? benefits.map((b, bi) => `
         <div style="display:flex; gap:8px; align-items:flex-start; margin-bottom:6px;">
           <span style="color:var(--gold); font-size:1.1rem; line-height:1.5; flex-shrink:0;">&bull;</span>
-          <textarea rows="2" style="flex:1; margin-bottom:0;" data-field="benefits.${bi}" data-id="${id}" onchange="updateBenefit(this)">${escHtml(b)}</textarea>
+          <textarea rows="2" style="flex:1; margin-bottom:0;" data-field="benefits.${bi}" data-id="${id}" oninput="updateBenefit(this)">${escHtml(b)}</textarea>
         </div>`).join('')
     : '<p class="text-muted" style="font-size:0.85rem;">No benefits extracted - check the PDF and add manually if needed.</p>';
   return `
     <div class="field-row">
-      <div><label>Name</label><input type="text" value="${escAttr(feat.name)}" data-field="name" data-id="${id}" onchange="updateField(this)" /></div>
-      <div><label>Prerequisite (leave blank if none)</label><input type="text" value="${escAttr(feat.prerequisite||'')}" data-field="prerequisite" data-id="${id}" onchange="updateField(this)" /></div>
+      <div><label>Name</label><input type="text" value="${escAttr(feat.name)}" data-field="name" data-id="${id}" oninput="updateField(this)" /></div>
+      <div><label>Prerequisite (leave blank if none)</label><input type="text" value="${escAttr(feat.prerequisite||'')}" data-field="prerequisite" data-id="${id}" oninput="updateField(this)" /></div>
     </div>
-    <div><label>Description (opening sentence)</label><textarea rows="2" data-field="description" data-id="${id}" onchange="updateField(this)">${escHtml(feat.description||'')}</textarea></div>
+    <div><label>Description (opening sentence)</label><textarea rows="2" data-field="description" data-id="${id}" oninput="updateField(this)">${escHtml(feat.description||'')}</textarea></div>
     <div style="display:flex; align-items:center; justify-content:space-between; margin-top:0.75rem; margin-bottom:0.5rem;">
       <span class="section-label" style="margin:0; border:none; padding:0;">Benefits</span>
       <button class="btn btn-secondary" style="font-size:0.7rem; padding:0.3rem 0.75rem;" onclick="addBenefit('${id}')">+ Add Benefit</button>
@@ -3025,39 +3030,39 @@ function buildMagicFields(item, id) {
   const rarities = ['Common','Uncommon','Rare','Very Rare','Legendary','Artifact'];
   return `
     <div class="field-row">
-      <div><label>Name</label><input type="text" value="${escAttr(item.name)}" data-field="name" data-id="${id}" onchange="updateField(this)" /></div>
-      <div><label>Type</label><input type="text" value="${escAttr(item.type||'Wondrous Item')}" data-field="type" data-id="${id}" onchange="updateField(this)" /></div>
+      <div><label>Name</label><input type="text" value="${escAttr(item.name)}" data-field="name" data-id="${id}" oninput="updateField(this)" /></div>
+      <div><label>Type</label><input type="text" value="${escAttr(item.type||'Wondrous Item')}" data-field="type" data-id="${id}" oninput="updateField(this)" /></div>
     </div>
     <div class="field-row">
       <div>
         <label>Rarity</label>
-        <select data-field="rarity" data-id="${id}" onchange="updateField(this)">
+        <select data-field="rarity" data-id="${id}" oninput="updateField(this)">
           <option value="" ${!item.rarity?'selected':''}>Select rarity</option>
           ${rarities.map(r=>`<option ${item.rarity===r?'selected':''}>${r}</option>`).join('')}
         </select>
       </div>
-      <div><label>Charges (0 if none)</label><input type="text" value="${item.charges||0}" data-field="charges" data-id="${id}" onchange="updateField(this)" /></div>
+      <div><label>Charges (0 if none)</label><input type="text" value="${escAttr(item.charges||0)}" data-field="charges" data-id="${id}" oninput="updateField(this)" /></div>
     </div>
     <div class="field-row">
       ${chk('requiresAttunement','Requires Attunement',item.requiresAttunement,id)}
     </div>
-    <div><label>Recharge (e.g. "Recharges at dawn")</label><input type="text" value="${escAttr(item.recharge||'')}" data-field="recharge" data-id="${id}" onchange="updateField(this)" /></div>
-    <div><label>Description</label><textarea rows="4" data-field="description" data-id="${id}" onchange="updateField(this)">${escHtml(item.description||'')}</textarea></div>`;
+    <div><label>Recharge (e.g. "Recharges at dawn")</label><input type="text" value="${escAttr(item.recharge||'')}" data-field="recharge" data-id="${id}" oninput="updateField(this)" /></div>
+    <div><label>Description</label><textarea rows="4" data-field="description" data-id="${id}" oninput="updateField(this)">${escHtml(item.description||'')}</textarea></div>`;
 }
 
 function buildRaceFields(race, id) {
   return `
     <div class="field-row">
-      <div><label>Name</label><input type="text" value="${escAttr(race.name)}" data-field="name" data-id="${id}" onchange="updateField(this)" /></div>
-      <div><label>Size</label><input type="text" value="${escAttr(race.size||'')}" data-field="size" data-id="${id}" onchange="updateField(this)" /></div>
+      <div><label>Name</label><input type="text" value="${escAttr(race.name)}" data-field="name" data-id="${id}" oninput="updateField(this)" /></div>
+      <div><label>Size</label><input type="text" value="${escAttr(race.size||'')}" data-field="size" data-id="${id}" oninput="updateField(this)" /></div>
     </div>
     <div class="field-row-3">
-      <div><label>Speed</label><input type="text" value="${escAttr(race.speed||'')}" data-field="speed" data-id="${id}" onchange="updateField(this)" /></div>
-      <div><label>Languages (comma-separated)</label><input type="text" value="${escAttr((race.languages||[]).join(', '))}" data-field="languages" data-id="${id}" onchange="updateFieldArr(this)" /></div>
-      <div><label>Language Choices</label><input type="text" value="${escAttr(race.languageChoices||'')}" data-field="languageChoices" data-id="${id}" onchange="updateField(this)" /></div>
+      <div><label>Speed</label><input type="text" value="${escAttr(race.speed||'')}" data-field="speed" data-id="${id}" oninput="updateField(this)" /></div>
+      <div><label>Languages (comma-separated)</label><input type="text" value="${escAttr((race.languages||[]).join(', '))}" data-field="languages" data-id="${id}" oninput="updateFieldArr(this)" /></div>
+      <div><label>Language Choices</label><input type="text" value="${escAttr(race.languageChoices||'')}" data-field="languageChoices" data-id="${id}" oninput="updateField(this)" /></div>
     </div>
-    <div><label>Ability Scores (e.g. strength:2, dexterity:1)</label><input type="text" value="${escAttr(formatAbilityScores(race.abilityScores))}" data-id="${id}" onchange="updateAbilityScores(this)" /></div>
-    <div><label>Description</label><textarea rows="3" data-field="description" data-id="${id}" onchange="updateField(this)">${escHtml(race.description||'')}</textarea></div>
+    <div><label>Ability Scores (e.g. strength:2, dexterity:1)</label><input type="text" value="${escAttr(formatAbilityScores(race.abilityScores))}" data-id="${id}" oninput="updateAbilityScores(this)" /></div>
+    <div><label>Description</label><textarea rows="3" data-field="description" data-id="${id}" oninput="updateField(this)">${escHtml(race.description||'')}</textarea></div>
     <div style="display:flex; align-items:center; justify-content:space-between; margin-top:0.75rem; margin-bottom:0.5rem;">
       <span class="section-label" style="margin:0; border:none; padding:0;">Traits</span>
       <button class="btn btn-secondary" style="font-size:0.7rem; padding:0.3rem 0.75rem;" onclick="addTrait('${id}')">+ Add Trait</button>
@@ -3068,20 +3073,20 @@ function buildRaceFields(race, id) {
 function buildBackgroundFields(bg, id) {
   return `
     <div class="field-row">
-      <div><label>Name</label><input type="text" value="${escAttr(bg.name)}" data-field="name" data-id="${id}" onchange="updateField(this)" /></div>
-      <div><label>Skill Proficiencies</label><input type="text" value="${escAttr((bg.skillProficiencies||[]).join(', '))}" data-field="skillProficiencies" data-id="${id}" onchange="updateFieldArr(this)" /></div>
+      <div><label>Name</label><input type="text" value="${escAttr(bg.name)}" data-field="name" data-id="${id}" oninput="updateField(this)" /></div>
+      <div><label>Skill Proficiencies</label><input type="text" value="${escAttr((bg.skillProficiencies||[]).join(', '))}" data-field="skillProficiencies" data-id="${id}" oninput="updateFieldArr(this)" /></div>
     </div>
     <div class="field-row">
-      <div><label>Ability Scores</label><input type="text" value="${escAttr((bg.abilityScores||[]).join(', '))}" data-field="abilityScores" data-id="${id}" onchange="updateFieldArr(this)" /></div>
-      <div><label>Feat</label><input type="text" value="${escAttr(bg.feat||'')}" data-field="feat" data-id="${id}" onchange="updateField(this)" /></div>
+      <div><label>Ability Scores</label><input type="text" value="${escAttr((bg.abilityScores||[]).join(', '))}" data-field="abilityScores" data-id="${id}" oninput="updateFieldArr(this)" /></div>
+      <div><label>Feat</label><input type="text" value="${escAttr(bg.feat||'')}" data-field="feat" data-id="${id}" oninput="updateField(this)" /></div>
     </div>
     <div class="field-row-3">
-      <div><label>Tool Proficiencies</label><input type="text" value="${escAttr((bg.toolProficiencies||[]).join(', '))}" data-field="toolProficiencies" data-id="${id}" onchange="updateFieldArr(this)" /></div>
-      <div><label>Languages</label><input type="text" value="${escAttr((bg.languages||[]).join(', '))}" data-field="languages" data-id="${id}" onchange="updateFieldArr(this)" /></div>
-      <div><label>Language Choices</label><input type="text" value="${escAttr(bg.languageChoices||'')}" data-field="languageChoices" data-id="${id}" onchange="updateField(this)" /></div>
+      <div><label>Tool Proficiencies</label><input type="text" value="${escAttr((bg.toolProficiencies||[]).join(', '))}" data-field="toolProficiencies" data-id="${id}" oninput="updateFieldArr(this)" /></div>
+      <div><label>Languages</label><input type="text" value="${escAttr((bg.languages||[]).join(', '))}" data-field="languages" data-id="${id}" oninput="updateFieldArr(this)" /></div>
+      <div><label>Language Choices</label><input type="text" value="${escAttr(bg.languageChoices||'')}" data-field="languageChoices" data-id="${id}" oninput="updateField(this)" /></div>
     </div>
-    <div><label>Equipment</label><textarea rows="2" data-field="equipment" data-id="${id}" onchange="updateField(this)">${escHtml(bg.equipment||'')}</textarea></div>
-    <div><label>Description</label><textarea rows="3" data-field="description" data-id="${id}" onchange="updateField(this)">${escHtml(bg.description||'')}</textarea></div>
+    <div><label>Equipment</label><textarea rows="2" data-field="equipment" data-id="${id}" oninput="updateField(this)">${escHtml(bg.equipment||'')}</textarea></div>
+    <div><label>Description</label><textarea rows="3" data-field="description" data-id="${id}" oninput="updateField(this)">${escHtml(bg.description||'')}</textarea></div>
     <div style="display:flex; align-items:center; justify-content:space-between; margin-top:0.75rem; margin-bottom:0.5rem;">
       <span class="section-label" style="margin:0; border:none; padding:0;">Features</span>
       <button class="btn btn-secondary" style="font-size:0.7rem; padding:0.3rem 0.75rem;" onclick="addSimpleFeature('${id}')">+ Add Feature</button>
@@ -3092,31 +3097,31 @@ function buildBackgroundFields(bg, id) {
 function buildClassFields(cls, id) {
   return `
     <div class="field-row">
-      <div><label>Name</label><input type="text" value="${escAttr(cls.name)}" data-field="name" data-id="${id}" onchange="updateField(this)" /></div>
-      <div><label>Hit Die</label><input type="text" value="${escAttr(cls.hitDie||'')}" data-field="hitDie" data-id="${id}" onchange="updateField(this)" /></div>
+      <div><label>Name</label><input type="text" value="${escAttr(cls.name)}" data-field="name" data-id="${id}" oninput="updateField(this)" /></div>
+      <div><label>Hit Die</label><input type="text" value="${escAttr(cls.hitDie||'')}" data-field="hitDie" data-id="${id}" oninput="updateField(this)" /></div>
     </div>
     <div class="field-row">
-      <div><label>Saving Throws</label><input type="text" value="${escAttr((cls.savingThrows||[]).join(', '))}" data-field="savingThrows" data-id="${id}" onchange="updateFieldArr(this)" /></div>
-      <div><label>Skill Choices</label><input type="text" value="${escAttr((cls.skillChoices?.from||[]).join(', '))}" data-field="skillChoices.from" data-id="${id}" onchange="updateNestedArrayField(this)" /></div>
+      <div><label>Saving Throws</label><input type="text" value="${escAttr((cls.savingThrows||[]).join(', '))}" data-field="savingThrows" data-id="${id}" oninput="updateFieldArr(this)" /></div>
+      <div><label>Skill Choices</label><input type="text" value="${escAttr((cls.skillChoices?.from||[]).join(', '))}" data-field="skillChoices.from" data-id="${id}" oninput="updateNestedArrayField(this)" /></div>
     </div>
     <div class="field-row">
-      <div><label>Skill Choice Count</label><input type="text" value="${escAttr(cls.skillChoices?.count||'')}" data-field="skillChoices.count" data-id="${id}" onchange="updateNestedField(this)" /></div>
-      <div><label>Archetype Level</label><input type="text" value="${escAttr(cls.archetypeLevel||'')}" data-field="archetypeLevel" data-id="${id}" onchange="updateField(this)" /></div>
+      <div><label>Skill Choice Count</label><input type="text" value="${escAttr(cls.skillChoices?.count||'')}" data-field="skillChoices.count" data-id="${id}" oninput="updateNestedField(this)" /></div>
+      <div><label>Archetype Level</label><input type="text" value="${escAttr(cls.archetypeLevel||'')}" data-field="archetypeLevel" data-id="${id}" oninput="updateField(this)" /></div>
     </div>
     <div class="field-row">
-      <div><label>Armor Proficiencies</label><input type="text" value="${escAttr((cls.armorProficiencies||[]).join(', '))}" data-field="armorProficiencies" data-id="${id}" onchange="updateFieldArr(this)" /></div>
-      <div><label>Weapon Proficiencies</label><input type="text" value="${escAttr((cls.weaponProficiencies||[]).join(', '))}" data-field="weaponProficiencies" data-id="${id}" onchange="updateFieldArr(this)" /></div>
+      <div><label>Armor Proficiencies</label><input type="text" value="${escAttr((cls.armorProficiencies||[]).join(', '))}" data-field="armorProficiencies" data-id="${id}" oninput="updateFieldArr(this)" /></div>
+      <div><label>Weapon Proficiencies</label><input type="text" value="${escAttr((cls.weaponProficiencies||[]).join(', '))}" data-field="weaponProficiencies" data-id="${id}" oninput="updateFieldArr(this)" /></div>
     </div>
     <div class="field-row">
-      <div><label>Archetype Label</label><input type="text" value="${escAttr(cls.archetypeLabel||'')}" data-field="archetypeLabel" data-id="${id}" onchange="updateField(this)" /></div>
-      <div><label>Archetype Supports</label><input type="text" value="${escAttr(cls.archetypeSupports||'')}" data-field="archetypeSupports" data-id="${id}" onchange="updateField(this)" /></div>
+      <div><label>Archetype Label</label><input type="text" value="${escAttr(cls.archetypeLabel||'')}" data-field="archetypeLabel" data-id="${id}" oninput="updateField(this)" /></div>
+      <div><label>Archetype Supports</label><input type="text" value="${escAttr(cls.archetypeSupports||'')}" data-field="archetypeSupports" data-id="${id}" oninput="updateField(this)" /></div>
     </div>
     <div class="field-row">
-      <div><label>Spellcasting Ability</label><input type="text" value="${escAttr(cls.spellcastingAbility||'')}" data-field="spellcastingAbility" data-id="${id}" onchange="updateField(this)" /></div>
-      <div><label>Spellcasting List</label><input type="text" value="${escAttr(cls.spellcastingList||'')}" data-field="spellcastingList" data-id="${id}" onchange="updateField(this)" /></div>
+      <div><label>Spellcasting Ability</label><input type="text" value="${escAttr(cls.spellcastingAbility||'')}" data-field="spellcastingAbility" data-id="${id}" oninput="updateField(this)" /></div>
+      <div><label>Spellcasting List</label><input type="text" value="${escAttr(cls.spellcastingList||'')}" data-field="spellcastingList" data-id="${id}" oninput="updateField(this)" /></div>
     </div>
-    <div><label>Starting Equipment</label><textarea rows="2" data-field="startingEquipment" data-id="${id}" onchange="updateField(this)">${escHtml(cls.startingEquipment||'')}</textarea></div>
-    <div><label>Description</label><textarea rows="3" data-field="description" data-id="${id}" onchange="updateField(this)">${escHtml(cls.description||'')}</textarea></div>
+    <div><label>Starting Equipment</label><textarea rows="2" data-field="startingEquipment" data-id="${id}" oninput="updateField(this)">${escHtml(cls.startingEquipment||'')}</textarea></div>
+    <div><label>Description</label><textarea rows="3" data-field="description" data-id="${id}" oninput="updateField(this)">${escHtml(cls.description||'')}</textarea></div>
     <div style="display:flex; align-items:center; justify-content:space-between; margin-top:0.75rem; margin-bottom:0.5rem;">
       <span class="section-label" style="margin:0; border:none; padding:0;">Features</span>
       <button class="btn btn-secondary" style="font-size:0.7rem; padding:0.3rem 0.75rem;" onclick="addFeature('${id}')">+ Add Feature</button>
@@ -3127,10 +3132,10 @@ function buildClassFields(cls, id) {
 function buildOtherFields(item, id) {
   return `
     <div class="field-row">
-      <div><label>Name</label><input type="text" value="${escAttr(item.name||'')}" data-field="name" data-id="${id}" onchange="updateField(this)" /></div>
-      <div><label>Aurora Type</label><input type="text" value="${escAttr(item.type||'')}" data-field="type" data-id="${id}" onchange="updateField(this)" /></div>
+      <div><label>Name</label><input type="text" value="${escAttr(item.name||'')}" data-field="name" data-id="${id}" oninput="updateField(this)" /></div>
+      <div><label>Aurora Type</label><input type="text" value="${escAttr(item.type||'')}" data-field="type" data-id="${id}" oninput="updateField(this)" /></div>
     </div>
-    <div><label>Description</label><textarea rows="4" data-field="description" data-id="${id}" onchange="updateField(this)">${escHtml(item.description||'')}</textarea></div>
+    <div><label>Description</label><textarea rows="4" data-field="description" data-id="${id}" oninput="updateField(this)">${escHtml(item.description||'')}</textarea></div>
     <div style="display:flex; align-items:center; justify-content:space-between; margin-top:0.75rem; margin-bottom:0.5rem;">
       <span class="section-label" style="margin:0; border:none; padding:0;">Features</span>
       <button class="btn btn-secondary" style="font-size:0.7rem; padding:0.3rem 0.75rem;" onclick="addSimpleFeature('${id}')">+ Add Feature</button>
@@ -3141,8 +3146,8 @@ function buildOtherFields(item, id) {
 function buildNestedTextBlocks(id, field, items, label) {
   return items.map((item, i) => `
     <div style="border:1px solid var(--border-light); border-radius:3px; padding:0.75rem; margin-bottom:0.75rem; background:var(--parchment);">
-      <div><label>${label}</label><input type="text" value="${escAttr(item.name||'')}" data-field="${field}.${i}.name" data-id="${id}" onchange="updateNestedField(this)" /></div>
-      <div><label>Description</label><textarea rows="3" data-field="${field}.${i}.description" data-id="${id}" onchange="updateNestedField(this)">${escHtml(item.description||'')}</textarea></div>
+      <div><label>${label}</label><input type="text" value="${escAttr(item.name||'')}" data-field="${field}.${i}.name" data-id="${id}" oninput="updateNestedField(this)" /></div>
+      <div><label>Description</label><textarea rows="3" data-field="${field}.${i}.description" data-id="${id}" oninput="updateNestedField(this)">${escHtml(item.description||'')}</textarea></div>
     </div>`).join('');
 }
 
@@ -3150,14 +3155,14 @@ function buildFeatureBlock(id, f, fi) {
   return `
     <div style="border:1px solid var(--border-light); border-radius:3px; padding:0.75rem; margin-bottom:0.75rem; background:var(--parchment);">
       <div class="field-row">
-        <div><label>Feature Name</label><input type="text" value="${escAttr(f.name)}" data-field="features.${fi}.name" data-id="${id}" onchange="updateNestedField(this)" /></div>
-        <div><label>Level</label><input type="text" value="${f.level}" data-field="features.${fi}.level" data-id="${id}" onchange="updateNestedField(this)" /></div>
+        <div><label>Feature Name</label><input type="text" value="${escAttr(f.name)}" data-field="features.${fi}.name" data-id="${id}" oninput="updateNestedField(this)" /></div>
+        <div><label>Level</label><input type="text" value="${escAttr(f.level)}" data-field="features.${fi}.level" data-id="${id}" oninput="updateNestedField(this)" /></div>
       </div>
       <div class="field-row">
-        <div><label>Action</label><input type="text" value="${escAttr(f.action||'')}" data-field="features.${fi}.action" data-id="${id}" onchange="updateNestedField(this)" /></div>
-        <div><label>Usage</label><input type="text" value="${escAttr(f.usage||'')}" data-field="features.${fi}.usage" data-id="${id}" onchange="updateNestedField(this)" /></div>
+        <div><label>Action</label><input type="text" value="${escAttr(f.action||'')}" data-field="features.${fi}.action" data-id="${id}" oninput="updateNestedField(this)" /></div>
+        <div><label>Usage</label><input type="text" value="${escAttr(f.usage||'')}" data-field="features.${fi}.usage" data-id="${id}" oninput="updateNestedField(this)" /></div>
       </div>
-      <div><label>Description</label><textarea rows="3" data-field="features.${fi}.description" data-id="${id}" onchange="updateNestedField(this)">${escHtml(f.description||'')}</textarea></div>
+      <div><label>Description</label><textarea rows="3" data-field="features.${fi}.description" data-id="${id}" oninput="updateNestedField(this)">${escHtml(f.description||'')}</textarea></div>
     </div>`;
 }
 
@@ -3387,6 +3392,7 @@ let hasUnsavedChanges = false;
 
 function markChanged() {
   hasUnsavedChanges = true;
+  window.AuroraDraftRecovery?.changed();
   ['downloadBtnWrap','downloadSingleWrap','previewBtnWrap'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.classList.add('has-changes');
@@ -3395,6 +3401,7 @@ function markChanged() {
 
 function clearChanged() {
   hasUnsavedChanges = false;
+  window.AuroraDraftRecovery?.changed();
   ['downloadBtnWrap','downloadSingleWrap','previewBtnWrap'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.classList.remove('has-changes');
@@ -3988,6 +3995,7 @@ function setRepairInputDocs(docs) {
     input.readOnly = true;
     input.placeholder = `${repairState.uploadedDocs.length} files loaded: ${repairState.uploadedDocs.map(doc => doc.fileName).join(', ')}. Clear to paste XML instead.`;
   }
+  window.AuroraDraftRecovery?.changed();
 }
 
 function syncRepairInputDocs() {
@@ -4054,6 +4062,7 @@ function inspectRepairXml() {
     }
     setRepairPreviewStatus(error.message, 'error');
   }
+  window.AuroraDraftRecovery?.changed();
 }
 
 function repairValueChanged(input) {
@@ -4188,6 +4197,7 @@ function clearRepairXmlPreview() {
     results.innerHTML = '';
     results.classList.add('hidden');
   }
+  window.AuroraDraftRecovery?.changed();
 }
 
 function renderAuthoringTemplates() {
@@ -4878,6 +4888,7 @@ function resetAuthoringTemplateXml() {
 }
 
 function setAuthoringTemplateStatus(message, tone = 'info') {
+  window.AuroraDraftRecovery?.changed();
   const status = document.getElementById('authoringTemplateStatus');
   if (!status) return;
   status.className = 'alert alert-' + tone + ' manual-status';
@@ -4962,7 +4973,7 @@ function addBenefit(id) {
     const div = document.createElement('div');
     div.style.cssText = 'display:flex; gap:8px; align-items:flex-start; margin-bottom:6px;';
     div.innerHTML = `<span style="color:var(--gold); font-size:1.1rem; line-height:1.5; flex-shrink:0;">&bull;</span>
-      <textarea rows="2" style="flex:1; margin-bottom:0;" data-field="benefits.${bi}" data-id="${id}" onchange="updateBenefit(this)"></textarea>`;
+      <textarea rows="2" style="flex:1; margin-bottom:0;" data-field="benefits.${bi}" data-id="${id}" oninput="updateBenefit(this)"></textarea>`;
     container.appendChild(div);
     div.querySelector('textarea').focus();
   }
@@ -4983,14 +4994,14 @@ function addFeature(id) {
     div.style.cssText = 'border:1px solid var(--border-light); border-radius:3px; padding:0.75rem; margin-bottom:0.75rem; background:var(--parchment);';
     div.innerHTML = `
       <div class="field-row">
-        <div><label>Feature Name</label><input type="text" value="" data-field="features.${fi}.name" data-id="${id}" onchange="updateNestedField(this)" /></div>
-        <div><label>Level</label><input type="text" value="1" data-field="features.${fi}.level" data-id="${id}" onchange="updateNestedField(this)" /></div>
+        <div><label>Feature Name</label><input type="text" value="" data-field="features.${fi}.name" data-id="${id}" oninput="updateNestedField(this)" /></div>
+        <div><label>Level</label><input type="text" value="1" data-field="features.${fi}.level" data-id="${id}" oninput="updateNestedField(this)" /></div>
       </div>
       <div class="field-row">
-        <div><label>Action (e.g. Bonus Action)</label><input type="text" value="" data-field="features.${fi}.action" data-id="${id}" onchange="updateNestedField(this)" /></div>
-        <div><label>Usage (e.g. 1/Short Rest)</label><input type="text" value="" data-field="features.${fi}.usage" data-id="${id}" onchange="updateNestedField(this)" /></div>
+        <div><label>Action (e.g. Bonus Action)</label><input type="text" value="" data-field="features.${fi}.action" data-id="${id}" oninput="updateNestedField(this)" /></div>
+        <div><label>Usage (e.g. 1/Short Rest)</label><input type="text" value="" data-field="features.${fi}.usage" data-id="${id}" oninput="updateNestedField(this)" /></div>
       </div>
-      <div><label>Description</label><textarea rows="3" data-field="features.${fi}.description" data-id="${id}" onchange="updateNestedField(this)"></textarea></div>`;
+      <div><label>Description</label><textarea rows="3" data-field="features.${fi}.description" data-id="${id}" oninput="updateNestedField(this)"></textarea></div>`;
     container.appendChild(div);
     div.querySelector('input').focus();
   }
@@ -5009,8 +5020,8 @@ function addSimpleFeature(id) {
     const div = document.createElement('div');
     div.style.cssText = 'border:1px solid var(--border-light); border-radius:3px; padding:0.75rem; margin-bottom:0.75rem; background:var(--parchment);';
     div.innerHTML = `
-      <div><label>Feature Name</label><input type="text" value="" data-field="features.${fi}.name" data-id="${id}" onchange="updateNestedField(this)" /></div>
-      <div><label>Description</label><textarea rows="3" data-field="features.${fi}.description" data-id="${id}" onchange="updateNestedField(this)"></textarea></div>`;
+      <div><label>Feature Name</label><input type="text" value="" data-field="features.${fi}.name" data-id="${id}" oninput="updateNestedField(this)" /></div>
+      <div><label>Description</label><textarea rows="3" data-field="features.${fi}.description" data-id="${id}" oninput="updateNestedField(this)"></textarea></div>`;
     container.appendChild(div);
     div.querySelector('input').focus();
   }
@@ -5029,8 +5040,8 @@ function addTrait(id) {
     const div = document.createElement('div');
     div.style.cssText = 'border:1px solid var(--border-light); border-radius:3px; padding:0.75rem; margin-bottom:0.75rem; background:var(--parchment);';
     div.innerHTML = `
-      <div><label>Trait Name</label><input type="text" value="" data-field="traits.${ti}.name" data-id="${id}" onchange="updateNestedField(this)" /></div>
-      <div><label>Description</label><textarea rows="3" data-field="traits.${ti}.description" data-id="${id}" onchange="updateNestedField(this)"></textarea></div>`;
+      <div><label>Trait Name</label><input type="text" value="" data-field="traits.${ti}.name" data-id="${id}" oninput="updateNestedField(this)" /></div>
+      <div><label>Description</label><textarea rows="3" data-field="traits.${ti}.description" data-id="${id}" oninput="updateNestedField(this)"></textarea></div>`;
     container.appendChild(div);
     div.querySelector('input').focus();
   }
@@ -7780,16 +7791,122 @@ function resetAll() {
   document.getElementById('xmlPreviewWrap').classList.add('hidden');
   document.getElementById('sourceName').value = '';
   document.getElementById('sourceAbbr').value = '';
+  delete document.getElementById('sourceAbbr').dataset.userEdited;
   document.getElementById('sourceAuthor').value = '';
   document.getElementById('sourceYear').value = '';
   delete document.getElementById('sourceYear').dataset.rulesetEvidence;
   document.getElementById('pageRange').value = '';
+  document.getElementById('manualSourceText').value = '';
   updateSourceRulesetDecisionDisplay();
   clearChanged();
   checkExtractReady();
 }
 
+const DRAFT_FIELD_IDS = [
+  'sourceName', 'sourceAbbr', 'sourceAuthor', 'sourceYear', 'pageRange',
+  'manualAddType', 'manualSourceText', 'authoringRuleType', 'authoringRuleAmount',
+  'authoringRuleSkill', 'authoringRuleAbility', 'authoringRuleSpellId',
+  'authoringRuleSpellcasting', 'authoringRulePrepared', 'authoringRuleAction',
+  'authoringRuleUsage', 'authoringRuleEffect', 'authoringElementProperty',
+  'authoringElementPropertyValue', 'authoringElementQualifier'
+];
+
+function captureWorkspaceDraft() {
+  const inputDocs = currentRepairInputDocs();
+  return {
+    workspace: activeWorkspaceView,
+    fields: Object.fromEntries(DRAFT_FIELD_IDS.map(id => [id, document.getElementById(id)?.value || ''])),
+    sourceFlags: {
+      abbrEdited: document.getElementById('sourceAbbr')?.dataset.userEdited || '',
+      rulesetEvidence: document.getElementById('sourceYear')?.dataset.rulesetEvidence || ''
+    },
+    selectedTypes: getSelectedTypes(),
+    data: cloneData(extractedData),
+    baseline: cloneData(generatedBaselineData),
+    skipped: cloneData(skippedItems),
+    pageRanges: cloneData(discoveredPageRanges),
+    changed: hasUnsavedChanges,
+    author: {
+      templateId: selectedAuthoringTemplateId,
+      fileName: selectedAuthoringTemplateFileName,
+      originalXml: selectedAuthoringTemplateOriginalXml,
+      xml: document.getElementById('authoringTemplateXml')?.value || ''
+    },
+    repair: {
+      inputDocs: cloneData(inputDocs),
+      originalDocs: cloneData(repairState.originalDocs),
+      docs: cloneData(repairState.docs),
+      undoDocs: cloneData(repairState.undoDocs),
+      inspected: Boolean(repairState.analysis && repairState.inputSnapshot === JSON.stringify(inputDocs))
+    }
+  };
+}
+
+function restoreWorkspaceDraft(state) {
+  (window.AuroraDraftStorage || globalThis.AuroraDraftStorage).validateState(state);
+  extractedData = cloneData(state.data);
+  generatedBaselineData = cloneData(state.baseline);
+  skippedItems = cloneData(state.skipped);
+  discoveredPageRanges = cloneData(state.pageRanges);
+  // File objects and old provider settings are deliberately outside the draft.
+  pdfFile = null;
+  document.getElementById('pdfFile').value = '';
+  document.getElementById('fileInfo').classList.add('hidden');
+  document.getElementById('uploadZone').classList.remove('hidden');
+
+  selectedAuthoringTemplateId = '';
+  loadAuthoringTemplate(state.author.templateId, { reset: true });
+  selectedAuthoringTemplateId = state.author.templateId;
+  selectedAuthoringTemplateFileName = state.author.fileName;
+  selectedAuthoringTemplateOriginalXml = state.author.originalXml;
+  document.getElementById('authoringTemplateXml').value = state.author.xml;
+  for (const id of DRAFT_FIELD_IDS) {
+    const field = document.getElementById(id);
+    if (field && Object.hasOwn(state.fields, id)) field.value = state.fields[id];
+  }
+  updateAuthoringRuleSnippetPreview();
+  updateAuthoringElementPropertyPreview();
+  // The property picker can rebuild qualifier options while refreshing.
+  document.getElementById('authoringElementQualifier').value = state.fields.authoringElementQualifier || '';
+  document.getElementById('authoringElementPropertyValue').value = state.fields.authoringElementPropertyValue || '';
+  updateAuthoringElementPropertyPreview();
+  const abbr = document.getElementById('sourceAbbr');
+  const year = document.getElementById('sourceYear');
+  delete abbr.dataset.userEdited;
+  delete year.dataset.rulesetEvidence;
+  if (state.sourceFlags.abbrEdited) abbr.dataset.userEdited = state.sourceFlags.abbrEdited;
+  if (state.sourceFlags.rulesetEvidence) year.dataset.rulesetEvidence = state.sourceFlags.rulesetEvidence;
+  document.querySelectorAll('.type-check input').forEach(input => {
+    input.checked = !input.disabled && state.selectedTypes.includes(input.value);
+    input.closest('.type-check').classList.toggle('checked', input.checked);
+  });
+  updateTypeCheck();
+  updateSourceRulesetDecisionDisplay();
+  const hasReview = Object.values(extractedData).some(items => items.length) || Boolean(state.fields.manualSourceText);
+  document.getElementById('stepReview').classList.toggle('hidden', !hasReview);
+  document.getElementById('reviewArea').classList.toggle('hidden', !hasReview);
+  if (hasReview) buildReviewUI();
+  if (state.changed) markChanged(); else clearChanged();
+
+  clearRepairXmlPreview();
+  setRepairInputDocs(state.repair.inputDocs);
+  if (state.repair.inspected && state.repair.docs.length) {
+    repairState.originalDocs = cloneData(state.repair.originalDocs);
+    repairState.docs = cloneData(state.repair.docs);
+    repairState.undoDocs = cloneData(state.repair.undoDocs);
+    repairState.analysis = analyzeRepairXmlDocs(repairState.docs);
+    repairState.lastApply = changedRepairDocs().length ? { applied: [], skipped: [], verify: null } : null;
+    syncRepairInputDocs();
+    renderRepairResults();
+    setRepairPreviewStatus('Draft recovered. Diagnostics were refreshed; your original XML and repair undo are available.', 'info');
+  }
+  switchWorkspaceView(state.workspace);
+  checkExtractReady();
+}
+
 window.AuroraXMLHelper = {
+  captureWorkspaceDraft,
+  restoreWorkspaceDraft,
   parseFeatsFromText,
   parseArchetypesFromText,
   parseClassesFromText,

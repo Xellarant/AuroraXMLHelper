@@ -75,10 +75,9 @@ function loadApp(sourceMeta = {}, options = {}) {
     authoringElementPropertyValue: createStubElement(''),
     authoringElementQualifier: createStubElement('')
   };
-  const fallbackElement = createStubElement();
   const document = {
     getElementById(id) {
-      return elements[id] || fallbackElement;
+      return elements[id] || (elements[id] = createStubElement());
     },
     querySelector() { return null; },
     querySelectorAll() { return []; },
@@ -125,6 +124,7 @@ function loadApp(sourceMeta = {}, options = {}) {
     path.join(repoRoot, 'src', 'aurora-authoring-templates.js'),
     path.join(repoRoot, 'src', 'pdf-text-layout.js'),
     path.join(repoRoot, 'src', 'pdf-page-range.js'),
+    path.join(repoRoot, 'src', 'draft-storage.js'),
     path.join(repoRoot, 'src', 'app.js')
   ]) {
     vm.runInContext(fs.readFileSync(scriptPath, 'utf8'), context, {

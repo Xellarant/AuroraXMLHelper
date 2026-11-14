@@ -108,6 +108,28 @@ Feat prerequisite text is for display and does not create a dynamic requirement.
 
 If incomplete elements were skipped, the ZIP includes `skipped-elements.txt`.
 
+### Draft recovery
+
+The app saves a working draft in this browser after a short pause in editing and
+when you leave the page. Returning or refreshing restores source details, parsed
+elements and their edits, pasted source text, authoring XML, the active workspace,
+and loaded repair files. Recovered repairs retain their original XML and last
+undo; diagnostics are recalculated when restored.
+
+Use **Export draft** for a separate JSON backup, and **Import draft** to reopen
+that backup in this or another browser. These drafts contain your workspace text,
+not the PDF file or provider credentials. To parse again after recovery, select
+the PDF again. Remembered corrections remain separate browser preferences.
+
+Autosave belongs to this browser profile and site address; clearing site data or
+using another device will not carry it over. Storage failures leave the last
+saved copy intact and show a warning so you can export the current work. If
+another tab changes the saved draft, saving pauses until you explicitly choose
+**Save this tab** or reopen the saved version. **Clear saved draft** removes the
+saved copy while keeping your open work; the next edit saves a new draft.
+**Start Over** clears the parsing workspace while retaining work in the authoring
+and repair workspaces.
+
 ---
 
 ## Aurora XML validation
@@ -158,7 +180,11 @@ npm run smoke:browser
 ```
 
 The smoke test starts the local static server, opens Playwright Chromium, and
-checks that the app and browser-only dependencies finish loading. It prefers
+checks that the app and browser-only dependencies finish loading. It also tests
+refresh recovery, the last field typed before refreshing, repair downloads and
+undo, draft export/import, corrupt drafts, tab conflicts, and PDF-to-ZIP export.
+It uses isolated browser contexts and does not access your normal browser data
+or start a desktop screen capture session. It prefers
 Playwright's bundled Chromium headless shell when available, then falls back to
 installed Google Chrome or Microsoft Edge. If you want the bundled shell, install
 it with:
@@ -174,6 +200,37 @@ shell install stalls, use an installed browser explicitly:
 $env:AURORA_BROWSER_CHANNEL="chrome"
 npm run smoke:browser
 ```
+
+### Automated release verification
+
+The **Tests** workflow runs unit/regression tests and the headless browser checks
+on pull requests and pushes to main. **Verify live release** runs after a
+successful `pages-build-deployment` for the current main commit. It can also be
+started manually from the Actions page on main. This follows GitHub's
+[`workflow_run` event](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#workflow_run)
+and preserves the existing branch-based Pages publishing setup.
+
+The live verifier checks the home page, every local script it loads, and the
+PDF worker against the checked-out commit. It retries for up to three minutes to
+allow publishing caches to update, then runs the browser workflows on the live
+URL. Mixed or stale files fail verification, even when the home page loads.
+Text comparisons normalize UTF-8 byte-order marks and line endings so Windows
+checkouts can be used too.
+These are post-deployment checks; they report failures and do not roll back or
+block the existing Pages deployment.
+
+To check the release represented by your current checkout manually:
+
+```powershell
+$env:RELEASE_BASE_URL="https://xellarant.github.io/AuroraXMLHelper/"
+npm run verify:release
+```
+
+Set `SMOKE_BASE_URL` to run only the browser checks against an existing site,
+without starting a local server. Set `SMOKE_REPORT_DIR` to retain a JSON report
+and screenshots; `verify:release` defaults to `artifacts/release`. GitHub Actions
+retains browser results for seven days and release results for fourteen days.
+The workflows must be merged into main before the automatic checks become active.
 
 Run local corpus comparisons with:
 

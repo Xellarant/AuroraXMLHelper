@@ -6,6 +6,9 @@ on:
       - main
   pull_request:
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.event.pull_request.head.ref || github.ref_name }}
   cancel-in-progress: true
@@ -28,3 +31,30 @@ jobs:
 
       - name: Run regression tests
         run: npm test
+
+  browser-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Install browser and system dependencies
+        run: npx playwright install --with-deps --only-shell chromium
+      - name: Check browser workflows and draft recovery
+        run: npm run smoke:browser
+        env:
+          SMOKE_REPORT_DIR: artifacts/browser-smoke
+      - name: Keep browser results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-smoke
+          path: artifacts/browser-smoke
+          if-no-files-found: ignore
+          retention-days: 7
