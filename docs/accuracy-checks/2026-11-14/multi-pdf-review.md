@@ -1,5 +1,9 @@
 # Additional PDF structure review — November 14, 2026
 
+**Follow-up:** The sidebar and class failures recorded below are resolved in the
+[subsequent fixes and regression report](sidebar-class-fixes.md). This document
+preserves the original review findings.
+
 Reviewed four contrasting local PDFs from `Documents/DnD/books and docs` using
 the production PDF reader, parsers, source validation, and XML generator.
 Compared extracted data with rendered source pages. Page numbers below are PDF

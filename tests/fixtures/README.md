@@ -17,7 +17,8 @@ This directory keeps regression fixtures small and source-safe.
 - Use `requiredText: { "spell": { "Name": ["required phrase"] } }` in source expectations to catch omitted or incorrectly extracted mechanics. Comparisons ignore case and whitespace; ambiguous dice notation and missing named stat blocks are also reported.
 - Use `requiredMetadata: { "spell": { "Name": { "level": 0, "castingTime": "1 action" } } }` to check captured field values. Strings ignore case and whitespace; numbers and booleans must match exactly, including zero and false.
 - Use `forbiddenText: { "magic": { "Name": ["known sidebar phrase"] } }` to flag unwanted commentary in a captured description. These checks identify known contamination; they do not remove it automatically.
-- `complex-pdf-audits.json` records four contrasting local PDF samples. The spell definitions pass; the item sidebar and two class samples deliberately fail until their documented extraction gaps are resolved. This private-source audit is opt-in and is not a CI gate. See the [review](../../docs/accuracy-checks/2026-11-14/multi-pdf-review.md) for scope and results.
+- `complex-pdf-audits.json` records four contrasting PDFs in six local checks, including expanded base-class sections for Ranger and Witch. All six source checks pass after the [sidebar and class fixes](../../docs/accuracy-checks/2026-11-14/sidebar-class-fixes.md). This private-source audit is opt-in and is not a CI gate. Source coverage does not certify complete rules automation; the app separately flags table features without descriptions.
+- Older class features use progression-table levels or explicit feature levels. The immediate continuation page may finish the last selected feature, but does not import new features, subclass sections, or option catalogues. Inset reference prose is retained in the class overview.
 
 Run the committed fixtures with:
 
@@ -56,6 +57,10 @@ Choose another entry's exact name to reproduce its findings. The paths resolve
 against `USERPROFILE`; source PDFs and generated reports stay local.
 `pdf-complex-structures.test.js` covers the corrected parsing patterns with
 synthetic content in CI.
+`pdf-class-extraction.test.js` adds a generated two-page class PDF and checks
+feature levels, metadata, scope, and XML. `pdf-text-layout.test.js` covers wide
+tables, uneven columns, annotations, and reference text using synthetic positions
+and font metadata. Source-book files and fonts are not required by these tests.
 
 Run the Aurora XML shape validator in required mode with:
 

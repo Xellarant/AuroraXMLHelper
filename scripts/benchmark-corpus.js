@@ -9,7 +9,7 @@ const {
   selectPageNumbers,
   continuationPageNumbers
 } = require('../src/pdf-page-range');
-const { textItemsToLayout, textItemsToLines } = require('../src/pdf-text-layout');
+const { extractPageLayout } = require('../src/pdf-text-layout');
 const {
   ELEMENT_TYPES,
   PARSERS,
@@ -347,8 +347,7 @@ async function extractPdfPages(sourcePath, ranges) {
   const pageByNumber = new Map();
   for (const p of [...selectedPageNumbers, ...continuationPageNumbers(pdf.numPages, selectedPageNumbers)]) {
     const page = await pdf.getPage(p);
-    const content = await page.getTextContent();
-    const layout = textItemsToLayout(content.items);
+    const layout = await extractPageLayout(page);
     pageByNumber.set(p, { page: p, text: layout.lines.join('\n'), layout });
   }
   return {

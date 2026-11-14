@@ -753,10 +753,9 @@ async function extractPdfPages(file) {
   const pages = [];
   for (let p = 1; p <= pdf.numPages; p++) {
     const page = await pdf.getPage(p);
-    const content = await page.getTextContent();
     const layout = window.AuroraPdfTextLayout;
-    if (!layout?.textItemsToLayout) throw new Error('PDF text layout support is not loaded.');
-    const pageLayout = layout.textItemsToLayout(content.items);
+    if (!layout?.extractPageLayout) throw new Error('PDF text layout support is not loaded.');
+    const pageLayout = await layout.extractPageLayout(page);
     pages.push({ page: p, text: pageLayout.lines.join('\n'), layout: pageLayout });
   }
   return pages;
@@ -828,7 +827,8 @@ function normalizeTextLine(line) {
   value = value
     .replace(/^>+\s*/, '')
     .replace(/^#{1,6}\s+/, '')
-    .replace(/^[-*+]\s+/, '')
+    .replace(/^[-*]\s+/, '')
+    .replace(/^\+\s+(?!your\s+(?:Strength|Dexterity|Constitution|Intelligence|Wisdom|Charisma|proficiency)\b)/i, '')
     .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
     .replace(/\*\*([^*]+)\*\*/g, '$1')
     .replace(/__([^_]+)__/g, '$1')
@@ -979,6 +979,7 @@ function normalizeSpellProse(text) {
     .replace(/\bd[lI](0|2)(s?)\b/g, 'd1$1$2')
     .replace(/\bfly\s+i\s+ng\b/gi, 'flying')
     .replace(/\bnecrot\s+ic\b/gi, 'necrotic')
+    .replace(/\be\s+ffects\b/gi, 'effects')
     .replace(/\bH\s+it(?=:)/g, 'Hit')
     .replace(/\bofflowers\b/gi, 'of flowers')
     .replace(/[ \t]+([.,;:!?])/g, '$1');
@@ -1447,10 +1448,35 @@ function normalizeArchetypeFeatures(archetypeName, features) {
   return features || [];
 }
 
-function parseClassesFromText(text) {
+function parseClassesFromText(text, options = {}) {
+  if (options.pages?.some(page => page.layout?.mainLines)) {
+    text = options.pages.map(page => page.layout?.mainLines?.join('\n') ?? page.text).join('\n\n');
+  }
   const lines = normalizeTextLines(text);
   const classes = [];
   for (let i = 0; i < lines.length; i++) {
+    const legacyName = legacyClassName(lines, i);
+    if (legacyName) {
+      let start = i;
+      for (let previous = i - 1; previous >= Math.max(0, i - 80); previous--) {
+        if (normalizeExtractedName(lines[previous]) === `The ${legacyName}`
+          && /^\|.*Level.*Features/i.test(lines[previous + 1] || '')) { start = previous; break; }
+      }
+      let end = i + 2;
+      while (end < lines.length && !legacyClassName(lines, end)
+        && !legacyClassBoundary(lines, end, legacyName)) end++;
+      const block = lines.slice(start, end);
+      // A subsequent class may have its progression table before its intro.
+      const nextName = legacyClassName(lines, end);
+      if (nextName) {
+        const title = block.findIndex(line => normalizeExtractedName(line) === `The ${nextName}`);
+        if (title >= 0) block.splice(title);
+      }
+      const parsed = parseLegacyClassBlock(legacyName, block, options, end === lines.length);
+      if (parsed.hitDie || parsed.features.length) classes.push(parsed);
+      i = end - 1;
+      continue;
+    }
     const name = classStartName(lines, i);
     if (!name) continue;
     const end = findElementEnd(lines, i + 1);
@@ -1460,6 +1486,114 @@ function parseClassesFromText(text) {
     i = Math.max(i, end - 1);
   }
   return uniqueByName(classes);
+}
+
+function legacyClassName(lines, index) {
+  if (!/^Class Features$/i.test(lines[index] || '')) return '';
+  const intro = (lines[index + 1] || '').match(/^As (?:a|an) ([A-Za-z' -]+), you (?:gain|have) the following class features\./i);
+  if (!intro || !lines.slice(index + 2, index + 8).some(line => /^Hit Dice?:/i.test(line))) return '';
+  return normalizeExtractedName(intro[1]);
+}
+
+function legacyClassBoundary(lines, index, name) {
+  const line = lines[index] || '';
+  if (new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} (?:Subclasses|Conclaves|Crafts|Archetypes)$`, 'i').test(line)) return true;
+  // Option catalogues repeat a feature heading, but are not another copy of
+  // the feature. Keep them outside the base class feature descriptions.
+  if (/\b(?:below|following)\b.*\balphabetical order\b/i.test(lines[index + 1] || '')) return true;
+  return /^Chapter\b|^[A-Za-z' -]+ Subclasses$|^(?:Magic Items|Monsters|Backgrounds|Races|Species Descriptions|Feats|Classes|Appendix)$/i.test(line);
+}
+
+function legacyFeatureKey(value) {
+  return normalizeExtractedName(value).toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function parseLegacyClassBlock(name, rawBlock, options, atSelectedEnd) {
+  const progression = parseClassProgressionRows(rawBlock);
+  const block = [];
+  for (let index = 0; index < rawBlock.length; index++) {
+    const line = rawBlock[index];
+    const keys = markdownTableCells(line).map(classTableHeaderKey);
+    if (keys.includes('level') && keys.includes('features')) {
+      index++;
+      if (isMarkdownTableSeparator(markdownTableCells(rawBlock[index] || ''))) index++;
+      while (/^\d+(?:st|nd|rd|th)?$/i.test(markdownTableCells(rawBlock[index] || '')[0] || '')) index++;
+      index--;
+      continue;
+    }
+    if (!isPdfPageChromeLine(line) && !/^©/.test(line) && normalizeExtractedName(line) !== `The ${name}`) block.push(line);
+  }
+  const levels = new Map();
+  progression.forEach(row => row.features.forEach(feature => {
+    if (!levels.has(legacyFeatureKey(feature))) levels.set(legacyFeatureKey(feature), row.level);
+  }));
+  const featureInfo = (lines, index) => {
+    const direct = lines[index].match(/^\d+(?:st|nd|rd|th)(?:-|\s+)level:?\s+(.+)$/i);
+    const explicit = !direct || /^[A-Z]/.test(direct[1]) ? featureStartInfo(lines, index, `${name} feature`) : null;
+    return explicit || (looksLikeTitle(lines[index]) && !lines[index].includes('|') && levels.has(legacyFeatureKey(lines[index]))
+      ? { name: normalizeExtractedName(lines[index]), level: levels.get(legacyFeatureKey(lines[index])), descriptionStart: index + 1 } : null);
+  };
+  const firstFeature = block.findIndex((_, index) => featureInfo(block, index));
+  const core = block.slice(0, firstFeature < 0 ? block.length : firstFeature);
+  const folded = [];
+  for (const line of core) {
+    if (/^(?:Hit Dice?|Hit Points[^:]*|Armor|Weapons|Tools|Saving Throws|Skills)\s*:/i.test(line)
+      || /^(?:Equipment|Hit Points|Proficiencies|Class Features)$/i.test(line)
+      || /^As (?:a|an)\b/i.test(line)) folded.push(line);
+    else if (folded.length) folded[folded.length - 1] += ' ' + line;
+  }
+  const cls = parseClassBlock(name, [...folded, ...block.slice(firstFeature < 0 ? block.length : firstFeature)]);
+  const coreClass = parseClassBlock(name, folded);
+  for (const field of ['hitDie', 'savingThrows', 'armorProficiencies', 'weaponProficiencies', 'toolProficiencies', 'skillChoices', 'startingEquipment']) cls[field] = coreClass[field];
+  cls.progression = progression;
+  cls.description = core.filter(line => /^As (?:a|an)\b/i.test(line)).join(' ');
+  const starts = [];
+  for (let index = 0; index < block.length; index++) {
+    const info = featureInfo(block, index);
+    if (info) {
+      starts.push({ index, ...info });
+      index = Math.max(index, info.descriptionStart - 1);
+    }
+  }
+  cls.features = starts.map((start, index) => ({
+    name: start.name, level: start.level,
+    description: block.slice(start.descriptionStart, starts[index + 1]?.index ?? block.length).join('\n').trim()
+  })).filter(feature => feature.description && !isPlaceholderClassFeature(feature));
+  const last = cls.features.at(-1);
+  if (last && atSelectedEnd && options.continuationPages?.length) {
+    const lastPage = options.pages?.at(-1)?.page;
+    const continuation = options.continuationPages.find(page => page.page === lastPage + 1);
+    const continued = normalizeTextLines(continuation?.layout?.mainLines?.join('\n') ?? continuation?.text ?? '')
+      .filter(line => !isPdfPageChromeLine(line) && !/^©/.test(line));
+    const stop = continued.findIndex((line, index) => featureInfo(continued, index) || legacyClassName(continued, index)
+      || legacyClassBoundary(continued, index, name) || isElementStart(continued, index));
+    const tail = continued.slice(0, stop < 0 ? continued.length : stop);
+    if (tail.length) last.description += '\n' + tail.join('\n');
+  }
+  cls.features.forEach(feature => {
+    feature.description = normalizeSpellProse(feature.description);
+    feature.action = /^Spellcasting$/i.test(feature.name) ? '' : inferAction(feature.description);
+    feature.usage = /^Spellcasting$/i.test(feature.name) ? '' : inferUsage(feature.description);
+  });
+  const references = [];
+  let referenceOwner = '';
+  for (const page of options.pages || []) {
+    const pageLines = normalizeTextLines(page.layout?.mainLines?.join('\n') ?? page.text ?? '');
+    const names = pageLines.map((_, index) => legacyClassName(pageLines, index)).filter(Boolean);
+    if (names.length) referenceOwner = names.at(-1);
+    if (referenceOwner === name && names.every(value => value === name)) {
+      references.push(...(page.layout?.references || []).filter(block => block.kind === 'reference'));
+    }
+  }
+  if (references.length) cls.description += '\n\n' + references.flatMap(block => block.lines).join('\n');
+  const selection = cls.features.find(feature => /\b(?:conclave|craft)\b/i.test(feature.name)
+    && /\bchoose\b/i.test(feature.description));
+  if (selection) {
+    cls.archetypeLevel = selection.level;
+    cls.archetypeLabel = selection.name;
+    cls.archetypeSupports = selection.name;
+  }
+  return cls;
 }
 
 function parseBackgroundBlock(name, block) {
@@ -1607,13 +1741,12 @@ function classTableHeaderKey(value) {
   if (/^features?$/.test(clean)) return 'features';
   if (/^plans/.test(clean)) return 'plansKnown';
   if (/^magic items?$/.test(clean)) return 'magicItems';
-  if (/^cantrips?$/.test(clean)) return 'cantrips';
+  if (/^cantrips?(?: known)?$/.test(clean)) return 'cantrips';
+  if (/^spells? known$/.test(clean)) return 'spellsKnown';
+  if (/^hexes known$/.test(clean)) return 'hexesKnown';
   if (/^prepared/.test(clean)) return 'prepared';
-  if (/^1st$/.test(clean)) return 'slots1';
-  if (/^2nd$/.test(clean)) return 'slots2';
-  if (/^3rd$/.test(clean)) return 'slots3';
-  if (/^4th$/.test(clean)) return 'slots4';
-  if (/^5th$/.test(clean)) return 'slots5';
+  const slot = clean.match(/^([1-9])(?:st|nd|rd|th)$/);
+  if (slot) return `slots${slot[1]}`;
   return '';
 }
 
@@ -1635,6 +1768,8 @@ function parseClassProgressionRows(lines) {
         magicItems: null,
         cantrips: null,
         prepared: null,
+        spellsKnown: null,
+        hexesKnown: null,
         slots: []
       };
       keys.forEach((key, index) => {
@@ -1703,7 +1838,7 @@ function parseClassBlock(name, block) {
   for (let i = 0; i < block.length; i++) {
     const line = block[i];
     if (/^Hit Dice?:/i.test(line) || /^Hit Point Die\b/i.test(line) || /^Hit Points/i.test(line)) {
-      cls.hitDie = parseHitDie(line);
+      cls.hitDie = parseHitDie(line) || cls.hitDie;
       firstField = Math.min(firstField, i);
     } else if (/^Saving Throw(?:s| Proficiencies)?/i.test(line)) {
       cls.savingThrows = parseAbilitiesFromText(stripLeadingFieldLabel(line, /^Saving Throw(?:s| Proficiencies)?/i));
@@ -2016,10 +2151,10 @@ function parseHitDie(text) {
 }
 
 function parseSkillChoice(line) {
-  const count = (line.match(/choose\s+(\d+)/i) || [])[1];
+  const count = (line.match(/choose\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\b/i) || [])[1];
   return {
-    count: count ? parseInt(count, 10) : 0,
-    from: parseSkillsFromText(line)
+    count: count ? parseCountWord(count) : 0,
+    from: SKILL_NAMES.filter(skill => new RegExp(`\\b${skill.split('').join('\\s*')}\\b`, 'i').test(line))
   };
 }
 
@@ -5366,6 +5501,11 @@ function validateAll() {
           issues.push({ type, i, field: null, msg: `${label} (${name}): hit die is missing` });
         if (!item.features || item.features.length === 0)
           issues.push({ type, i, field: null, msg: `${label} (${name}): has no class features` });
+        const missing = uniqueStrings((item.progression || []).flatMap(row => row.features || []))
+          .filter(feature => !isPlaceholderClassFeature({ name: feature })
+            && !(item.features || []).some(captured => legacyFeatureKey(captured.name) === legacyFeatureKey(feature)));
+        if (missing.length) issues.push({ type, i, field: null,
+          msg: `${label} (${name}): progression table features need descriptions: ${missing.join(', ')}. Include the relevant pages or add these features before using the class.` });
       }
 
       if (type === 'other') {
@@ -7369,7 +7509,7 @@ function isArchetypeSelectionFeature(feature, cls) {
 }
 
 function isPlaceholderClassFeature(feature) {
-  return /^Subclass Feature$/i.test(String(feature?.name || ''));
+  return /^(?:[A-Za-z' -]+ )?(?:Subclass|Conclave|Craft|Archetype) Feature$/i.test(String(feature?.name || ''));
 }
 
 function classFeatureIdSegment(name) {
@@ -7397,6 +7537,7 @@ function classProgressionFeatureGrants(cls) {
   progression.forEach(row => {
     (row.features || []).forEach(name => {
       if (!name || isPlaceholderClassFeature({ name })) return;
+      if (!(cls.features || []).some(feature => legacyFeatureKey(feature.name) === legacyFeatureKey(name))) return;
       grants.push({ name, level: row.level });
     });
   });
@@ -7528,17 +7669,19 @@ function classSpellcastingRules(cls) {
   const rules = [];
   const classKey = String(cls.name || '').toLowerCase();
   const spellcastingName = escAttrXml(cls.name);
-  rules.push(rule(
-    `\t\t\t<grant type="Grants" id="ID_INTERNAL_GRANT_MULTICLASS_SPELLCASTING_SLOTS_HALF_UP" requirements="ID_INTERNAL_GRANT_MULTICLASS" />`,
-    'Multiclass Artificer levels count as half levels rounded up for spell slots.',
-    cls.name
+  const multiclass = /^Artificer$/i.test(cls.name) ? 'HALF_UP'
+    : /^(Ranger|Paladin)$/i.test(cls.name) ? 'HALF'
+    : /^(Bard|Cleric|Druid|Sorcerer|Wizard)$/i.test(cls.name) ? 'FULL' : '';
+  if (multiclass) rules.push(rule(
+    `\t\t\t<grant type="Grants" id="ID_INTERNAL_GRANT_MULTICLASS_SPELLCASTING_SLOTS_${multiclass}" requirements="ID_INTERNAL_GRANT_MULTICLASS" />`,
+    `Use the ${cls.name} multiclass spell slot progression.`, cls.name
   ));
-  for (let slotLevel = 1; slotLevel <= 5; slotLevel++) {
+  for (let slotLevel = 1; slotLevel <= 9; slotLevel++) {
     progressionDeltas(rows, row => row.slots?.[slotLevel]).forEach(delta => {
       rules.push(rule(
         `\t\t\t<stat name="${classKey}:spellcasting:slots:${slotLevel}" value="${delta.value}" level="${delta.level}" />`,
         `Increase level ${slotLevel} spell slots by ${delta.value} at ${cls.name} level ${delta.level}.`,
-        'Artificer Features table'
+        `${cls.name} progression table`
       ));
     });
   }
@@ -7554,6 +7697,13 @@ function classSpellcastingRules(cls) {
       `\t\t\t<stat name="${classKey}:spellcasting:prepare" value="${delta.value}" level="${delta.level}" />`,
       `Increase prepared spells by ${delta.value} at ${cls.name} level ${delta.level}.`,
       'Prepared Spells column'
+    ));
+  });
+  progressionDeltas(rows, row => row.spellsKnown).forEach(delta => {
+    const number = delta.value > 1 ? ` number="${delta.value}"` : '';
+    rules.push(rule(
+      `\t\t\t<select type="Spell" name="Spellcasting (${spellcastingName})" supports="$(spellcasting:list),$(spellcasting:slots)" level="${delta.level}"${number} spellcasting="${spellcastingName}" />`,
+      `Choose ${delta.value} additional ${cls.name} spells at level ${delta.level}.`, 'Spells Known column'
     ));
   });
   const initialCantrips = progressionDeltas(rows, row => row.cantrips);

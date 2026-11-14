@@ -76,6 +76,36 @@
         "requireTextTypes": ["class"], "requireFeaturesForTypes": ["class"],
         "maxWarnings": 0, "maxReview": 0
       }
+    },
+    {
+      "name": "Revised Ranger - complete base class",
+      "source": "{USERPROFILE}\\Documents\\DnD\\books and docs\\UA_RevisedRanger.pdf",
+      "pageRange": "2-5", "types": ["class"],
+      "sourceMeta": { "name": "Unearthed Arcana: Revised Ranger", "abbr": "UARR", "year": "2016" },
+      "sourceValidation": {
+        "minCounts": { "class": 1 }, "expected": { "class": ["Ranger"] },
+        "requireTextTypes": ["class"], "requireFeaturesForTypes": ["class"], "requireFeatureTextTypes": ["class"],
+        "requiredFeatures": { "class": { "Ranger": ["Favored Enemy", "Natural Explorer", "Fighting Style", "Spellcasting", "Primeval Awareness", "Ranger Conclave", "Ability Score Improvement", "Greater Favored Enemy", "Fleet of Foot", "Hide in Plain Sight", "Vanish", "Feral Senses", "Foe Slayer"] } },
+        "requiredMetadata": { "class": { "Ranger": { "hitDie": 10, "savingThrows": ["Strength", "Dexterity"], "spellcastingAbility": "Wisdom", "archetypeLevel": 3, "archetypeLabel": "Ranger Conclave" } } },
+        "requiredText": { "class": { "Ranger": ["greater favored enemy", "before any", "effects of the roll"] } },
+        "forbiddenText": { "class": { "Ranger": ["Animal Companion", "You learn to use your magic to create a powerful bond"] } },
+        "maxWarnings": 0, "maxReview": 0
+      }
+    },
+    {
+      "name": "Complete Witch - complete base class",
+      "source": "{USERPROFILE}\\Documents\\DnD\\books and docs\\Complete Witch.pdf",
+      "pageRange": "4-8", "types": ["class"],
+      "sourceMeta": { "name": "Complete Witch", "abbr": "CW", "author": "Mage Hand Press", "year": "2020" },
+      "sourceValidation": {
+        "minCounts": { "class": 1 }, "expected": { "class": ["Witch"] },
+        "requireTextTypes": ["class"], "requireFeaturesForTypes": ["class"], "requireFeatureTextTypes": ["class"],
+        "requiredFeatures": { "class": { "Witch": ["Spellcasting", "Witch's Curse", "Hexes", "Cackle", "Familiar", "Witch's Craft", "Insidious Spell", "Improved Familiar", "Dying Curse", "Grand Hex", "Hexmaster"] } },
+        "requiredMetadata": { "class": { "Witch": { "hitDie": 8, "savingThrows": ["Wisdom", "Charisma"], "spellcastingAbility": "Charisma", "archetypeLevel": 3, "archetypeLabel": "Witch's Craft", "ritualCasting": true } } },
+        "requiredText": { "class": { "Witch": ["folk.", "Starving.", "Visions.", "7th level", "20th level", "Humanoid creatures have disadvantage"] } },
+        "forbiddenText": { "class": { "Witch": ["The Hexes below are presented in alphabetical order", "Bleeding"] } },
+        "maxWarnings": 0, "maxReview": 0
+      }
     }
   ]
 }
