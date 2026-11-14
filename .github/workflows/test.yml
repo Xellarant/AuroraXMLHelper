@@ -33,7 +33,8 @@ jobs:
         run: npm test
 
   browser-smoke:
-    runs-on: ubuntu-latest
+    # Keep the OS compatible with the pinned Playwright 1.57 browser build.
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: read

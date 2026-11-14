@@ -23,7 +23,8 @@ jobs:
       (github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.head_repository.full_name == github.repository &&
        github.event.workflow_run.head_sha == github.sha)
-    runs-on: ubuntu-latest
+    # Keep the OS compatible with the pinned Playwright 1.57 browser build.
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Check out the deployed commit
