@@ -154,6 +154,22 @@ async function checkPdfExport(browser, url, reportDirectory) {
     const name = page.locator('[data-id="spell-0"][data-field="name"]');
     await name.waitFor({ state: 'attached' });
     assert.equal(await name.inputValue(), 'Clockwork Beacon');
+    assert.match(await page.locator('#reviewSourceScope').textContent(), /Release Fixture\.pdf.*Selected PDF pages: 1/);
+    assert.match(await page.locator('#body-spell-0 .source-reference').textContent(), /PDF page 1/);
+    const unresolved = page.locator('#reviewIssuesList li').filter({ hasText: 'no spell lists assigned' });
+    await unresolved.getByRole('button', { name: 'Go to field' }).click();
+    const classes = page.locator('[data-id="spell-0"][data-field="classes"]');
+    assert.ok(await classes.evaluate(element => document.activeElement === element));
+    await classes.fill('Wizard');
+    await unresolved.waitFor({ state: 'detached' });
+    await page.waitForFunction(() => {
+      const saved = JSON.parse(localStorage.getItem(window.AuroraDraftStorage.KEY) || 'null');
+      return saved?.state.data.spell?.[0]?.classes.includes('Wizard') && saved.state.data.spell[0]._source?.page === 1;
+    });
+    await page.reload();
+    await name.waitFor({ state: 'attached' });
+    assert.match(await page.locator('#body-spell-0 .source-reference').textContent(), /PDF page 1/);
+    assert.equal(await classes.inputValue(), 'Wizard');
     const downloadPromise = page.waitForEvent('download');
     await page.locator('button[onclick="downloadZip()"]').click();
     const download = await downloadPromise;
@@ -164,7 +180,7 @@ async function checkPdfExport(browser, url, reportDirectory) {
     const xml = await zip.file(spellFile).async('string');
     assert.match(xml, /name="Clockwork Beacon" type="Spell"/);
     assert.match(xml, /<set name="level">2<\/set>/);
-    return 'Upload a synthetic PDF, parse its spell, and download a ZIP containing the spell and source XML';
+    return 'Upload a synthetic PDF, review its source, resolve a linked warning, recover those edits, and export the spell/source XML';
   } catch (error) {
     if (reportDirectory && page) await page.screenshot({ path: path.join(reportDirectory, 'export-failure.png'), fullPage: true }).catch(() => {});
     throw error;

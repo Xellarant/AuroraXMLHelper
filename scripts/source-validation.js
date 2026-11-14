@@ -1,4 +1,5 @@
 const path = require('node:path');
+const { artifactFindings } = require('../src/source-review');
 
 const TEXT_KEYS = new Set([
   'description',
@@ -288,24 +289,6 @@ function isFragmentShapedName(name) {
   if (/^(you|your|when|while|if|as|the|this|that|these|those)\b/i.test(name)) return true;
   if (/[,:;]$/.test(name)) return true;
   return false;
-}
-
-function artifactFindings(text) {
-  const value = String(text || '');
-  const findings = [];
-  const checks = [
-    { pattern: /\uFFFD|\u00c2|\u00c3|\u00e2\u20ac|\u25a1/, label: 'encoding artifact' },
-    { pattern: /\bCant rip\b/i, label: 'OCR split for Cantrip' },
-    { pattern: /\b[lI]d(?:100|20|12|10|8|6|4)\b|\bd[lI](?:0|2)s?\b/, label: 'ambiguous dice notation' },
-    { pattern: /\b\d+\s+CHAPTER\s+\d+\s+I\s+[A-Z][A-Z\s]+\b/i, label: 'PDF page header/footer artifact' },
-    { pattern: /\b(?:Conc\.|Concentration|Cone\.)?\s*Ritual\s+Class\b/i, label: 'spell table class-column artifact' },
-    { pattern: /[<{~][^A-Za-z0-9]{0,4}|[-–]?nzban\b/i, label: 'sidebar OCR artifact' },
-    { pattern: /<\/?[A-Za-z][^>]*>/, label: 'raw tag artifact' }
-  ];
-  for (const check of checks) {
-    if (check.pattern.test(value)) findings.push(check.label);
-  }
-  return findings;
 }
 
 function summarizeIssues(issues, expectations = {}) {

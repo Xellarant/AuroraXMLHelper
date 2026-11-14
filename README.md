@@ -61,14 +61,34 @@ elements over guessed content.
 ### 4. Review and edit
 
 Extracted elements appear in tabs. Expand each entry to review and edit fields.
-Validation warnings are shown before download when required Aurora fields or
-shape rules are missing.
+Each parsed entry and named feature includes an **Original source reference**
+with the PDF filename, physical page number, extracted line, and a short text
+excerpt. Page numbers include covers and front matter. The review screen also
+shows the selected pages and any additional continuation pages read for context.
+Pasted sections use text line references; manually added or older entries may
+have no reference. If a heading cannot be located, the app asks you to check it
+instead of assigning a guessed page.
+
+**Unresolved items** lists all known missing fields, suspicious OCR text, empty
+selected sections, skipped entries, and XML shape findings. Use **Go to field**
+to open and focus the relevant editor. The list updates as you edit, and each
+entry shows its remaining count. **Restore entry** brings an incomplete skipped
+record back for editing. **Add missing feature** creates a blank description
+linked to the class progression table; it stays unresolved until you supply the
+rule. Missing spell lists should be checked against the book's class spell-list
+pages. Validation warnings are also shown before download.
+
+These checks identify known gaps; an empty list does not certify complete source
+coverage or correct rules automation. Compare the original source and test the
+intended behavior in Aurora before relying on an export.
 
 Edits are one-off by default and affect only the current export. Use
 **Remember Correction** on an edited element when you want that correction to be
 applied automatically the next time the same generated element appears. Use
 **Forget** to stop reusing a remembered correction without reverting the current
-edit.
+edit. Remembered corrections reuse content while preserving the newly parsed
+source references, so a previous page number or manual source check is not
+carried into a different extraction.
 
 You can also click **Manual Author** to start without a parsed PDF result, add a
 blank element for any supported type, or paste a missed section into the review
@@ -118,6 +138,7 @@ undo; diagnostics are recalculated when restored.
 
 Use **Export draft** for a separate JSON backup, and **Import draft** to reopen
 that backup in this or another browser. These drafts contain your workspace text,
+including source references, short excerpts, and unresolved review context,
 not the PDF file or provider credentials. To parse again after recovery, select
 the PDF again. Remembered corrections remain separate browser preferences.
 

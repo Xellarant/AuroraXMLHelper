@@ -19,6 +19,12 @@
   }
 
   function validateState(state) {
+    const review = state?.reviewContext;
+    if (review != null && (!object(review) || review.kind !== 'pdf' || typeof review.fileName !== 'string'
+      || !Array.isArray(review.types) || !review.types.every(type => ['spell', 'archetype', 'item', 'feat', 'magic', 'race', 'background', 'class', 'other'].includes(type))
+      || ![review.selectedPages, review.continuationPages].every(pages => Array.isArray(pages) && pages.every(page => Number.isInteger(page) && page > 0)))) {
+      throw failure('invalid', 'This draft has invalid source review details.');
+    }
     if (!object(state) || !['parse', 'repair', 'author'].includes(state.workspace)
       || !object(state.fields) || !Object.values(state.fields).every(value => typeof value === 'string')
       || !object(state.sourceFlags) || !['abbrEdited', 'rulesetEvidence'].every(key => typeof state.sourceFlags[key] === 'string')

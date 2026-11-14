@@ -125,6 +125,7 @@ function loadApp(sourceMeta = {}, options = {}) {
     path.join(repoRoot, 'src', 'pdf-text-layout.js'),
     path.join(repoRoot, 'src', 'pdf-page-range.js'),
     path.join(repoRoot, 'src', 'draft-storage.js'),
+    path.join(repoRoot, 'src', 'source-review.js'),
     path.join(repoRoot, 'src', 'app.js')
   ]) {
     vm.runInContext(fs.readFileSync(scriptPath, 'utf8'), context, {

@@ -253,6 +253,7 @@ function generateBenchmarkXml(context, text, types, sourceContext = {}) {
     const parsed = context[parserName](text, { pages, continuationPages });
     data[type] = type === 'feat' ? parsed.map(feat => context.parseFeatFullText(feat)) : parsed;
   }
+  if (pages.length) context.AuroraSourceReview.attachSourceReferences(data, { pages, continuationPages, kind: sourceContext.kind || 'pdf', fileName: sourceContext.fileName || '' });
   runInApp(context, `extractedData = ${JSON.stringify(data)};`);
   const xml = runInApp(context, 'generateXml()');
   const meta = JSON.parse(runInApp(context, 'JSON.stringify(getSourceMeta())'));
@@ -364,7 +365,7 @@ async function readSource(sourcePath, pageRange = '') {
     const { pages, continuationPages, totalPageCount } = await extractPdfPages(sourcePath, ranges);
     const text = pages.map(page => page.text).join('\n\n');
     if (!text.trim()) throw new Error(`No selectable text was found in PDF source: ${sourcePath}`);
-    return { kind: 'pdf', pages, continuationPages, text, pageRange: selectedPageRange, totalPageCount };
+    return { kind: 'pdf', fileName: path.basename(sourcePath), pages, continuationPages, text, pageRange: selectedPageRange, totalPageCount };
   }
   const text = fs.readFileSync(sourcePath, 'utf8');
   const pages = selectPageNumbers(1, ranges).map(page => ({ page, text }));

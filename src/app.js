@@ -8,6 +8,9 @@ let apiKey = '';
 let useOllama = false;
 let ollamaModel = 'qwen3:8b';
 let generatedBaselineData = {};
+let sourceReviewContext = null;
+let reviewIssues = [];
+let reviewRefreshTimer;
 const OVERRIDE_STORAGE_KEY = 'aurora_xml_helper_overrides_v1';
 const LEGACY_AI_EXTRACTION_ENABLED = false;
 let rememberedOverrides = loadRememberedOverrides();
@@ -742,6 +745,9 @@ async function deterministicExtract(file, types, progressCallback) {
     out[type] = parser ? parser(text, { pages: selectedPages, continuationPages }) : [];
   }
   progressCallback(95, 'Normalizing parsed elements...');
+  sourceReviewContext = { kind: 'pdf', fileName: file.name || '', types: types.slice(),
+    selectedPages: selectedPages.map(page => page.page), continuationPages: continuationPages.map(page => page.page) };
+  window.AuroraSourceReview.attachSourceReferences(out, { pages: selectedPages, continuationPages, kind: 'pdf', fileName: file.name || '' });
   return out;
 }
 
@@ -787,7 +793,8 @@ function detectSourceMetaFromText(pages) {
     document.getElementById('sourceName').value = title;
     autoFillAbbr(title);
   }
-  const byline = firstLines.find(line => /^by\s+/i.test(line));
+  // A wrapped sentence beginning with "by" is not an author credit.
+  const byline = firstLines.find(line => /^[Bb][Yy]\s+\p{Lu}[\p{L}.'’\-]*(?:\s+(?:\p{Lu}[\p{L}.'’\-]*|and|&|of|the|van|von|de)){0,11}$/u.test(line));
   if (byline && !document.getElementById('sourceAuthor').value.trim()) {
     document.getElementById('sourceAuthor').value = byline.replace(/^by\s+/i, '').trim();
   }
@@ -2597,7 +2604,7 @@ function applyRememberedOverrideAt(type, index) {
   const key = overrideKeyForIndex(type, index);
   const override = key ? rememberedOverrides[key] : null;
   if (!override?.item || !extractedData[type]?.[index]) return false;
-  extractedData[type][index] = cloneData(override.item);
+  extractedData[type][index] = window.AuroraSourceReview.applyContentCorrection(extractedData[type][index], override.item);
   return true;
 }
 
@@ -2650,6 +2657,7 @@ async function startExtraction() {
   document.getElementById('extractSpinner').classList.remove('hidden');
 
   extractedData = {};
+  sourceReviewContext = null;
   discoveredPageRanges = {};
   skippedItems = [];
   const errors = [];
@@ -2677,7 +2685,7 @@ async function startExtraction() {
   const deterministicBannerParts = [];
   if (errors.length) deterministicBannerParts.push(...errors.map(e => '- ' + escHtml(String(e))));
   if (skippedItems.length) {
-    deterministicBannerParts.push(`- ${skippedItems.length} element(s) skipped - below 80% complete (see skipped-elements.txt in ZIP)`);
+    deterministicBannerParts.push(`- ${skippedItems.length} element(s) skipped - restore and complete them in Unresolved items below.`);
   }
   const unsupportedTypes = types.filter(t => !DETERMINISTIC_PARSERS[t]);
   if (unsupportedTypes.length) {
@@ -2993,6 +3001,8 @@ function setProgress(pct, msg) {
 // ---------------------------------------------
 function buildReviewUI(preferredType = '') {
   ensureExtractedDataBuckets();
+  const scope = document.getElementById('reviewSourceScope');
+  if (scope) scope.textContent = sourceReviewContext ? `${sourceReviewContext.fileName || 'PDF'} · Selected PDF pages: ${window.AuroraSourceReview.pageLabel(sourceReviewContext.selectedPages)}${sourceReviewContext.continuationPages.length ? ' · Additional continuation context: ' + window.AuroraSourceReview.pageLabel(sourceReviewContext.continuationPages) : ''}. Page numbers include covers and front matter.` : '';
   const total = Object.values(extractedData)
     .filter(Array.isArray)
     .reduce((s, a) => s + a.length, 0);
@@ -3039,6 +3049,126 @@ function buildReviewUI(preferredType = '') {
     panel.innerHTML = searchBar + buildPanelHTML(type, items);
     panelsEl.appendChild(panel);
   }
+  refreshReviewIssues();
+}
+
+function sourceReferenceHTML(reference) {
+  if (!reference) return '<p class="text-muted">No source reference is available for this manually added or older entry.</p>';
+  const page = reference.kind === 'pdf' && Number.isInteger(reference.page) ? `PDF page ${reference.page}` : '';
+  const line = Number.isInteger(reference.line) ? `extracted line ${reference.line}` : '';
+  const kind = reference.kind === 'pasted' ? 'Pasted text' : reference.kind === 'manual' ? 'Added manually' : reference.fileName || 'Source text';
+  const label = [kind, page, line, reference.continuation ? 'continuation context' : '', reference.match === 'table' ? 'progression table entry' : ''].filter(Boolean).join(' · ');
+  return `<p class="source-reference-label">${escHtml(label)}</p>
+    ${reference.match === 'unmatched' ? `<p class="text-muted">Heading not located automatically.${reference.checked ? ' Source checked manually.' : ''}</p>` : ''}
+    ${reference.excerpt ? `<pre class="source-excerpt">${escHtml(reference.excerpt)}</pre>` : ''}`;
+}
+
+function buildSourceReference(item) {
+  return `<details class="source-reference"><summary>Original source reference${item._source?.page ? ` · PDF page ${Number(item._source.page)}` : ''}</summary>
+    ${sourceReferenceHTML(item._source)}${(Array.isArray(item._source?.related) ? item._source.related : []).map(reference => `<h4>${escHtml(reference.label)}</h4>${sourceReferenceHTML(reference)}`).join('')}</details>`;
+}
+
+function referenceForIssue(issue) {
+  if (issue.source) return issue.source;
+  const item = extractedData[issue.type]?.[issue.i];
+  const nested = String(issue.field || '').match(/^(features|traits|actions|reactions)\.(\d+)\./);
+  return (nested ? item?.[nested[1]]?.[Number(nested[2])]?._source : null) || item?._source;
+}
+
+function refreshReviewIssues(issues = null) {
+  const summary = document.getElementById('reviewIssuesSummary');
+  const list = document.getElementById('reviewIssuesList');
+  if (!summary || !list) return;
+  reviewIssues = issues || validateAll();
+  summary.textContent = reviewIssues.length ? `${reviewIssues.length} item${reviewIssues.length === 1 ? ' needs' : 's need'} attention.` : 'No unresolved items detected by these checks.';
+  const groups = [['missing-info', 'Missing information'], ['source-review', 'Check against the source'], ['coverage', 'Selected sections'], ['skipped', 'Skipped entries'], ['xml', 'XML checks']];
+  list.innerHTML = groups.map(([category, title]) => {
+    const entries = reviewIssues.map((issue, index) => ({ issue, index })).filter(({ issue }) => (issue.category || (issue.type === 'xml' ? 'xml' : 'missing-info')) === category);
+    return entries.length ? `<section class="review-issue-group"><h3>${title} <span>(${entries.length})</span></h3><ul>${entries.map(({ issue, index }) => {
+      const source = referenceForIssue(issue);
+      const action = issue.action === 'restore' ? 'Restore entry' : issue.action === 'add-feature' ? 'Add missing feature' : issue.action === 'check-source' ? 'Review source' : issue.action === 'paste' ? 'Paste section' : issue.type === 'xml' ? 'Review XML' : 'Go to field';
+      return `<li><div><p>${escHtml(issue.msg)}</p>${source ? `<details><summary>Source${source.page ? ` · PDF page ${Number(source.page)}` : ''}</summary>${sourceReferenceHTML(source)}</details>` : ''}</div>
+        <button class="btn btn-secondary" type="button" onclick="goToReviewIssue(${index})">${action}</button></li>`;
+    }).join('')}</ul></section>` : '';
+  }).join('');
+  document.querySelectorAll('.validation-error').forEach(element => element.classList.remove('validation-error'));
+  for (const type of ELEMENT_TYPES) (extractedData[type] || []).forEach((_, i) => {
+    const count = reviewIssues.filter(issue => issue.type === type && issue.i === i && issue.category !== 'skipped' && issue.category !== 'coverage').length;
+    const badge = document.getElementById(`review-count-${type}-${i}`);
+    if (badge) badge.textContent = count ? `${count} unresolved` : '';
+  });
+  reviewIssues.forEach(issue => {
+    if (issue.field && /^[a-zA-Z0-9_.]+$/.test(issue.field)) document.querySelector(`[data-id="${issue.type}-${issue.i}"][data-field="${issue.field}"]`)?.classList.add('validation-error');
+  });
+}
+
+function focusReviewField(type, index, field = '') {
+  if (!ELEMENT_TYPES.includes(type) || !extractedData[type]?.[index]) return;
+  switchWorkspaceView('parse');
+  switchTab(type);
+  const panel = document.getElementById(`panel-${type}`);
+  const search = panel?.querySelector('.panel-search');
+  if (search) { search.value = ''; filterPanel(type, ''); }
+  const card = document.getElementById(`card-${type}-${index}`);
+  const body = document.getElementById(`body-${type}-${index}`);
+  card?.classList.remove('card-hidden-by-search');
+  body?.classList.add('open');
+  let target = field && /^[a-zA-Z0-9_.]+$/.test(field) ? body?.querySelector(`[data-field="${field}"]`) : null;
+  if (!target && field && /^[a-zA-Z]+$/.test(field)) target = document.getElementById(`${field}-${type}-${index}`)?.previousElementSibling?.querySelector('button');
+  target ||= body?.querySelector('input, textarea, select');
+  (target || card)?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+  target?.focus?.({ preventScroll: true });
+}
+
+function goToReviewIssue(index) {
+  const issue = reviewIssues[index];
+  if (!issue) return;
+  if (issue.action === 'restore') return restoreSkippedEntry(issue.skippedIndex);
+  if (issue.action === 'paste') {
+    const select = document.getElementById('manualAddType');
+    if (ELEMENT_TYPES.includes(issue.type)) select.value = issue.type;
+    const input = document.getElementById('manualSourceText');
+    input.closest('details')?.setAttribute('open', '');
+    input.scrollIntoView({ behavior: 'smooth', block: 'center' }); input.focus(); return;
+  }
+  if (issue.type === 'xml') {
+    const preview = document.getElementById('xmlPreview');
+    document.getElementById('xmlPreviewWrap').classList.remove('hidden');
+    preview.textContent = generateXml(); preview.setAttribute('tabindex', '-1'); preview.focus(); preview.scrollIntoView({ behavior: 'smooth' }); return;
+  }
+  if (issue.action === 'add-feature') {
+    const item = extractedData[issue.type]?.[issue.i];
+    if (!item) return;
+    item.features ||= [];
+    item.features.push({ name: issue.featureName, level: issue.level, description: '', action: '', usage: '', _source: cloneData(referenceForIssue(issue)) });
+    buildReviewUI(issue.type);
+    focusReviewField(issue.type, issue.i, `features.${item.features.length - 1}.description`);
+    markChanged(); return;
+  }
+  focusReviewField(issue.type, issue.i, issue.field);
+  if (issue.action === 'check-source') {
+    const body = document.getElementById(`body-${issue.type}-${issue.i}`);
+    body?.querySelector('.source-reference')?.setAttribute('open', '');
+  }
+}
+
+function markSourceChecked(type, index) {
+  const reference = extractedData[type]?.[index]?._source;
+  if (!reference || reference.match !== 'unmatched') return;
+  reference.checked = true;
+  buildReviewUI(type); focusReviewField(type, index); markChanged();
+}
+
+function restoreSkippedEntry(index) {
+  const entry = skippedItems[index];
+  const type = entry?.elementType || Object.keys(TYPE_LABELS).find(type => type === entry?.type || TYPE_LABELS[type] === entry?.type);
+  if (!entry?.item || !ELEMENT_TYPES.includes(type)) return;
+  ensureExtractedDataBuckets();
+  const item = cloneData(entry.item);
+  extractedData[type].push(item);
+  appendGeneratedBaselineItems(type, [item]);
+  skippedItems.splice(index, 1);
+  buildReviewUI(type); focusReviewField(type, extractedData[type].length - 1); markChanged();
 }
 
 function switchTab(type) {
@@ -3063,9 +3193,12 @@ function buildPanelHTML(type, items) {
     <div class="element-card" id="card-${type}-${i}">
       <div class="element-card-header" onclick="toggleCard('${type}',${i})">
         <h3>${escHtml(header)}</h3>
+        <span class="review-count" id="review-count-${type}-${i}"></span>
         <span class="element-type-badge">${escHtml(badge)}</span>
       </div>
       <div class="element-card-body" id="body-${type}-${i}">
+        ${buildSourceReference(item)}
+        ${item._source?.kind === 'pdf' && item._source.match === 'unmatched' && !item._source.checked ? `<button class="btn btn-secondary" type="button" onclick="markSourceChecked('${type}',${i})">I checked this entry against the PDF</button>` : ''}
         ${buildOverrideControls(type, i)}
         <div style="display:flex; justify-content:flex-end; margin-bottom:0.75rem;">
           <button class="btn btn-secondary" style="font-size:0.7rem; padding:0.3rem 0.75rem;" onclick="removeElement('${type}-${i}', event)">Remove Element</button>
@@ -3209,6 +3342,7 @@ function buildArchetypeFields(a, id) {
     </div>
     <div id="features-${id}">${(a.features||[]).map((f,fi) => `
       <div style="border:1px solid var(--border-light); border-radius:3px; padding:0.75rem; margin-bottom:0.75rem; background:var(--parchment);">
+        ${f._source ? buildSourceReference(f) : ''}
         <div class="field-row">
           <div><label>Feature Name</label><input type="text" value="${escAttr(f.name)}" data-field="features.${fi}.name" data-id="${id}" oninput="updateNestedField(this)" /></div>
           <div><label>Level</label><input type="text" value="${escAttr(f.level)}" data-field="features.${fi}.level" data-id="${id}" oninput="updateNestedField(this)" /></div>
@@ -3384,6 +3518,7 @@ function buildOtherFields(item, id) {
 function buildNestedTextBlocks(id, field, items, label) {
   return items.map((item, i) => `
     <div style="border:1px solid var(--border-light); border-radius:3px; padding:0.75rem; margin-bottom:0.75rem; background:var(--parchment);">
+      ${item._source ? buildSourceReference(item) : ''}
       <div><label>${label}</label><input type="text" value="${escAttr(item.name||'')}" data-field="${field}.${i}.name" data-id="${id}" oninput="updateNestedField(this)" /></div>
       <div><label>Description</label><textarea rows="3" data-field="${field}.${i}.description" data-id="${id}" oninput="updateNestedField(this)">${escHtml(item.description||'')}</textarea></div>
     </div>`).join('');
@@ -3392,6 +3527,7 @@ function buildNestedTextBlocks(id, field, items, label) {
 function buildFeatureBlock(id, f, fi) {
   return `
     <div style="border:1px solid var(--border-light); border-radius:3px; padding:0.75rem; margin-bottom:0.75rem; background:var(--parchment);">
+      ${f._source ? buildSourceReference(f) : ''}
       <div class="field-row">
         <div><label>Feature Name</label><input type="text" value="${escAttr(f.name)}" data-field="features.${fi}.name" data-id="${id}" oninput="updateNestedField(this)" /></div>
         <div><label>Level</label><input type="text" value="${escAttr(f.level)}" data-field="features.${fi}.level" data-id="${id}" oninput="updateNestedField(this)" /></div>
@@ -3591,7 +3727,7 @@ function rememberOverride(id, event) {
     sourceAbbr: meta.abbr,
     originalName: baseline.name || '',
     savedAt: new Date().toISOString(),
-    item: cloneData(current)
+    item: window.AuroraSourceReview.withoutReferences(current)
   };
   saveRememberedOverrides();
   updateOverrideStatusForId(id);
@@ -3631,6 +3767,8 @@ let hasUnsavedChanges = false;
 function markChanged() {
   hasUnsavedChanges = true;
   window.AuroraDraftRecovery?.changed();
+  clearTimeout(reviewRefreshTimer);
+  reviewRefreshTimer = setTimeout(() => { if (Object.values(extractedData).some(items => items?.length) || skippedItems.length || sourceReviewContext) refreshReviewIssues(); }, 150);
   ['downloadBtnWrap','downloadSingleWrap','previewBtnWrap'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.classList.add('has-changes');
@@ -3750,13 +3888,16 @@ function parseManualTextForType(type, text) {
 
   const parser = DETERMINISTIC_PARSERS[normalizedType];
   const parsed = parser ? parser(trimmed) : [];
-  return parsed.length ? parsed : [createSeededManualElement(normalizedType, trimmed)];
+  const result = parsed.length ? parsed : [createSeededManualElement(normalizedType, trimmed)];
+  window.AuroraSourceReview.attachSourceReferences({ [normalizedType]: result }, { kind: 'pasted', pages: [{ page: null, text: trimmed }] });
+  return result;
 }
 
 function addManualElement(typeOverride = '', itemOverride = null) {
   const select = document.getElementById('manualAddType');
   const type = normalizeManualType(typeOverride || select?.value || 'feat');
   const item = itemOverride || createBlankElement(type);
+  if (!item._source) item._source = { kind: 'manual' };
 
   ensureExtractedDataBuckets();
   extractedData[type].push(item);
@@ -5401,6 +5542,8 @@ function filterIncomplete() {
         skipped.push({
           name: item.name || '(unnamed)',
           type: TYPE_LABELS[type] || type,
+          elementType: type,
+          item: cloneData(item),
           missing,
           completeness: Math.round(completeness * 100),
         });
@@ -5441,7 +5584,7 @@ function generateSkippedReport(skipped, sourceName) {
 // ---------------------------------------------
 // Validation
 // ---------------------------------------------
-function validateAll() {
+function validateAll(options = {}) {
   const issues = [];
   for (const [type, items] of Object.entries(extractedData)) {
     items.forEach((item, i) => {
@@ -5469,10 +5612,10 @@ function validateAll() {
         if (!item.features || item.features.length === 0)
           issues.push({ type, i, field: null, msg: `${label} (${name}): has no features` });
         (item.features || []).forEach((f, fi) => {
-          if (!f.name) issues.push({ type, i, field: null, msg: `${label} (${name}): feature #${fi+1} has no name` });
+          if (!f.name) issues.push({ type, i, field: `features.${fi}.name`, msg: `${label} (${name}): feature #${fi+1} has no name` });
           const fl = parseInt(f.level);
           if (isNaN(fl) || fl < 1 || fl > 20)
-            issues.push({ type, i, field: null, msg: `${label} (${name}): feature "${f.name}" has invalid level` });
+            issues.push({ type, i, field: `features.${fi}.level`, msg: `${label} (${name}): feature "${f.name}" has invalid level` });
         });
         const fnames = (item.features||[]).map(f => f.name);
         fnames.forEach((fn, fi) => {
@@ -5483,29 +5626,31 @@ function validateAll() {
 
       if (type === 'feat') {
         if (!item.benefits || item.benefits.length === 0)
-          issues.push({ type, i, field: null, msg: `${label} (${name}): has no benefits` });
+          issues.push({ type, i, field: 'benefits', msg: `${label} (${name}): has no benefits` });
       }
 
       if (type === 'race') {
         if (!item.traits || item.traits.length === 0)
-          issues.push({ type, i, field: null, msg: `${label} (${name}): has no racial traits` });
+          issues.push({ type, i, field: 'traits', msg: `${label} (${name}): has no racial traits` });
       }
 
       if (type === 'background') {
         if (!item.skillProficiencies || item.skillProficiencies.length === 0)
-          issues.push({ type, i, field: null, msg: `${label} (${name}): has no skill proficiencies` });
+          issues.push({ type, i, field: 'skillProficiencies', msg: `${label} (${name}): has no skill proficiencies` });
       }
 
       if (type === 'class') {
         if (!item.hitDie)
-          issues.push({ type, i, field: null, msg: `${label} (${name}): hit die is missing` });
+          issues.push({ type, i, field: 'hitDie', msg: `${label} (${name}): hit die is missing` });
         if (!item.features || item.features.length === 0)
-          issues.push({ type, i, field: null, msg: `${label} (${name}): has no class features` });
+          issues.push({ type, i, field: 'features', msg: `${label} (${name}): has no class features` });
         const missing = uniqueStrings((item.progression || []).flatMap(row => row.features || []))
           .filter(feature => !isPlaceholderClassFeature({ name: feature })
             && !(item.features || []).some(captured => legacyFeatureKey(captured.name) === legacyFeatureKey(feature)));
-        if (missing.length) issues.push({ type, i, field: null,
-          msg: `${label} (${name}): progression table features need descriptions: ${missing.join(', ')}. Include the relevant pages or add these features before using the class.` });
+        missing.forEach(featureName => issues.push({ type, i, field: 'features', action: 'add-feature', featureName,
+          level: (item.progression || []).find(row => (row.features || []).some(feature => legacyFeatureKey(feature) === legacyFeatureKey(featureName)))?.level || 1,
+          source: item._source?.progression?.find(reference => legacyFeatureKey(reference.name) === legacyFeatureKey(featureName)),
+          msg: `${label} (${name}): progression table features need descriptions: ${featureName}. Include the relevant pages or add this feature before using the class.` }));
       }
 
       if (type === 'other') {
@@ -5516,13 +5661,27 @@ function validateAll() {
       }
 
       // Duplicate name check within same type
+      const fieldNames = { 'hit die': 'hitDie', 'saving throws': 'savingThrows', 'skill proficiencies': 'skillProficiencies', 'casting time': 'castingTime' };
+      for (const missing of checkCompleteness(item, type).missing) {
+        const field = fieldNames[missing] || missing;
+        if (!issues.some(issue => issue.type === type && issue.i === i && issue.field === field)) issues.push({ type, i, field, msg: `${label} (${name}): ${missing} is missing.` });
+      }
       const sameType = extractedData[type];
       const firstIdx = sameType.findIndex(x => (x.name||'').trim() === name && !x._error);
       if (firstIdx !== -1 && firstIdx < i && name)
         issues.push({ type, i, field: 'name', msg: `${label}: duplicate name "${name}" will produce duplicate XML IDs` });
     });
   }
-  issues.push(...validateGeneratedXmlShape());
+  const sourceIssues = window.AuroraSourceReview.findings(extractedData);
+  for (const issue of sourceIssues) if (!issues.some(existing => existing.type === issue.type && existing.i === issue.i && existing.field === issue.field && !existing.action)) issues.push(issue);
+  skippedItems.forEach((entry, skippedIndex) => issues.push({ type: entry.elementType || entry.type, i: -1, category: 'skipped', skippedIndex,
+    action: entry.item && ELEMENT_TYPES.includes(entry.elementType || entry.type) ? 'restore' : 'paste', source: entry.item?._source,
+    msg: `${entry.name || entry.item?.name || 'Entry'} was skipped${entry.missing?.length ? ': missing ' + entry.missing.join(', ') : ' because it was incomplete'}. Restore it to finish editing.` }));
+  for (const type of sourceReviewContext?.types || []) {
+    if (!(extractedData[type] || []).length && !skippedItems.some(entry => entry.elementType === type)) issues.push({ type, i: -1, category: 'coverage', action: 'paste',
+      msg: `No ${TYPE_LABELS[type] || type} were found on the selected pages. Check the page range or paste the intended section.` });
+  }
+  if (options.includeXml !== false) issues.push(...validateGeneratedXmlShape());
   return issues;
 }
 
@@ -5574,6 +5733,7 @@ function validateAuroraXmlDocuments(docs, scopeLabel) {
 }
 
 function showValidationResult(issues) {
+  refreshReviewIssues(issues);
   document.querySelectorAll('.validation-error').forEach(el => el.classList.remove('validation-error'));
   document.querySelectorAll('.validation-badge').forEach(el => el.remove());
   const errEl = document.getElementById('extractErrors');
@@ -5592,8 +5752,6 @@ function showValidationResult(issues) {
     if (header && !header.querySelector('.validation-badge')) {
       header.insertAdjacentHTML('beforeend', '<span class="validation-badge">!</span>');
     }
-    const body = document.getElementById(`body-${type}-${i}`);
-    if (body) body.classList.add('open');
     if (field) {
       const el = document.querySelector(`[data-id="${type}-${i}"][data-field="${field}"]`);
       if (el) el.classList.add('validation-error');
@@ -5602,9 +5760,7 @@ function showValidationResult(issues) {
 
   errEl.className = 'alert alert-error';
   errEl.dataset.validationMessage = '1';
-  errEl.innerHTML = `<strong>Warning: ${issues.length} issue${issues.length > 1 ? 's' : ''} found - review before downloading:</strong><br>` +
-    issues.slice(0, 8).map(x => `- ${escHtml(x.msg)}`).join('<br>') +
-    (issues.length > 8 ? `<br><em>...and ${issues.length - 8} more</em>` : '');
+  errEl.innerHTML = `<strong>${issues.length} unresolved item${issues.length === 1 ? '' : 's'} found.</strong> Review the complete list below before downloading.`;
   errEl.classList.remove('hidden');
   errEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 
@@ -8031,6 +8187,8 @@ function ordinal(n) {
 }
 
 function resetAll() {
+  sourceReviewContext = null;
+  reviewIssues = [];
   extractedData = {};
   generatedBaselineData = {};
   discoveredPageRanges = {};
@@ -8084,6 +8242,7 @@ function captureWorkspaceDraft() {
     baseline: cloneData(generatedBaselineData),
     skipped: cloneData(skippedItems),
     pageRanges: cloneData(discoveredPageRanges),
+    reviewContext: cloneData(sourceReviewContext),
     changed: hasUnsavedChanges,
     author: {
       templateId: selectedAuthoringTemplateId,
@@ -8107,6 +8266,7 @@ function restoreWorkspaceDraft(state) {
   generatedBaselineData = cloneData(state.baseline);
   skippedItems = cloneData(state.skipped);
   discoveredPageRanges = cloneData(state.pageRanges);
+  sourceReviewContext = cloneData(state.reviewContext || null);
   // File objects and old provider settings are deliberately outside the draft.
   pdfFile = null;
   document.getElementById('pdfFile').value = '';
@@ -8141,7 +8301,7 @@ function restoreWorkspaceDraft(state) {
   });
   updateTypeCheck();
   updateSourceRulesetDecisionDisplay();
-  const hasReview = Object.values(extractedData).some(items => items.length) || Boolean(state.fields.manualSourceText);
+  const hasReview = Object.values(extractedData).some(items => items.length) || skippedItems.length > 0 || Boolean(sourceReviewContext) || Boolean(state.fields.manualSourceText);
   document.getElementById('stepReview').classList.toggle('hidden', !hasReview);
   document.getElementById('reviewArea').classList.toggle('hidden', !hasReview);
   if (hasReview) buildReviewUI();
@@ -8164,6 +8324,8 @@ function restoreWorkspaceDraft(state) {
 }
 
 window.AuroraXMLHelper = {
+  refreshReviewIssues,
+  goToReviewIssue,
   captureWorkspaceDraft,
   restoreWorkspaceDraft,
   parseFeatsFromText,
