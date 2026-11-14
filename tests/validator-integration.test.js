@@ -3,8 +3,23 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { generateFromFixtureFile, repoRoot } = require('./fixture-harness');
-const { runAuroraShapeValidator } = require('../scripts/aurora-shape-validator');
+const { runAuroraShapeValidator, STARTUP_TIMEOUT_MS, VALIDATION_TIMEOUT_MS } = require('../scripts/aurora-shape-validator');
 const { validateAuroraXmlDocuments } = require('../src/aurora-xml-shape');
+// Allow both bounded subprocesses to finish before the test runner's deadline.
+const validatorTestTimeoutMs = STARTUP_TIMEOUT_MS + VALIDATION_TIMEOUT_MS + 10000;
+
+function withTempFixture(prefix, fn) {
+  const temporaryBase = path.resolve(os.tmpdir());
+  const directory = fs.mkdtempSync(path.join(temporaryBase, prefix));
+  try {
+    return fn(directory);
+  } finally {
+    const absolute = path.resolve(directory);
+    assert.equal(path.dirname(absolute), temporaryBase);
+    assert.ok(path.basename(absolute).startsWith(prefix));
+    fs.rmSync(absolute, { recursive: true, force: true });
+  }
+}
 
 const runTest = globalThis.test || function standaloneTest(name, fn) {
   try {
@@ -61,11 +76,10 @@ runTest('extracted browser shape module catches duplicate element IDs', () => {
   assert.ok(issues.some(issue => issue.msg.includes('DuplicateElementIds') && issue.msg.includes('duplicate.xml')));
 });
 
-runTest('generated fixture XML passes Aurora shape validator when available', () => {
+runTest('generated fixture XML passes Aurora shape validator when available', () => withTempFixture('aurora-xml-helper-validator-', tempRoot => {
   const requireValidator = process.argv.includes('--required') || process.env.AURORA_REQUIRE_VALIDATOR === '1';
   const fixturePath = path.join(repoRoot, 'tests', 'fixtures', 'golden', 'synthetic-2024.fixture.json');
   const { xml } = generateFromFixtureFile(fixturePath);
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'aurora-xml-helper-validator-'));
   const xmlPath = path.join(tempRoot, 'synthetic-fixture.xml');
   fs.writeFileSync(xmlPath, xml, 'utf8');
 
@@ -85,11 +99,10 @@ runTest('generated fixture XML passes Aurora shape validator when available', ()
       result.stderr
     ].filter(Boolean).join('\n')
   );
-}, 15000);
+}), validatorTestTimeoutMs);
 
-runTest('Aurora shape validator catches duplicate element IDs in one file when available', () => {
+runTest('Aurora shape validator catches duplicate element IDs in one file when available', () => withTempFixture('aurora-xml-helper-validator-duplicate-', tempRoot => {
   const requireValidator = process.argv.includes('--required') || process.env.AURORA_REQUIRE_VALIDATOR === '1';
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'aurora-xml-helper-validator-duplicate-'));
   fs.writeFileSync(path.join(tempRoot, 'duplicate.xml'), `<?xml version="1.0" encoding="utf-8"?>
 <elements>
   <info>
@@ -112,4 +125,4 @@ runTest('Aurora shape validator catches duplicate element IDs in one file when a
   assert.equal(result.ok, false);
   assert.match(result.stdout, /DuplicateElementIds/);
   assert.match(result.stdout, /ID_DUPLICATE_FIXTURE_FEAT_REPEAT/);
-}, 15000);
+}), validatorTestTimeoutMs);

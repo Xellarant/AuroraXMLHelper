@@ -69,3 +69,9 @@ npm run test:validator:required
 ```
 
 Required mode fails instead of skipping when PowerShell cannot be found. `npm test` still skips that validator check on machines without PowerShell so the portable fixture tests can run anywhere.
+
+PowerShell discovery shares a 30-second startup budget across candidates and
+caches successful discovery until the executable settings change. Each validator
+process has a separate 30-second limit. The two integration tests allow 70 seconds
+for startup, validation, and fixture cleanup; a timed-out process fails explicitly
+and is terminated. Invalid XML still fails without an automatic retry.
