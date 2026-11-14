@@ -297,6 +297,10 @@ function sourceContextForName(records, name) {
   // A spell-list or contents row can mention an entity before its definition.
   // Prefer an actual title line so source reports point at the captured body.
   let matchIndex = records.findIndex(record => normalizeSearchText(record.text) === normalizedName);
+  if (matchIndex < 0) {
+    const compactName = normalizedName.replace(/\s/g, '');
+    matchIndex = records.findIndex(record => normalizeSearchText(record.text).replace(/\s/g, '') === compactName);
+  }
   for (const needle of needles) {
     if (matchIndex !== -1) break;
     matchIndex = records.findIndex(record => normalizeSearchText(record.text).includes(needle));

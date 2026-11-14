@@ -38,6 +38,25 @@ test('source references prefer a definition over an earlier spell-list entry', (
   const context = sourceContextForName(records, 'Copper Flash');
   assert.equal(context.page, 3);
   assert.equal(context.text, 'COPPER FLASH');
+  const decorative = sourceContextForName(sourceLineRecords([{ page: 8, text: 'Be LL of Copper' }]), 'Bell of Copper');
+  assert.equal(decorative.page, 8);
+});
+
+test('source gates check metadata values and reject known sidebar contamination', () => {
+  const model = syntheticSourceModel();
+  const spell = model.entitiesByType.spell[0];
+  spell.metadata.level = 0;
+  spell.metadata.isOptional = false;
+  spell.bodyText = 'Rules text. A synthetic author note is present.';
+  const expectations = {
+    requiredMetadata: { spell: { [spell.name]: { level: 0, isOptional: false } } },
+    forbiddenText: { spell: { [spell.name]: ['a synthetic author note'] } }
+  };
+  assert.ok(validateSourceModel(model, expectations).issues.some(issue => issue.category === 'unexpected-source-text'));
+  spell.bodyText = 'Rules text.';
+  assert.equal(validateSourceModel(model, expectations).summary.pass, true);
+  delete spell.metadata.isOptional;
+  assert.ok(validateSourceModel(model, expectations).issues.some(issue => issue.category === 'metadata-mismatch'));
 });
 
 test('a source gate catches missing mechanics text, ambiguous dice, and omitted creature statistics', () => {

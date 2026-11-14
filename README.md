@@ -349,6 +349,10 @@ reported XML shape issues.
   never captured correctly.
 - The parser targets common D&D/DDB-style layouts. Unusual page layouts may need
   manual page ranges or Manual Author cleanup.
+- Older and homebrew class layouts with full-width progression tables can fail
+  to produce a class. Decorative sidebars can also enter item descriptions.
+  The [multi-PDF review](docs/accuracy-checks/2026-11-14/multi-pdf-review.md)
+  records examples and reproducible checks for these gaps.
 - Rules are generated conservatively. Some mechanics may require manual Aurora
   rule edits after import.
 - Spell list tables are not treated as full spell definitions unless complete

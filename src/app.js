@@ -804,6 +804,7 @@ function detectSourceMetaFromText(pages) {
 
 function normalizeEncodingArtifacts(text) {
   return String(text || '')
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '')
     .replace(/\u00a0/g, ' ')
     .replace(/[\u201c\u201d]/g, '"')
     .replace(/[\u2018\u2019]/g, "'")
@@ -927,7 +928,7 @@ function cleanSpellBodyLines(lines) {
   const cleaned = [];
   let skippingSidebar = false;
   for (const rawLine of lines || []) {
-    const line = String(rawLine || '').trim();
+    const line = normalizeEncodingArtifacts(rawLine).trim();
     if (!line) continue;
     if (skippingSidebar) {
       if (/^[-–]?(?:fizban|nzban)$/i.test(line)) skippingSidebar = false;
@@ -946,6 +947,10 @@ function cleanSpellBodyLines(lines) {
 }
 
 function continuationProseStartIndex(lines, options = {}) {
+  if (options.preferEarliestFeature) {
+    const firstContent = lines.findIndex(line => !isPdfContinuationNoise(line) && !isPdfPageChromeLine(line));
+    if (firstContent >= 0 && /^[a-z]/.test(lines[firstContent])) return firstContent;
+  }
   const directAddress = lines.findIndex(line => /^You\b/i.test(line));
   const namedFeature = lines.findIndex(line => /^[A-Z][A-Za-z' -]{2,}\.\s+/.test(line));
   const proseStart = lines.findIndex(line => /^(?:The|A|An|Each|When|While|For|Until|On)\b/i.test(line));
@@ -1048,14 +1053,23 @@ function parseSpellsFromText(text, options = {}) {
     const fields = {};
     let j = i + 2;
     for (; j < Math.min(lines.length, i + 14); j++) {
-      const m = lines[j].match(/^(Casting Time|Range|Components|Duration):\s*(.+)$/i);
+      const m = lines[j].match(/^(Casting Time|Range|Components|Duration)\s*:\s*(.+)$/i);
       if (m) {
         const field = m[1].toLowerCase();
         fields[field] = m[2].trim();
+        if (field === 'casting time' || field === 'range') {
+          const nextOffset = lines.slice(j + 1, i + 14)
+            .findIndex(line => /^(Casting Time|Range|Components|Duration)\s*:/i.test(line));
+          const nextField = nextOffset < 0 ? -1 : j + 1 + nextOffset;
+          if (nextField > j + 1) {
+            fields[field] += ' ' + lines.slice(j + 1, nextField).join(' ');
+            j = nextField - 1;
+          }
+        }
         if (field === 'components') {
           while (hasUnclosedParenthesis(fields.components) && j + 1 < Math.min(lines.length, i + 14)) {
             const continuation = lines[j + 1];
-            if (/^(Casting Time|Range|Components|Duration):\s*/i.test(continuation)) break;
+            if (/^(Casting Time|Range|Components|Duration)\s*:\s*/i.test(continuation)) break;
             fields.components += ` ${continuation}`;
             j++;
           }
@@ -1067,12 +1081,14 @@ function parseSpellsFromText(text, options = {}) {
     const descStart = j + 1;
     let descEnd = descStart;
     while (descEnd < lines.length && !isElementStart(lines, descEnd) && !isSectionHeading(lines[descEnd])) descEnd++;
-    const stoppedAtPageChrome = descEnd < lines.length && isPdfPageChromeLine(lines[descEnd]);
+    const stoppedAtPageChrome = (descEnd < lines.length && isPdfPageChromeLine(lines[descEnd]))
+      || (descEnd === lines.length && lines.slice(descStart, descEnd).some(isPdfPageChromeLine));
     let bodyLines = cleanSpellBodyLines(lines.slice(descStart, descEnd));
     let body = bodyLines.join('\n');
     if (!body.trim()) body = spellContinuationText(lines[i], options.pages, options.continuationPages);
     else if (stoppedAtPageChrome) {
-      const selectedPageContinuation = spellNextPageText(lines[i], options.pages, options.pages, { preferEarliestFeature: true });
+      const selectedPageContinuation = spellNextPageText(lines[i], options.pages,
+        [...(options.pages || []), ...(options.continuationPages || [])], { preferEarliestFeature: true });
       if (selectedPageContinuation) body = `${body}\n${selectedPageContinuation}`;
     }
     body = restoreSpellRollTableLabels(normalizeSpellProse(body));
@@ -1262,28 +1278,40 @@ function parseMagicItemsFromText(text) {
   const items = [];
   const rarityWords = 'common|uncommon|rare|very rare|legendary|artifact|varies';
   const hasMagicItemSections = lines.some(isMagicItemSectionHeading);
-  const allowLooseMagicItems = hasMagicItemSections || lines.length < 120;
-  let inMagicItemSection = allowLooseMagicItems && !hasMagicItemSections;
+  let inMagicItemSection = !hasMagicItemSections;
   for (let i = 0; i < lines.length - 1; i++) {
     if (isMagicItemSectionHeading(lines[i])) {
       inMagicItemSection = true;
       continue;
     }
-    if (isSectionHeading(lines[i]) && !isMagicItemSectionHeading(lines[i])) {
+    if (hasMagicItemSections && isSectionHeading(lines[i]) && !isMagicItemSectionHeading(lines[i])) {
       inMagicItemSection = false;
       continue;
     }
     if (!inMagicItemSection) continue;
     if (!looksLikeTitle(lines[i])) continue;
     if (isProseFragmentTitle(lines[i])) continue;
-    const detail = lines[i + 1].match(new RegExp(`^(.+?),\\s*(${rarityWords})(?:\\s*\\((requires attunement.*?)\\))?$`, 'i'));
+    let detailText = lines[i + 1];
+    let descriptionStart = i + 2;
+    if (/\(requires attunement/i.test(detailText)) {
+      while (hasUnclosedParenthesis(detailText) && descriptionStart < Math.min(lines.length, i + 6)) {
+        detailText += ' ' + lines[descriptionStart++];
+      }
+    }
+    const detail = detailText.match(new RegExp(`^(.+?),\\s*(${rarityWords})(?:\\s*\\((requires attunement.*?)\\))?$`, 'i'));
     if (!detail) continue;
     if (!isMagicItemType(detail[1])) continue;
-    let j = i + 2;
+    let j = descriptionStart;
     while (j < lines.length && !isElementStart(lines, j) && !isSectionHeading(lines[j])) j++;
-    const description = lines.slice(i + 2, j).join('\n').trim();
+    let description = lines.slice(descriptionStart, j)
+      .filter(line => !isPdfPageChromeLine(line) && !/^magic(?:al)?itemdescriptions$/i.test(line.replace(/\s/g, '')))
+      .join('\n').trim();
+    if (detail[3] && !/^requires attunement$/i.test(detail[3].trim())) {
+      const condition = detail[3].trim().replace(/^requires/i, 'Requires');
+      description = `${condition}.\n${description}`;
+    }
     items.push({
-      name: lines[i],
+      name: normalizeExtractedName(lines[i]),
       type: titleCase(detail[1].trim()),
       rarity: titleCase(detail[2].trim()),
       requiresAttunement: !!detail[3],
@@ -1298,9 +1326,9 @@ function parseMagicItemsFromText(text) {
 
 function isMagicItemSectionHeading(line) {
   const clean = cleanExtractedTitle(line);
-  return /^magic items?$/i.test(clean)
-    || /^magic item descriptions$/i.test(clean)
-    || /^magic items? a[-–—]z$/i.test(clean);
+  return /^magic(?:al)? items?$/i.test(clean)
+    || /^magic(?:al)? item descriptions$/i.test(clean)
+    || /^magic(?:al)? items? a[-–—]z$/i.test(clean);
 }
 
 function isMagicItemType(value) {
@@ -2105,11 +2133,21 @@ function isLeveledFeatureHeading(line) {
 }
 
 function cleanExtractedTitle(text) {
-  return normalizeEncodingArtifacts(text)
+  return normalizeSplitHeadingLetters(normalizeEncodingArtifacts(text))
     .replace(/^['"`]+/, '')
     .replace(/\s+/g, ' ')
     .replace(/[.!?]+$/i, '')
     .trim();
+}
+
+function normalizeSplitHeadingLetters(text) {
+  const words = new Set(['anklet', 'balance', 'ball', 'bell', 'flame', 'healing', 'hobbling', 'magical', 'spell', 'valor', 'walking']);
+  return text.replace(/\b([A-Za-z]+)\s+(L{1,2})\b(?:\s+([a-z]+))?/g, (original, left, letters, right) => {
+    const joined = left + letters.toLowerCase();
+    if (right && words.has((joined + right).toLowerCase())) return joined + right;
+    if (words.has(joined.toLowerCase())) return joined + (right ? ' ' + right : '');
+    return original;
+  });
 }
 
 function normalizeExtractedName(text) {

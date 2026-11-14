@@ -112,6 +112,9 @@ function pickMetadata(type, entity) {
     'cost',
     'weight',
     'rarity',
+    'requiresAttunement',
+    'charges',
+    'recharge',
     'category'
   ];
   const metadata = {};
@@ -446,6 +449,31 @@ function validateSourceModel(model, expectations = {}) {
             type, name, requiredText: phrase, sourceContext: captured[0]?.sourceContext
           });
         }
+      }
+    }
+  }
+
+  for (const [type, entities] of Object.entries(expectations.requiredMetadata || {})) {
+    for (const [name, fields] of Object.entries(entities)) {
+      const captured = groups.get(`${normalizeKey(type)}::${normalizeKey(name)}`) || [];
+      for (const [field, expected] of Object.entries(fields)) {
+        const matches = captured.some(entity => {
+          const actual = entity.metadata?.[field];
+          return actual !== undefined && (typeof expected === 'string'
+            ? normalizeKey(actual) === normalizeKey(expected)
+            : JSON.stringify(actual) === JSON.stringify(expected));
+        });
+        if (!matches) add('error', 'metadata-mismatch', `Expected ${type} "${name}" ${field}=${JSON.stringify(expected)} was not captured.`, { type, name, field });
+      }
+    }
+  }
+
+  for (const [type, entities] of Object.entries(expectations.forbiddenText || {})) {
+    for (const [name, phrases] of Object.entries(entities)) {
+      const captured = groups.get(`${normalizeKey(type)}::${normalizeKey(name)}`) || [];
+      const body = normalizeKey(captured.map(entity => entity.bodyText).join('\n'));
+      for (const phrase of phrases) {
+        if (body.includes(normalizeKey(phrase))) add('error', 'unexpected-source-text', `${type} "${name}" includes text from outside its rules: ${phrase}`, { type, name, forbiddenText: phrase });
       }
     }
   }

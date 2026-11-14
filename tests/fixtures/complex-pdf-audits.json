@@ -1,0 +1,81 @@
+{
+  "benchmarks": [
+    {
+      "name": "Elemental Evil - spell definitions",
+      "source": "{USERPROFILE}\\Documents\\DnD\\books and docs\\Elemental Evil Players Companion.pdf",
+      "pageRange": "15-16",
+      "types": ["spell"],
+      "sourceMeta": { "name": "Elemental Evil Player's Companion", "abbr": "EEPC", "year": "2015" },
+      "sourceValidation": {
+        "minCounts": { "spell": 9 },
+        "expected": { "spell": ["Abi-Dalzim's Horrid Wilting", "Absorb Elements", "Aganazzar's Scorcher", "Beast Bond", "Bones of the Earth", "Catapult", "Create Bonfire", "Control Flames", "Control Winds"] },
+        "requireTextTypes": ["spell"], "maxWarnings": 0, "maxReview": 0,
+        "requiredMetadata": { "spell": {
+          "Absorb Elements": { "castingTime": "1 reaction, which you take when you take acid, cold, fire, lightning, or thunder damage" },
+          "Create Bonfire": { "level": 0, "range": "60 feet", "duration": "Concentration, up to 1 minute" }
+        } },
+        "requiredText": { "spell": {
+          "Abi-Dalzim's Horrid Wilting": ["10d8 necrotic"],
+          "Absorb Elements": ["1d6 damage", "2nd level or higher"],
+          "Aganazzar's Scorcher": ["3d8 fire damage"],
+          "Beast Bond": ["Intelligence is 4 or higher", "telepathically communicate"],
+          "Bones of the Earth": ["six pillars", "AC 5", "30 hit points", "6d6 bludgeoning"],
+          "Catapult": ["3d8 bludgeoning", "increases by 5 pounds"],
+          "Create Bonfire": ["1d8 fire damage", "17th level (4d8)"],
+          "Control Flames": ["bright light and dim light", "three of its non-instantaneous effects"],
+          "Control Winds": ["turn to switch", "Gusts.", "Downdraft.", "Updraft."]
+        } }
+      }
+    },
+    {
+      "name": "Marvelous Magic - item catalogue",
+      "source": "{USERPROFILE}\\Documents\\DnD\\books and docs\\Mordenkainens Tome of Marvelous Magic.pdf",
+      "pageRange": "6-7", "types": ["magic"],
+      "sourceMeta": { "name": "Mordenkainen's Tome of Marvelous Magic", "abbr": "MTMM" },
+      "sourceValidation": {
+        "minCounts": { "magic": 20 }, "maxWarnings": 0, "maxReview": 0,
+        "expected": { "magic": ["Anchor of Seafaring", "Anklet of Hobbling", "Anklet of Levitation", "Anklet of Walking", "Aquamarine of Spell Extending", "Armband of Healing", "Armband of Strength", "Armored Gi", "Badge of Freedom", "Badge of Valor", "Bag of Flame", "Bagpipes of Droning", "Balance of Judgement", "Balance of Power", "Ball of Power", "Banner of the Storm's Eye", "Bead of Accuracy", "Bead of Dew", "Beady Eye", "Bell of Freedom"] },
+        "requireTextTypes": ["magic"],
+        "requiredMetadata": { "magic": {
+          "Aquamarine of Spell Extending": { "rarity": "Rare", "requiresAttunement": true, "charges": 3 },
+          "Bagpipes of Droning": { "requiresAttunement": false, "charges": 3 }
+        } },
+        "requiredText": { "magic": {
+          "Anchor of Seafaring": ["maximum length of 1 mile"],
+          "Aquamarine of Spell Extending": ["Requires attunement by a sorcerer, warlock, or wizard"],
+          "Bag of Flame": ["Fiery Shield.", "immunity to fire damage for 10 minutes"],
+          "Banner of the Storm's Eye": ["immune to being frightened and stunned"],
+          "Bell of Freedom": ["all normal locks within 15 feet"]
+        } },
+        "forbiddenText": { "magic": {
+          "Anklet of Hobbling": ["Hobbling a creature over an extended period"],
+          "Bag of Flame": ["Someone once said"],
+          "Bell of Freedom": ["An especially useful device"]
+        } }
+      }
+    },
+    {
+      "name": "Revised Ranger - class and progression table",
+      "source": "{USERPROFILE}\\Documents\\DnD\\books and docs\\UA_RevisedRanger.pdf",
+      "pageRange": "2-4", "types": ["class"],
+      "sourceMeta": { "name": "Unearthed Arcana: Revised Ranger", "abbr": "UARR", "year": "2016" },
+      "sourceValidation": {
+        "minCounts": { "class": 1 }, "expected": { "class": ["Ranger"] },
+        "requireTextTypes": ["class"], "requireFeaturesForTypes": ["class"],
+        "requiredFeatures": { "class": { "Ranger": ["Favored Enemy", "Natural Explorer", "Fighting Style", "Spellcasting"] } },
+        "maxWarnings": 0, "maxReview": 0
+      }
+    },
+    {
+      "name": "Complete Witch - class with sidebar",
+      "source": "{USERPROFILE}\\Documents\\DnD\\books and docs\\Complete Witch.pdf",
+      "pageRange": "4-6", "types": ["class"],
+      "sourceMeta": { "name": "Complete Witch", "abbr": "CW", "author": "Mage Hand Press", "year": "2020" },
+      "sourceValidation": {
+        "minCounts": { "class": 1 }, "expected": { "class": ["Witch"] },
+        "requireTextTypes": ["class"], "requireFeaturesForTypes": ["class"],
+        "maxWarnings": 0, "maxReview": 0
+      }
+    }
+  ]
+}
