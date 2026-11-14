@@ -742,11 +742,12 @@ async function deterministicExtract(file, types, progressCallback) {
     const type = types[i];
     const parser = DETERMINISTIC_PARSERS[type];
     progressCallback(10 + Math.round((i / Math.max(types.length, 1)) * 80), `Parsing ${TYPE_LABELS[type] || type}...`);
-    out[type] = parser ? parser(text, { pages: selectedPages, continuationPages }) : [];
+    out[type] = parser ? parser(text, { pages: selectedPages, continuationPages, availabilityPages: pages, fileName: file.name || '' }) : [];
   }
   progressCallback(95, 'Normalizing parsed elements...');
   sourceReviewContext = { kind: 'pdf', fileName: file.name || '', types: types.slice(),
-    selectedPages: selectedPages.map(page => page.page), continuationPages: continuationPages.map(page => page.page) };
+    selectedPages: selectedPages.map(page => page.page), continuationPages: continuationPages.map(page => page.page),
+    availabilityPages: window.AuroraSpellAvailability.contextPages(out.spell) };
   window.AuroraSourceReview.attachSourceReferences(out, { pages: selectedPages, continuationPages, kind: 'pdf', fileName: file.name || '' });
   return out;
 }
@@ -757,14 +758,16 @@ async function extractPdfPages(file) {
   const data = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data, disableWorker: true }).promise;
   const pages = [];
-  for (let p = 1; p <= pdf.numPages; p++) {
-    const page = await pdf.getPage(p);
-    const layout = window.AuroraPdfTextLayout;
-    if (!layout?.extractPageLayout) throw new Error('PDF text layout support is not loaded.');
-    const pageLayout = await layout.extractPageLayout(page);
-    pages.push({ page: p, text: pageLayout.lines.join('\n'), layout: pageLayout });
-  }
-  return pages;
+  try {
+    for (let p = 1; p <= pdf.numPages; p++) {
+      const page = await pdf.getPage(p);
+      const layout = window.AuroraPdfTextLayout;
+      if (!layout?.extractPageLayout) throw new Error('PDF text layout support is not loaded.');
+      const pageLayout = await layout.extractPageLayout(page);
+      pages.push({ page: p, text: pageLayout.lines.join('\n'), layout: pageLayout });
+    }
+    return pages;
+  } finally { await pdf.destroy(); }
 }
 
 function selectPages(pages, rangeText) {
@@ -1053,7 +1056,7 @@ function spellContinuationText(name, pages, continuationPages) {
 
 function parseSpellsFromText(text, options = {}) {
   const lines = normalizeTextLines(text);
-  const tableMetadata = extractSpellTableMetadata(options.pages);
+  const tableMetadata = extractSpellTableMetadata(options.availabilityPages?.length ? options.availabilityPages : options.pages);
   const spells = [];
   for (let i = 0; i < lines.length - 5; i++) {
     const kind = parseSpellKind(lines[i + 1]);
@@ -1122,7 +1125,7 @@ function parseSpellsFromText(text, options = {}) {
       isConcentration: tableEntry?.isConcentration ?? /^concentration/i.test(fields.duration),
       isRitual: tableEntry?.isRitual ?? /\britual\b/i.test(lines[i + 1]),
       isTechnomagic: false,
-      classes: tableEntry?.classes?.length ? tableEntry.classes : (kind.classes?.length ? kind.classes : inferClasses(`${lines.slice(Math.max(0, i - 8), i).join(' ')}\n${body}`)),
+      classes: tableEntry?.classes?.length ? tableEntry.classes : (kind.classes?.length ? kind.classes : inferClasses(body)),
       tableMetadata: tableEntry || null,
       description,
       ...(statBlockName ? { statBlockName, statBlock } : {}),
@@ -1130,7 +1133,7 @@ function parseSpellsFromText(text, options = {}) {
     });
     i = Math.max(i, descEnd - 1);
   }
-  return uniqueByName(spells);
+  return window.AuroraSpellAvailability.resolve(uniqueByName(spells), { ...options, text });
 }
 
 function parseSpellKind(line) {
@@ -1141,7 +1144,7 @@ function parseSpellKind(line) {
     const ddb = line.match(/^Level\s+(\d+)\s+([A-Za-z]+)(?:\s*\(([^)]+)\))?/i);
   if (ddb && isSpellSchool(ddb[2])) {
     const paren = ddb[3] || '';
-    const classes = /\britual\b/i.test(paren) ? [] : splitListValue(paren).map(titleCase);
+    const classes = splitListValue(paren).filter(name => !/^ritual$/i.test(name.trim())).map(titleCase);
     return {
       level: parseInt(ddb[1], 10),
       school: titleCase(ddb[2]),
@@ -1181,12 +1184,8 @@ function parseComponents(text) {
 }
 
 function inferClasses(text) {
-  const allowed = new Set(['Bard','Cleric','Druid','Paladin','Ranger','Sorcerer','Warlock','Wizard','Artificer']);
-  const possessive = String(text || '').match(/\b(Bard|Cleric|Druid|Paladin|Ranger|Sorcerer|Warlock|Wizard|Artificer)['’]s\s+spell\s+list\b/i);
-  if (possessive) return [titleCase(possessive[1])].filter(s => allowed.has(s));
-  const m = text.match(/Spell Lists?\.\s*([A-Za-z,\s]+)/i);
-  if (!m) return [];
-  return m[1].split(',').map(s => titleCase(s.trim())).filter(s => allowed.has(s));
+  const match = String(text || '').match(/^(?:Spell Lists?|Classes)\s*[.:]\s*([^\n]+)/im);
+  return match ? window.AuroraSpellAvailability.classNames(match[1]) : [];
 }
 
 function parseFeatsFromText(text) {
@@ -3002,7 +3001,7 @@ function setProgress(pct, msg) {
 function buildReviewUI(preferredType = '') {
   ensureExtractedDataBuckets();
   const scope = document.getElementById('reviewSourceScope');
-  if (scope) scope.textContent = sourceReviewContext ? `${sourceReviewContext.fileName || 'PDF'} · Selected PDF pages: ${window.AuroraSourceReview.pageLabel(sourceReviewContext.selectedPages)}${sourceReviewContext.continuationPages.length ? ' · Additional continuation context: ' + window.AuroraSourceReview.pageLabel(sourceReviewContext.continuationPages) : ''}. Page numbers include covers and front matter.` : '';
+  if (scope) scope.textContent = sourceReviewContext ? `${sourceReviewContext.fileName || 'PDF'} · Selected PDF pages: ${window.AuroraSourceReview.pageLabel(sourceReviewContext.selectedPages)}${sourceReviewContext.continuationPages.length ? ' · Additional continuation context: ' + window.AuroraSourceReview.pageLabel(sourceReviewContext.continuationPages) : ''}${sourceReviewContext.availabilityPages?.length ? ' · Additional spell availability context: ' + window.AuroraSourceReview.pageLabel(sourceReviewContext.availabilityPages) : ''}. Page numbers include covers and front matter.` : '';
   const total = Object.values(extractedData)
     .filter(Array.isArray)
     .reduce((s, a) => s + a.length, 0);
@@ -3066,6 +3065,45 @@ function sourceReferenceHTML(reference) {
 function buildSourceReference(item) {
   return `<details class="source-reference"><summary>Original source reference${item._source?.page ? ` · PDF page ${Number(item._source.page)}` : ''}</summary>
     ${sourceReferenceHTML(item._source)}${(Array.isArray(item._source?.related) ? item._source.related : []).map(reference => `<h4>${escHtml(reference.label)}</h4>${sourceReferenceHTML(reference)}`).join('')}</details>`;
+}
+
+function buildSpellAvailability(spell, id) {
+  const availability = spell.availability;
+  if (!availability) return '';
+  const index = Number(id.split('-')[1]);
+  const accessLabels = { 'expanded-list': 'Added to a spell list', prepared: 'Always prepared', known: 'Known spell', innate: 'Granted casting', choice: 'Eligible choice', review: 'Grant conditions need review' };
+  return `<section class="source-reference" data-id="${id}" data-field="availability" tabindex="0"><h4>Spell availability</h4>
+    <p class="text-muted">The base class lists above control class spell selection. Conditional access below requires its named feature and must be implemented by that feature.</p>
+    ${availability.base.length ? `<details><summary>Base list evidence (${availability.base.length})</summary>${availability.base.map(entry => `<h4>${escHtml(entry.name)}</h4>${sourceReferenceHTML(entry._source)}`).join('')}</details>` : '<p>No base class list was located in this source.</p>'}
+    ${availability.conditional.map((entry, route) => `<div class="source-reference" data-id="${id}" data-field="availability.conditional.${route}.condition" tabindex="0">
+      <h4>${escHtml(entry.owner)} · ${escHtml(accessLabels[entry.access] || entry.access)}${Number.isInteger(entry.level) ? ` · level ${Number(entry.level)}` : ''}${Number.isInteger(entry.spellLevel) ? ` · spell level ${Number(entry.spellLevel)}` : ''}</h4>
+      <p>${escHtml(entry.condition)}</p><details><summary>Grant source${entry._source?.page ? ` · PDF page ${Number(entry._source.page)}` : ''}</summary>${sourceReferenceHTML(entry._source)}</details>
+      ${entry.levelUnclear ? `<label>${entry.levelField === 'level' ? 'Character or class level' : 'Spell level'} from source<input type="number" min="${entry.levelField === 'level' ? 1 : 0}" max="${entry.levelField === 'level' ? 20 : 9}" data-id="${id}" data-field="availability.conditional.${route}.${entry.levelField === 'level' ? 'level' : 'spellLevel'}" oninput="updateSpellAvailabilityLevel(${index},${route},this)" /></label>` : ''}
+      <label class="checkbox-label"><input type="checkbox" ${entry._reviewed ? 'checked' : ''} onchange="markSpellAvailabilityChecked(${index},${route},this.checked)" /> I checked this access and its granting feature</label></div>`).join('')}
+    ${!spell.classes?.length && availability.conditional.length ? `<label class="checkbox-label"><input type="checkbox" ${availability._conditionalOnlyConfirmed ? 'checked' : ''} onchange="markSpellAvailabilityChecked(${index},-1,this.checked)" /> The source intentionally provides conditional access only</label>` : ''}
+    ${availability.conflicts.length ? `<p>${availability.conflicts.map(issue => escHtml(issue.message)).join('<br />')}</p><label class="checkbox-label"><input type="checkbox" ${availability._conflictsReviewed ? 'checked' : ''} onchange="markSpellAvailabilityChecked(${index},-2,this.checked)" /> I compared the sources and corrected the base class lists</label>` : ''}
+  </section>`;
+}
+
+function markSpellAvailabilityChecked(index, route, checked) {
+  const availability = extractedData.spell?.[index]?.availability;
+  if (!availability) return;
+  if (route === -1) availability._conditionalOnlyConfirmed = checked;
+  else if (route === -2) availability._conflictsReviewed = checked;
+  else if (availability.conditional[route]) availability.conditional[route]._reviewed = checked;
+  refreshReviewIssues(); markChanged();
+}
+
+function updateSpellAvailabilityLevel(index, route, input) {
+  const entry = extractedData.spell?.[index]?.availability?.conditional?.[route];
+  if (!entry) return;
+  const field = entry.levelField === 'level' ? 'level' : 'spellLevel';
+  const value = input.value.trim() === '' ? NaN : Number(input.value);
+  if (Number.isInteger(value) && value >= (field === 'level' ? 1 : 0) && value <= (field === 'level' ? 20 : 9)) {
+    entry[field] = value; entry.levelUnclear = false;
+  } else { delete entry[field]; entry.levelUnclear = true; }
+  entry._reviewed = false;
+  flashField(input); refreshReviewIssues();
 }
 
 function referenceForIssue(issue) {
@@ -3306,6 +3344,7 @@ function buildSpellFields(s, id) {
         <input type="text" value="${escAttr((s.classes||[]).join(', '))}" data-field="classes" data-id="${id}" oninput="updateFieldArr(this)" />
       </div>
     </div>
+    ${buildSpellAvailability(s, id)}
     <div style="display:flex; gap:1.5rem; flex-wrap:wrap; margin-bottom:1rem;">
       ${chk('hasVerbal','Verbal',s.hasVerbal,id)}
       ${chk('hasSomatic','Somatic',s.hasSomatic,id)}
@@ -6233,6 +6272,10 @@ function genSpellXml(s, source, prefix, meta) {
   if (s.statBlock) {
     lines.push(`\t\t\t<h4>${escXml(s.statBlockName || 'Referenced creature')}</h4>`);
     lines.push(`\t\t\t<p>${String(s.statBlock).split(/\r?\n/).map(escXml).join('<br />')}</p>`);
+  }
+  if (s.availability?.conditional?.length) {
+    lines.push('\t\t\t<h4>Conditional access</h4>');
+    s.availability.conditional.forEach(entry => lines.push(`\t\t\t<p><b>${escXml(entry.owner)}.</b>${Number.isInteger(entry.level) ? ` Level ${entry.level}.` : ''}${Number.isInteger(entry.spellLevel) ? ` Spell level ${entry.spellLevel}.` : ''} ${escXml(entry.condition)}</p>`));
   }
   lines.push(`\t\t</description>`);
   lines.push(`\t\t<setters>`);

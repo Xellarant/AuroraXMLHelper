@@ -137,8 +137,11 @@ async function checkPdfExport(browser, url, reportDirectory) {
     await page.goto(url, { waitUntil: 'domcontentloaded' });
     const pdf = await page.evaluate(async () => {
       const doc = await window.PDFLib.PDFDocument.create();
-      const sheet = doc.addPage([600, 800]);
       const font = await doc.embedFont(window.PDFLib.StandardFonts.Helvetica);
+      const catalogue = doc.addPage([600, 800]);
+      ['Wizard Spells', '2nd Level', 'Clockwork Beacon (evocation)', 'Feat: Clockwork Initiate', 'You know the Clockwork Beacon spell.']
+        .forEach((text, i) => catalogue.drawText(text, { x: 40, y: 740 - i * 22, size: 11, font }));
+      const sheet = doc.addPage([600, 800]);
       const lines = [
         'Clockwork Beacon', '2nd-level evocation', 'Casting Time: 1 action',
         'Range: 30 feet', 'Components: V, S', 'Duration: 1 minute',
@@ -150,25 +153,34 @@ async function checkPdfExport(browser, url, reportDirectory) {
     });
     await page.locator('#pdfFile').setInputFiles({ name: 'Release Fixture.pdf', mimeType: 'application/pdf', buffer: Buffer.from(pdf) });
     for (const type of ['archetype', 'item', 'feat', 'magic', 'race', 'background', 'class']) await page.locator(`#chk-${type} input`).uncheck();
+    await page.locator('#pageRange').fill('2');
     await page.locator('#extractBtn').click();
     const name = page.locator('[data-id="spell-0"][data-field="name"]');
     await name.waitFor({ state: 'attached' });
     assert.equal(await name.inputValue(), 'Clockwork Beacon');
-    assert.match(await page.locator('#reviewSourceScope').textContent(), /Release Fixture\.pdf.*Selected PDF pages: 1/);
-    assert.match(await page.locator('#body-spell-0 .source-reference').textContent(), /PDF page 1/);
-    const unresolved = page.locator('#reviewIssuesList li').filter({ hasText: 'no spell lists assigned' });
-    await unresolved.getByRole('button', { name: 'Go to field' }).click();
+    assert.match(await page.locator('#reviewSourceScope').textContent(), /Release Fixture\.pdf.*Selected PDF pages: 2.*spell availability context: 1/);
+    assert.match(await page.locator('#body-spell-0 .source-reference').first().textContent(), /PDF page 2/);
     const classes = page.locator('[data-id="spell-0"][data-field="classes"]');
+    assert.equal(await classes.inputValue(), 'Wizard');
+    const conditional = page.locator('#reviewIssuesList li').filter({ hasText: 'Clockwork Initiate' });
+    await conditional.getByRole('button', { name: 'Go to field' }).click();
+    await page.getByRole('checkbox', { name: 'I checked this access and its granting feature', exact: true }).check();
+    await conditional.waitFor({ state: 'detached' });
+    await classes.fill('');
+    const unresolved = page.locator('#reviewIssuesList li').filter({ hasText: 'no spell lists assigned' });
+    await unresolved.waitFor({ state: 'visible' });
+    await unresolved.getByRole('button', { name: 'Go to field' }).click();
     assert.ok(await classes.evaluate(element => document.activeElement === element));
     await classes.fill('Wizard');
     await unresolved.waitFor({ state: 'detached' });
     await page.waitForFunction(() => {
       const saved = JSON.parse(localStorage.getItem(window.AuroraDraftStorage.KEY) || 'null');
-      return saved?.state.data.spell?.[0]?.classes.includes('Wizard') && saved.state.data.spell[0]._source?.page === 1;
+      return saved?.state.data.spell?.[0]?.classes.includes('Wizard') && saved.state.data.spell[0]._source?.page === 2
+        && saved.state.data.spell[0].availability?.conditional[0]?._reviewed;
     });
     await page.reload();
     await name.waitFor({ state: 'attached' });
-    assert.match(await page.locator('#body-spell-0 .source-reference').textContent(), /PDF page 1/);
+    assert.match(await page.locator('#body-spell-0 .source-reference').first().textContent(), /PDF page 2/);
     assert.equal(await classes.inputValue(), 'Wizard');
     const downloadPromise = page.waitForEvent('download');
     await page.locator('button[onclick="downloadZip()"]').click();
@@ -180,7 +192,9 @@ async function checkPdfExport(browser, url, reportDirectory) {
     const xml = await zip.file(spellFile).async('string');
     assert.match(xml, /name="Clockwork Beacon" type="Spell"/);
     assert.match(xml, /<set name="level">2<\/set>/);
-    return 'Upload a synthetic PDF, review its source, resolve a linked warning, recover those edits, and export the spell/source XML';
+    assert.match(xml, /<supports>Wizard<\/supports>/);
+    assert.match(xml, /Clockwork Initiate/);
+    return 'Look up base and feat access outside the selected PDF pages, review a conditional grant, recover the source and edits, and export without broadening class access';
   } catch (error) {
     if (reportDirectory && page) await page.screenshot({ path: path.join(reportDirectory, 'export-failure.png'), fullPage: true }).catch(() => {});
     throw error;

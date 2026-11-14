@@ -128,6 +128,38 @@ Feat prerequisite text is for display and does not create a dynamic requirement.
 
 If incomplete elements were skipped, the ZIP includes `skipped-elements.txt`.
 
+### Spell availability
+
+When parsing spells, the app checks the PDF for class spell lists and granting
+features, including pages outside your selected range. The selected range still
+controls which spell definitions are extracted. Additional pages used as
+availability evidence are listed separately in review and source reports.
+
+The **Classes** field contains base spell lists. **Spell availability** shows the
+evidence for each assignment and keeps subclass, feat, background, and racial
+access separate. Conditional entries retain their owner, source, grant text,
+choice requirements, and any readable acquisition level or spell-table level.
+Those two kinds of level are kept distinct. Named grants, expanded lists,
+prepared spells, and choices from a specified class list are supported; an
+incidental class or spell mention does not establish availability.
+
+Review each conditional entry against its granting feature. An unreadable table
+level stays unresolved and has a field where you can enter the source's value.
+If the source intentionally provides conditional access only, you can confirm
+that explicitly instead of assigning an invented base class. Review decisions
+and level corrections survive draft recovery. A new extraction requires a fresh
+review; remembered level corrections retain the new source reference.
+
+Base classes become Aurora spell supports. Conditional access is included as
+reference text in the spell description and requires the owning feature's grant,
+spellcasting extension, or choice rules. A review acknowledgement does not create
+those rules or grant a spell to a whole class. Class progression and choices are
+the next separate milestone.
+
+Availability is established from the current source, rather than a universal
+database across books or editions. Unrecognized layouts, missing lists, conflicting
+metadata, and unclear conditions still need review.
+
 ### Draft recovery
 
 The app saves a working draft in this browser after a short pause in editing and

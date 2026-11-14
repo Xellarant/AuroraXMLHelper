@@ -508,6 +508,7 @@ async function run() {
         auroraAppLoaded: document.documentElement.dataset.auroraAppLoaded,
         draftStorageLoaded: document.documentElement.dataset.draftStorageLoaded,
         sourceReviewLoaded: document.documentElement.dataset.sourceReviewLoaded,
+        spellAvailabilityLoaded: document.documentElement.dataset.spellAvailabilityLoaded,
         draftRecoveryLoaded: document.documentElement.dataset.draftRecoveryLoaded,
         hasPdfInput: Boolean(document.querySelector('input[type=file]')),
         hasPageRange: Boolean(document.querySelector('#pageRange')),
@@ -542,6 +543,7 @@ async function run() {
       'auroraAppLoaded',
       'draftStorageLoaded',
       'sourceReviewLoaded',
+      'spellAvailabilityLoaded',
       'draftRecoveryLoaded'
     ];
     const missing = expectedFlags.filter(flag => result[flag] !== 'true');

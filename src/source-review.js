@@ -123,7 +123,13 @@
         const add = (field, msg, category = 'missing-info', source = item._source) => issues.push({ type, i, field, msg, category, source });
         if (item._error) add('description', `${item.name || 'Entry'} could not be parsed. Paste its source text or complete it manually.`);
         if (type === 'spell') {
-          if (!(item.classes || []).length) add('classes', `${item.name || 'Spell'}: no spell lists assigned. Check the source's class spell-list pages.`);
+          if (!(item.classes || []).length && !(item.availability?.conditional?.length && item.availability._conditionalOnlyConfirmed)) add('classes', `${item.name || 'Spell'}: no spell lists assigned. Check the source's class spell-list pages.`);
+          const accessLabels = { 'expanded-list': 'the spell list expansion', prepared: 'always prepared access', known: 'known spell access', innate: 'the granted casting', choice: 'the spell choice', review: 'the grant conditions' };
+          for (const [index, entry] of (item.availability?.conditional || []).entries()) if (!entry._reviewed)
+            add(`availability.conditional.${index}.condition`, `${item.name || 'Spell'}: review ${accessLabels[entry.access] || 'the grant conditions'} from ${entry.owner}. Access requires that feature; it is not a base class list.`, 'source-review', entry._source);
+          for (const [index, entry] of (item.availability?.conditional || []).entries()) if (entry.levelUnclear)
+            add(`availability.conditional.${index}.${entry.levelField || 'spellLevel'}`, `${item.name || 'Spell'}: the table level for ${entry.owner} is unreadable. Enter the level shown in the source.`, 'missing-info', entry._source);
+          if (!item.availability?._conflictsReviewed) for (const conflict of item.availability?.conflicts || []) add('availability', `${item.name || 'Spell'}: ${conflict.message}`, 'source-review');
           for (const field of ['castingTime', 'range', 'duration']) if (!String(item[field] || '').trim()) add(field, `${item.name || 'Spell'}: ${field === 'castingTime' ? 'casting time' : field} is missing.`);
         }
         if (item._source?.kind === 'pdf' && item._source.match === 'unmatched' && !item._source.checked) {
@@ -155,6 +161,19 @@
 
   function applyContentCorrection(current, correction) {
     const result = withoutReferences(correction);
+    if (current.availability) {
+      result.availability = JSON.parse(JSON.stringify(current.availability));
+      for (const entry of result.availability.conditional || []) {
+        const previous = correction.availability?.conditional?.find(candidate => key(candidate.owner) === key(entry.owner)
+          && candidate.access === entry.access && key(candidate.condition) === key(entry.condition));
+        const field = entry.levelField === 'level' ? 'level' : 'spellLevel';
+        if (entry.levelUnclear && previous?.levelUnclear === false && Number.isInteger(previous[field])
+          && previous[field] >= (field === 'level' ? 1 : 0) && previous[field] <= (field === 'level' ? 20 : 9)) {
+          entry[field] = previous[field]; entry.levelUnclear = false;
+        }
+      }
+    }
+    else delete result.availability;
     if (current._source) result._source = JSON.parse(JSON.stringify(current._source));
     for (const collection of ['features', 'traits', 'actions', 'reactions']) {
       for (const child of result[collection] || []) {

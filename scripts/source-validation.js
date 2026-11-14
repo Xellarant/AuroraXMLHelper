@@ -1,5 +1,6 @@
 const path = require('node:path');
 const { artifactFindings } = require('../src/source-review');
+const { contextPages: spellAvailabilityPages } = require('../src/spell-availability');
 
 const TEXT_KEYS = new Set([
   'description',
@@ -93,6 +94,7 @@ function extractMarkdownTables(text) {
 function pickMetadata(type, entity) {
   const keys = [
     'class',
+    'classes',
     'supports',
     'prerequisite',
     'level',
@@ -137,6 +139,7 @@ function pickMetadata(type, entity) {
     }
   }
   if (type === 'spell') {
+    if (entity.availability) metadata.availability = entity.availability;
     metadata.components = {
       verbal: !!entity.hasVerbal,
       somatic: !!entity.hasSomatic,
@@ -230,6 +233,7 @@ function createSourceModel(options) {
       pageCount: pages?.length || 0,
       pageRange: pageRange || '',
       continuationPageCount: continuationPageCount || 0,
+      spellAvailabilityPages: spellAvailabilityPages(parsedData.spell),
       totalPageCount: totalPageCount || pages?.length || 0,
       name: sourceMeta?.name || '',
       abbr: sourceMeta?.abbr || '',
@@ -454,6 +458,8 @@ function validateSourceModel(model, expectations = {}) {
       for (const [field, expected] of Object.entries(fields)) {
         const matches = captured.some(entity => {
           const actual = entity.metadata?.[field];
+          if (field === 'classes' && Array.isArray(actual) && Array.isArray(expected))
+            return JSON.stringify([...new Set(actual.map(normalizeKey))].sort()) === JSON.stringify([...new Set(expected.map(normalizeKey))].sort());
           return actual !== undefined && (typeof expected === 'string'
             ? normalizeKey(actual) === normalizeKey(expected)
             : JSON.stringify(actual) === JSON.stringify(expected));
@@ -497,6 +503,7 @@ function renderSourceCoverageMarkdown(model, coverage) {
   lines.push(`- Source kind: ${model.source.kind}${model.source.pageCount ? ` (${model.source.pageCount} page${model.source.pageCount === 1 ? '' : 's'})` : ''}`);
   lines.push(`- Selected page range: ${model.source.pageRange || 'all'} (${model.source.pageCount}/${model.source.totalPageCount || model.source.pageCount} page${(model.source.totalPageCount || model.source.pageCount) === 1 ? '' : 's'})`);
   if (model.source.continuationPageCount) lines.push(`- Continuation pages read: ${model.source.continuationPageCount}`);
+  if (model.source.spellAvailabilityPages?.length) lines.push(`- Additional spell availability pages: ${model.source.spellAvailabilityPages.join(', ')}`);
   lines.push(`- Source name: ${model.source.name || '(unknown)'}`);
   lines.push(`- Source abbreviation: ${model.source.abbr || '(unknown)'}`);
   lines.push(`- Ruleset: ${model.source.ruleset || '(unknown)'}`);

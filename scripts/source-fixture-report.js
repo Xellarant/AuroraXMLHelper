@@ -141,13 +141,13 @@ async function buildSourceReport(rawArgs) {
   const entry = args.entry || (shouldLoadManifestEntry ? loadManifestEntry(args) : null);
   const sourcePath = path.resolve(expandLocalPath(args.source || entry?.source || ''));
   if (!sourcePath || !fs.existsSync(sourcePath)) throw new Error(`Source path does not exist: ${sourcePath}`);
-  const source = await readSource(sourcePath, args.pageRange || entry?.pageRange || '');
   const sourceMeta = sourceMetaFromArgs(args, entry, sourcePath);
   const types = (args.types.length ? args.types : entry?.sourceValidation?.types || entry?.types || ELEMENT_TYPES)
     .map(type => type.toLowerCase());
   for (const type of types) {
     if (!ELEMENT_TYPES.includes(type)) throw new Error(`Unsupported source fixture type: ${type}`);
   }
+  const source = await readSource(sourcePath, args.pageRange || entry?.pageRange || '', { spellAvailability: types.includes('spell') });
 
   const { context, elements } = loadApp(sourceMeta);
   runInApp(context, `detectSourceMetaFromText(${JSON.stringify(source.pages)});`);

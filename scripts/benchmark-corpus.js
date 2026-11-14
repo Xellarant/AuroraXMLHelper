@@ -242,7 +242,7 @@ function indexByKey(elements) {
 }
 
 function generateBenchmarkXml(context, text, types, sourceContext = {}) {
-  const { pages = [], continuationPages = [] } = Array.isArray(sourceContext)
+  const { pages = [], continuationPages = [], availabilityPages = [] } = Array.isArray(sourceContext)
     ? { pages: sourceContext }
     : sourceContext;
   const data = {};
@@ -250,7 +250,7 @@ function generateBenchmarkXml(context, text, types, sourceContext = {}) {
   data.other = [];
   for (const type of types) {
     const parserName = PARSERS[type];
-    const parsed = context[parserName](text, { pages, continuationPages });
+    const parsed = context[parserName](text, { pages, continuationPages, availabilityPages, fileName: sourceContext.fileName || '', kind: sourceContext.kind === 'pdf' ? 'pdf' : 'pasted' });
     data[type] = type === 'feat' ? parsed.map(feat => context.parseFeatFullText(feat)) : parsed;
   }
   if (pages.length) context.AuroraSourceReview.attachSourceReferences(data, { pages, continuationPages, kind: sourceContext.kind || 'pdf', fileName: sourceContext.fileName || '' });
@@ -318,7 +318,7 @@ function sourceContextForName(records, name) {
   };
 }
 
-async function extractPdfPages(sourcePath, ranges) {
+async function extractPdfPages(sourcePath, ranges, options = {}) {
   let pdfjsLib;
   const shouldSuppressPdfJsWarning = args => /Cannot polyfill `(DOMMatrix|Path2D)`/.test(String(args[0] || ''));
   const originalLog = console.log;
@@ -344,28 +344,33 @@ async function extractPdfPages(sourcePath, ranges) {
     disableWorker: true,
     standardFontDataUrl: path.join(repoRoot, 'node_modules', 'pdfjs-dist', 'standard_fonts') + path.sep
   }).promise;
-  const selectedPageNumbers = selectPageNumbers(pdf.numPages, ranges);
-  const pageByNumber = new Map();
-  for (const p of [...selectedPageNumbers, ...continuationPageNumbers(pdf.numPages, selectedPageNumbers)]) {
-    const page = await pdf.getPage(p);
-    const layout = await extractPageLayout(page);
-    pageByNumber.set(p, { page: p, text: layout.lines.join('\n'), layout });
-  }
-  return {
-    pages: selectedPageNumbers.map(page => pageByNumber.get(page)),
-    continuationPages: continuationPageNumbers(pdf.numPages, selectedPageNumbers).map(page => pageByNumber.get(page)),
-    totalPageCount: pdf.numPages
-  };
+  try {
+    const selectedPageNumbers = selectPageNumbers(pdf.numPages, ranges);
+    const pageByNumber = new Map();
+    const pagesToRead = options.spellAvailability ? Array.from({ length: pdf.numPages }, (_, index) => index + 1)
+      : [...selectedPageNumbers, ...continuationPageNumbers(pdf.numPages, selectedPageNumbers)];
+    for (const p of pagesToRead) {
+      const page = await pdf.getPage(p);
+      const layout = await extractPageLayout(page);
+      pageByNumber.set(p, { page: p, text: layout.lines.join('\n'), layout });
+    }
+    return {
+      pages: selectedPageNumbers.map(page => pageByNumber.get(page)),
+      continuationPages: continuationPageNumbers(pdf.numPages, selectedPageNumbers).map(page => pageByNumber.get(page)),
+      availabilityPages: options.spellAvailability ? pagesToRead.map(page => pageByNumber.get(page)) : [],
+      totalPageCount: pdf.numPages
+    };
+  } finally { await pdf.destroy(); }
 }
 
-async function readSource(sourcePath, pageRange = '') {
+async function readSource(sourcePath, pageRange = '', options = {}) {
   const ranges = parsePageRange(pageRange);
   const selectedPageRange = formatPageRange(ranges);
   if (/\.pdf$/i.test(sourcePath)) {
-    const { pages, continuationPages, totalPageCount } = await extractPdfPages(sourcePath, ranges);
+    const { pages, continuationPages, availabilityPages, totalPageCount } = await extractPdfPages(sourcePath, ranges, options);
     const text = pages.map(page => page.text).join('\n\n');
     if (!text.trim()) throw new Error(`No selectable text was found in PDF source: ${sourcePath}`);
-    return { kind: 'pdf', fileName: path.basename(sourcePath), pages, continuationPages, text, pageRange: selectedPageRange, totalPageCount };
+    return { kind: 'pdf', fileName: path.basename(sourcePath), pages, continuationPages, availabilityPages, text, pageRange: selectedPageRange, totalPageCount };
   }
   const text = fs.readFileSync(sourcePath, 'utf8');
   const pages = selectPageNumbers(1, ranges).map(page => ({ page, text }));
@@ -375,7 +380,7 @@ async function readSource(sourcePath, pageRange = '') {
 async function benchmark(args) {
   const sourcePath = path.resolve(args.source);
   if (!fs.existsSync(sourcePath)) throw new Error(`Source path does not exist: ${args.source}`);
-  const source = await readSource(sourcePath, args.pageRange);
+  const source = await readSource(sourcePath, args.pageRange, { spellAvailability: args.types.includes('spell') });
   const sourceText = source.text;
   const sourceBase = path.basename(sourcePath, path.extname(sourcePath));
   const sourceMeta = {
@@ -433,6 +438,7 @@ async function benchmark(args) {
     pageRange: source.pageRange,
     pageCount: source.pages.length,
     continuationPages: (source.continuationPages || []).map(page => page.page),
+    spellAvailabilityPages: context.AuroraSpellAvailability.contextPages(generated.data.spell),
     totalPageCount: source.totalPageCount,
     canonical: canonicalFiles,
     meta: generated.meta,

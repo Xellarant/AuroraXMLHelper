@@ -11,8 +11,15 @@
         "expected": { "spell": ["Abi-Dalzim's Horrid Wilting", "Absorb Elements", "Aganazzar's Scorcher", "Beast Bond", "Bones of the Earth", "Catapult", "Create Bonfire", "Control Flames", "Control Winds"] },
         "requireTextTypes": ["spell"], "maxWarnings": 0, "maxReview": 0,
         "requiredMetadata": { "spell": {
-          "Absorb Elements": { "castingTime": "1 reaction, which you take when you take acid, cold, fire, lightning, or thunder damage" },
-          "Create Bonfire": { "level": 0, "range": "60 feet", "duration": "Concentration, up to 1 minute" }
+          "Abi-Dalzim's Horrid Wilting": { "classes": ["Sorcerer", "Wizard"] },
+          "Absorb Elements": { "classes": ["Druid", "Ranger", "Wizard"], "castingTime": "1 reaction, which you take when you take acid, cold, fire, lightning, or thunder damage" },
+          "Aganazzar's Scorcher": { "classes": ["Sorcerer", "Wizard"] },
+          "Beast Bond": { "classes": ["Druid", "Ranger"] },
+          "Bones of the Earth": { "classes": ["Druid"] },
+          "Catapult": { "classes": ["Sorcerer", "Wizard"] },
+          "Create Bonfire": { "classes": ["Druid", "Sorcerer", "Warlock", "Wizard"], "level": 0, "range": "60 feet", "duration": "Concentration, up to 1 minute" },
+          "Control Flames": { "classes": ["Druid", "Sorcerer", "Wizard"] },
+          "Control Winds": { "classes": ["Druid", "Sorcerer", "Wizard"] }
         } },
         "requiredText": { "spell": {
           "Abi-Dalzim's Horrid Wilting": ["10d8 necrotic"],

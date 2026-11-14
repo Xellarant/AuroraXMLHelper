@@ -10,6 +10,15 @@
   "requireTextTypes": ["spell"],
   "maxWarnings": 0,
   "maxReview": 0,
+  "requiredMetadata": { "spell": {
+    "Ashardalon's Stride": { "classes": ["Artificer", "Ranger", "Sorcerer", "Wizard"] },
+    "Draconic Transformation": { "classes": ["Druid", "Sorcerer", "Wizard"] },
+    "Fizban's Platinum Shield": { "classes": ["Sorcerer", "Wizard"] },
+    "Nathair's Mischief": { "classes": ["Bard", "Sorcerer", "Wizard"] },
+    "Raulothim's Psychic Lance": { "classes": ["Bard", "Sorcerer", "Warlock", "Wizard"] },
+    "Rime's Binding Ice": { "classes": ["Sorcerer", "Wizard"] },
+    "Summon Draconic Spirit": { "classes": ["Druid", "Sorcerer", "Wizard"] }
+  } },
   "requiredText": {
     "spell": {
       "Ashardalon's Stride": ["speed increases by 20 feet", "1d6 fire damage", "each spell slot level above 3rd"],
