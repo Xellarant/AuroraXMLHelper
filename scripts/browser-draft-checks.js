@@ -154,6 +154,14 @@ async function checkPdfExport(browser, url, reportDirectory) {
       const catalogue = doc.addPage([600, 800]);
       ['Wizard Spells', '2nd Level', 'Clockwork Beacon (evocation)', 'Feat: Clockwork Initiate', 'You know the Clockwork Beacon spell.']
         .forEach((text, i) => catalogue.drawText(text, { x: 40, y: 740 - i * 22, size: 11, font }));
+      // Exercise whole-document context reading on a book-sized PDF while the
+      // selected definition remains small and its expected output is exact.
+      for (let page = 2; page < 250; page++) {
+        const appendix = doc.addPage([600, 800]);
+        for (let line = 0; line < 45; line++) appendix.drawText(
+          `Appendix note ${page}:${line}. Original synthetic text for checking a long document.`,
+          { x: 30, y: 760 - line * 16, size: 9, font });
+      }
       const sheet = doc.addPage([600, 800]);
       const lines = [
         'Clockwork Beacon', '2nd-level evocation', 'Casting Time: 1 action',
@@ -166,13 +174,16 @@ async function checkPdfExport(browser, url, reportDirectory) {
     });
     await page.locator('#pdfFile').setInputFiles({ name: 'Release Fixture.pdf', mimeType: 'application/pdf', buffer: Buffer.from(pdf) });
     for (const type of ['archetype', 'item', 'feat', 'magic', 'race', 'background', 'class']) await page.locator(`#chk-${type} input`).uncheck();
-    await page.locator('#pageRange').fill('2');
+    await page.locator('#pageRange').fill('250');
+    const extractionStarted = Date.now();
     await page.locator('#extractBtn').click();
     const name = page.locator('[data-id="spell-0"][data-field="name"]');
-    await name.waitFor({ state: 'attached' });
+    await name.waitFor({ state: 'attached', timeout: 90000 });
     assert.equal(await name.inputValue(), 'Clockwork Beacon');
-    assert.match(await page.locator('#reviewSourceScope').textContent(), /Release Fixture\.pdf.*Selected PDF pages: 2.*spell availability context: 1/);
-    assert.match(await page.locator('#body-spell-0 .source-reference').first().textContent(), /PDF page 2/);
+    assert.match(await page.locator('#reviewSourceScope').textContent(), /Release Fixture\.pdf.*Selected PDF pages: 250.*spell availability context: 1/);
+    assert.match(await page.locator('#body-spell-0 .source-reference').first().textContent(), /PDF page 250/);
+    const extractionMs = Date.now() - extractionStarted;
+    assert.equal(await page.locator('#cancelExtractBtn').isVisible(), false, 'The completed large PDF must release its busy state.');
     const classes = page.locator('[data-id="spell-0"][data-field="classes"]');
     assert.equal(await classes.inputValue(), 'Wizard');
     const conditional = page.locator('#reviewIssuesList li').filter({ hasText: 'Clockwork Initiate' });
@@ -188,12 +199,12 @@ async function checkPdfExport(browser, url, reportDirectory) {
     await unresolved.waitFor({ state: 'detached' });
     await page.waitForFunction(() => {
       const saved = JSON.parse(localStorage.getItem(window.AuroraDraftStorage.KEY) || 'null');
-      return saved?.state.data.spell?.[0]?.classes.includes('Wizard') && saved.state.data.spell[0]._source?.page === 2
+      return saved?.state.data.spell?.[0]?.classes.includes('Wizard') && saved.state.data.spell[0]._source?.page === 250
         && saved.state.data.spell[0].availability?.conditional[0]?._reviewed;
     });
     await page.reload();
     await name.waitFor({ state: 'attached' });
-    assert.match(await page.locator('#body-spell-0 .source-reference').first().textContent(), /PDF page 2/);
+    assert.match(await page.locator('#body-spell-0 .source-reference').first().textContent(), /PDF page 250/);
     assert.equal(await classes.inputValue(), 'Wizard');
     assert.deepEqual(await page.evaluate(() => window.AuroraXMLHelper.validateAll().map(issue => issue.msg)), [],
       'The completed PDF fixture must export cleanly without acknowledging an unexpected warning.');
@@ -230,7 +241,8 @@ async function checkPdfExport(browser, url, reportDirectory) {
     const reviewFile = Object.keys(reviewZip.files).find(file => file.endsWith('/unresolved-items.txt'));
     assert.ok(reviewFile, 'A ZIP exported for review must include its unresolved-items report.');
     assert.match(await reviewZip.file(reviewFile).async('string'), /no spell lists assigned/);
-    return 'Look up base and feat access outside the selected PDF pages, recover reviewed edits, export clean XML without broadening access, and include review reports when exporting acknowledged warnings';
+    return { pages: 250, bytes: pdf.length, extractionMs,
+      checks: 'Read whole-document context, find the selected spell on page 250, recover reviewed edits, export clean XML, and include reports for acknowledged warnings' };
   } catch (error) {
     if (reportDirectory && page) await page.screenshot({ path: path.join(reportDirectory, 'export-failure.png'), fullPage: true }).catch(() => {});
     throw error;

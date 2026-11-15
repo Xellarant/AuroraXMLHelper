@@ -23,7 +23,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
 
       - name: Install dependencies
@@ -36,26 +36,35 @@ jobs:
     # Keep the OS compatible with the pinned Playwright 1.57 browser build.
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - browser: chromium
+            install: --only-shell chromium
+          - browser: firefox
+            install: firefox
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
       - run: npm ci
       - name: Install browser and system dependencies
-        run: npx playwright install --with-deps --only-shell chromium
+        run: npx playwright install --with-deps ${{ matrix.install }}
       - name: Check browser workflows and draft recovery
         run: npm run smoke:browser
         env:
+          AURORA_BROWSER: ${{ matrix.browser }}
           SMOKE_REPORT_DIR: artifacts/browser-smoke
       - name: Keep browser results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: browser-smoke
+          name: browser-smoke-${{ matrix.browser }}
           path: artifacts/browser-smoke
           if-no-files-found: ignore
           retention-days: 7

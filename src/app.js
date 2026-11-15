@@ -575,6 +575,7 @@ function normalizeTextLine(line) {
   if (!value) return '';
   if (/^!\[[^\]]*\]\([^)]+\)/.test(value)) return '';
   value = value
+    .replace(/^Duratio\s+n(?=\s*:)/i, 'Duration')
     .replace(/^>+\s*/, '')
     .replace(/^#{1,6}\s+/, '')
     .replace(/^[-*]\s+/, '')
@@ -861,7 +862,7 @@ function parseSpellsFromText(text, options = {}) {
       school: tableEntry?.school || kind.school,
       level: tableEntry?.level ?? kind.level,
       castingTime: normalizeSpellCastingTime(fields['casting time'], lines[i + 1]),
-      range: fields.range,
+      range: fields.range.replace(/\bf\s+eet\b/gi, 'feet'),
       hasVerbal: components.hasVerbal,
       hasSomatic: components.hasSomatic,
       hasMaterial: components.hasMaterial,
@@ -882,6 +883,7 @@ function parseSpellsFromText(text, options = {}) {
 }
 
 function parseSpellKind(line) {
+  line = String(line || '').replace(/\bca\s+ntrip\b/gi, 'cantrip');
   const cantrip = line.match(/^([A-Za-z]+)\s+cantrip(?:\s*\((ritual)\))?$/i);
   if (cantrip && isSpellSchool(cantrip[1])) return { level: 0, school: titleCase(cantrip[1]) };
   const leveled = line.match(/^(\d+)(?:st|nd|rd|th)-level\s+([A-Za-z]+)(?:\s*\((ritual)\))?$/i);
@@ -909,7 +911,7 @@ function normalizeSpellCastingTime(value, kindLine = '') {
 
 function normalizeSpellDuration(value) {
   const text = String(value || '').trim();
-  if (/^instant(?:aneous)?$/i.test(text)) return 'Instantaneous';
+  if (/^instant(?:aneous)?$/i.test(text.replace(/\s+/g, ''))) return 'Instantaneous';
   return text;
 }
 
@@ -2338,6 +2340,7 @@ function loadRememberedOverrides() {
     if (!registry || typeof registry !== 'object' || Array.isArray(registry)) return {};
     return Object.fromEntries(Object.entries(registry).filter(([key, entry]) => !['__proto__', 'constructor', 'prototype'].includes(key)
       && entry && typeof entry === 'object' && ELEMENT_TYPES.includes(entry.type) && validCorrectionFields(entry.fields)
+      && (entry.version === undefined || entry.version === 2 && (window.AuroraDraftStorage || globalThis.AuroraDraftStorage).validElementRecord(entry.type, entry.baseline))
       && (window.AuroraDraftStorage || globalThis.AuroraDraftStorage).validElementRecord(entry.type, entry.item)));
   } catch {
     return {};
@@ -2388,19 +2391,12 @@ function applyRememberedOverrideAt(type, index) {
   const override = key ? rememberedOverrides[key] : null;
   if (!override?.item || override.type !== type || !extractedData[type]?.[index] || !validCorrectionFields(override.fields)) return false;
   if (!(window.AuroraDraftStorage || globalThis.AuroraDraftStorage).validElementRecord(type, override.item)) return false;
-  const current = extractedData[type][index];
-  const content = Array.isArray(override.fields)
-    ? { ...window.AuroraSourceReview.withoutReferences(current),
-      ...Object.fromEntries(override.fields.filter(field => !field.startsWith('_') && Object.hasOwn(override.item, field)).map(field => [field, override.item[field]])) }
-    : override.item;
-  const corrected = window.AuroraSourceReview.applyContentCorrection(current, content);
-  if (!Array.isArray(override.fields)) corrected._legacyRememberedCorrection = true;
-  else {
-    const collections = override.fields.filter(field => ['features', 'choices', 'traits', 'actions', 'reactions', 'subraces', 'benefits', 'progression'].includes(field));
-    if (collections.length) corrected._rememberedCollectionFields = collections;
-  }
-  if (!(window.AuroraDraftStorage || globalThis.AuroraDraftStorage).validElementRecord(type, corrected)) return false;
-  extractedData[type][index] = corrected;
+  if (override.version !== undefined && override.version !== 2) return false;
+  if (override.version === 2 && !(window.AuroraDraftStorage || globalThis.AuroraDraftStorage).validElementRecord(type, override.baseline)) return false;
+  const result = window.AuroraCorrections.apply(extractedData[type][index], override);
+  if (!(window.AuroraDraftStorage || globalThis.AuroraDraftStorage).validElementRecord(type, result.item)) return false;
+  if (result.issues.length) result.item._rememberedCorrectionIssues = result.issues;
+  extractedData[type][index] = result.item;
   return true;
 }
 
@@ -2796,7 +2792,8 @@ function cardBadgeText(type, item) {
 function overrideStatusText(type, index) {
   const edited = isEditedFromGenerated(type, index);
   const remembered = hasRememberedOverride(type, index);
-  if (remembered && edited) return 'Remembered correction will apply on future parses.';
+  if (extractedData[type]?.[index]?._rememberedCorrectionIssues?.length) return 'Some saved edits need review. Fresh source content was kept where an edit could not be matched safely.';
+  if (remembered && edited) return 'Remembered edits will be matched individually on future parses.';
   if (remembered) return 'Remembered correction exists for this generated element.';
   if (edited) return 'Edited for this export only. Click Remember Correction to reuse it later.';
   return 'Matches generated parser output. Edits are one-off until remembered.';
@@ -2806,6 +2803,9 @@ function buildOverrideControls(type, index) {
   const id = `${type}-${index}`;
   const edited = isEditedFromGenerated(type, index);
   const remembered = hasRememberedOverride(type, index);
+  const record = rememberedOverrides[overrideKeyForIndex(type, index)];
+  const pending = extractedData[type]?.[index]?._rememberedCorrectionIssues?.length;
+  const saved = pending && record ? (record.fields || Object.keys(record.item)).map(field => '<h4>' + escHtml(field.replace(/([a-z])([A-Z])/g, '$1 $2')) + '</h4><pre>' + escHtml(window.AuroraCorrections.describe(record.item[field])) + '</pre>').join('') : '';
   return `
     <div class="override-controls" id="override-controls-${id}">
       <span class="override-status" id="override-status-${id}">${escHtml(overrideStatusText(type, index))}</span>
@@ -2814,7 +2814,9 @@ function buildOverrideControls(type, index) {
         <button class="btn btn-secondary" id="forget-${id}" style="font-size:0.68rem; padding:0.25rem 0.65rem;" onclick="forgetOverride('${id}', event)" ${remembered ? '' : 'disabled'}>Forget</button>
         <button class="btn btn-secondary" id="revert-${id}" style="font-size:0.68rem; padding:0.25rem 0.65rem;" onclick="revertToGenerated('${id}', event)" ${edited ? '' : 'disabled'}>Revert to Generated</button>
       </span>
-    </div>`;
+    </div>
+    <details id="saved-correction-${id}" class="source-reference ${pending ? '' : 'hidden'}"><summary>Review saved correction</summary>
+      <p>These are the previously saved values. Compare them with the fresh fields below and reapply only the edits you still want, then choose Remember Correction. Forget removes the saved correction.</p>${saved}</details>`;
 }
 
 
@@ -3437,6 +3439,7 @@ function updateOverrideStatusForId(id) {
   if (rememberBtn) rememberBtn.disabled = !edited;
   if (forgetBtn) forgetBtn.disabled = !remembered;
   if (revertBtn) revertBtn.disabled = !edited;
+  document.getElementById(`saved-correction-${id}`)?.classList.toggle('hidden', !extractedData[type]?.[index]?._rememberedCorrectionIssues?.length);
 }
 
 function rememberOverride(id, event) {
@@ -3451,22 +3454,22 @@ function rememberOverride(id, event) {
   }
   const meta = getSourceMeta();
   const previous = rememberedOverrides[key];
-  const fields = Object.keys(current).filter(field => !field.startsWith('_') && !sameGeneratedShape(current[field], baseline[field]));
   rememberedOverrides[key] = {
+    ...window.AuroraCorrections.capture(baseline, current),
     type,
     sourceName: meta.name,
     sourceAbbr: meta.abbr,
     originalName: baseline.name || '',
-    savedAt: new Date().toISOString(),
-    fields,
-    item: window.AuroraSourceReview.withoutReferences(current)
+    savedAt: new Date().toISOString()
   };
   if (!saveRememberedOverrides()) {
     if (previous) rememberedOverrides[key] = previous; else delete rememberedOverrides[key];
     updateOverrideStatusForId(id);
     return false;
   }
+  delete current._rememberedCorrectionIssues;
   updateOverrideStatusForId(id);
+  refreshReviewIssues();
   setManualAuthorStatus(`Remembered correction for ${current.name || baseline.name || TYPE_LABELS[type] || type}.`, 'success');
 }
 
@@ -3479,7 +3482,9 @@ function forgetOverride(id, event) {
     delete rememberedOverrides[key];
     if (!saveRememberedOverrides()) { rememberedOverrides[key] = previous; updateOverrideStatusForId(id); return false; }
   }
+  if (extractedData[type]?.[index]) delete extractedData[type][index]._rememberedCorrectionIssues;
   updateOverrideStatusForId(id);
+  refreshReviewIssues();
   setManualAuthorStatus('Forgot saved correction. Current edits remain one-off for this export.', 'info');
 }
 
@@ -5363,6 +5368,7 @@ function validateAll(options = {}) {
       }
       for (const field of (Array.isArray(item._rememberedCollectionFields) ? item._rememberedCollectionFields : [])) issues.push({ type, i, field, category: 'source-review',
         msg: name + ': a remembered correction replaced the ' + field + ' collection. Compare every entry with the fresh source; new or improved content may have been replaced. Use Revert to Generated and reapply the intended edits if needed.' });
+      for (const finding of (Array.isArray(item._rememberedCorrectionIssues) ? item._rememberedCorrectionIssues : [])) issues.push({ type, i, field: 'name', category: 'source-review', msg: name + ': ' + finding.message });
       if (item._legacyRememberedCorrection) issues.push({ type, i, field: 'name', category: 'source-review',
         msg: name + ': an older remembered correction replaced the full entry. Check the source, use Revert to Generated, reapply the intended edits, then Remember Correction to reuse only those edits.' });
 

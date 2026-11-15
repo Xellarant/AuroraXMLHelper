@@ -3,6 +3,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+const { supportsNode } = require('./node-compat');
 
 const repoRoot = path.resolve(__dirname, '..');
 const vitestCli = path.join(repoRoot, 'node_modules', 'vitest', 'vitest.mjs');
@@ -41,14 +42,14 @@ function selectNode() {
     .map(nodeVersion)
     .filter(Boolean)
     .sort((a, b) => b.major - a.major);
-  return versions.find(version => version.major >= 20) || versions[0] || null;
+  return versions.find(version => supportsNode(version.version)) || versions[0] || null;
 }
 
 const selected = selectNode();
-if (!selected || selected.major < 20) {
+if (!selected || !supportsNode(selected.version)) {
   const current = selected ? `${selected.version} at ${selected.command}` : 'none found';
-  console.error(`Vitest 4 requires Node 20 or newer; available Node is ${current}.`);
-  console.error('Install Node 20+ or set AURORA_NODE to a compatible node.exe path.');
+  console.error(`Vitest 4 requires Node 20.19+ or 22.12+; available Node is ${current}.`);
+  console.error('Install Node 24 LTS or set AURORA_NODE to a compatible node.exe path.');
   process.exit(1);
 }
 

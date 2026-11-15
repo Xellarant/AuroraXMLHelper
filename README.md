@@ -90,11 +90,13 @@ applied automatically the next time the same generated element appears. Use
 **Forget** to stop reusing a remembered correction without reverting the current
 edit. Remembered corrections reuse content while preserving the newly parsed
 source references, so a previous page number or manual source check is not
-carried into a different extraction. New corrections reuse only changed fields.
-Corrections to nested features, choices, or benefits replace that whole collection
-and raise a review warning; compare the fresh source before using them. Older
-whole-entry corrections also raise a warning. Use **Revert to Generated** to recover
-the new parser output before reapplying intended edits.
+carried into a different extraction. New corrections match individual features and options by name, and progression
+rows by level, while keeping fresh unedited prose, new siblings, and source references.
+Ambiguous matches, changed text lists, and older whole-entry corrections are held
+for review instead of replacing fresh content. Expand **Review saved correction**
+to compare saved values, reapply only the intended edits, and choose **Remember
+Correction** again. **Forget** discards the saved correction; **Revert to Generated**
+restores this parse's original result.
 
 Removed entries and nested features, traits, benefits, choices, and options offer
 **Undo removal** for the last removal in the open workspace.
@@ -258,7 +260,32 @@ optional local/external ID references.
 
 ---
 
+## Release and compatibility
+
+The current development version is **1.0.0-rc.1**. See the
+[release notes](CHANGELOG.md) and [release acceptance checklist](docs/release-checks/2026-11-15/README.md).
+The stable 1.0 scope is an assisted PDF-to-Aurora authoring workflow: review the
+source references and unresolved items before exporting. Readable text/OCR is
+required; the app does not perform OCR. Custom resources, activated or situational
+mechanics, companions, and unfamiliar choices can require manual implementation.
+
+Browser automation covers Chromium and Firefox on the release workflows. Desktop
+acceptance targets the installed Aurora 1.0.3 (assembly 1.0.166.7407); other builds
+need their own acceptance check. Draft format version 1 remains supported. Export
+a draft backup before an app update; remembered corrections remain browser-local
+and are reviewed conservatively when their older format lacks edit history.
+
+Report problems through this repository's GitHub Issues with the app version,
+browser version, the action that failed, and a minimal synthetic example when
+possible. Review draft backups before sharing them: they contain workspace text
+and source excerpts.
+
 ## Development
+
+Use Node.js **24 LTS** for development (the toolchain also accepts Node 20.19+
+or 22.12+). Install locked dependencies with `npm ci` and check them with
+`npm audit`. Both browser engines run in GitHub Actions; local interactive checks
+can use the in-app browser.
 
 The browser app is static, but PDF.js is loaded as a local module, so run it
 through the tiny local server instead of opening `index.html` directly:

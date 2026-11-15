@@ -1,6 +1,6 @@
 {
   "name": "aurora-xml-helper",
-  "version": "0.1.0",
+  "version": "1.0.0-rc.1",
   "private": true,
   "description": "Deterministic D&D PDF to Aurora Builder XML helper.",
   "scripts": {
@@ -26,6 +26,9 @@
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^4.10.38",
     "playwright": "1.57.0",
-    "vitest": "^4.1.8"
+    "vitest": "^4.1.12"
+  },
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
   }
 }
