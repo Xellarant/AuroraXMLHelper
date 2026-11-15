@@ -82,6 +82,8 @@ async function checkDraftRecovery(browser, url, reportDirectory) {
     const backup = fs.readFileSync(await download.path());
     assert.equal(JSON.parse(backup).state.data.feat[0].name, 'Recovered Feat');
     await acceptWorkspaceConfirmation(page, () => page.locator('#draftClear').click());
+    // Closing the dialog precedes its async consumer; wait for the clear itself.
+    await page.waitForFunction(() => localStorage.getItem(window.AuroraDraftStorage.KEY) === null);
     assert.equal(await page.evaluate(() => localStorage.getItem(window.AuroraDraftStorage.KEY)), null);
     await page.reload({ waitUntil: 'domcontentloaded' });
     assert.equal(await page.locator('#sourceName').inputValue(), '');
@@ -125,6 +127,8 @@ async function checkDraftRecovery(browser, url, reportDirectory) {
     await page.locator('details.manual-paste summary').click();
     await page.locator('#manualSourceText').fill('Discard this pasted section when starting over');
     await acceptWorkspaceConfirmation(page, () => page.getByRole('button', { name: 'Start Over', exact: true }).click());
+    await page.waitForFunction(() => document.querySelector('#manualSourceText').value === ''
+      && document.querySelector('#sourceName').value === '');
     await page.reload({ waitUntil: 'domcontentloaded' });
     assert.equal(await page.locator('#manualSourceText').inputValue(), '');
     assert.equal(await page.locator('#sourceName').inputValue(), '');
