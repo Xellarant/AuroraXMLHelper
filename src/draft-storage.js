@@ -29,6 +29,20 @@
     return Object.assign(new Error(message), { code });
   }
 
+  function classProgression(value) {
+    if (value.progression != null && (!Array.isArray(value.progression) || !value.progression.every(row => object(row)
+      && typeof row.level === 'number' && Array.isArray(row.features) && row.features.every(name => typeof name === 'string')
+      && (row.slots == null || Array.isArray(row.slots))
+      && (row._errors == null || Array.isArray(row._errors) && row._errors.every(error => typeof error === 'string'))))) return false;
+    if (value.choices == null) return true; // Older drafts acquire choices when opened.
+    return Array.isArray(value.choices) && value.choices.every(choice => object(choice)
+      && ['name', 'feature', 'mode'].every(field => typeof choice[field] === 'string')
+      && (choice.schedule == null || Array.isArray(choice.schedule) && choice.schedule.every(event => object(event)
+        && typeof event.level === 'number' && typeof event.count === 'number'))
+      && Array.isArray(choice.options) && choice.options.every(option => object(option)
+        && typeof option.name === 'string' && typeof option.description === 'string'));
+  }
+
   function validateState(state) {
     const review = state?.reviewContext;
     if (review != null && (!object(review) || review.kind !== 'pdf' || typeof review.fileName !== 'string'
@@ -51,6 +65,9 @@
     }
     if (![...(state.data.spell || []), ...(state.baseline.spell || [])].every(spell => availability(spell.availability))) {
       throw failure('invalid', 'This draft has invalid spell availability details.');
+    }
+    if (![...(state.data.class || []), ...(state.baseline.class || [])].every(classProgression)) {
+      throw failure('invalid', 'This draft has invalid class progression or choice details.');
     }
     return state;
   }

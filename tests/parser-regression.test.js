@@ -135,8 +135,8 @@ test('2024 Artificer class XML mirrors canonical table-derived shape', () => {
   assert.ok(xml.includes('<multiclass id="ID_VSS_MULTICLASS_ARTIFICER">'));
   assert.ok(xml.includes('<stat name="artificer:spellcasting:slots:2" value="2" level="5" />'));
   assert.ok(xml.includes('<stat name="replicate:plans:known" value="4" level="2" />'));
-  assert.ok(xml.includes('<select type="Feat" name="Feat (Artificer)" />'));
-  assert.ok(xml.includes('<select type="Feat" name="Epic Boon (Artificer)" supports="Epic Boon" />'));
+  assert.ok(xml.includes('<select type="Feat" name="Ability Score Improvement (Artificer, level 4)" level="4" />'));
+  assert.ok(xml.includes('<select type="Feat" name="Epic Boon (Artificer, level 19)" level="19" />'));
 });
 
 test('browser namespace exposes parser and generator API', () => {

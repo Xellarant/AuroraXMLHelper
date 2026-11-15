@@ -509,6 +509,7 @@ async function run() {
         draftStorageLoaded: document.documentElement.dataset.draftStorageLoaded,
         sourceReviewLoaded: document.documentElement.dataset.sourceReviewLoaded,
         spellAvailabilityLoaded: document.documentElement.dataset.spellAvailabilityLoaded,
+        classProgressionLoaded: document.documentElement.dataset.classProgressionLoaded,
         draftRecoveryLoaded: document.documentElement.dataset.draftRecoveryLoaded,
         hasPdfInput: Boolean(document.querySelector('input[type=file]')),
         hasPageRange: Boolean(document.querySelector('#pageRange')),
@@ -544,6 +545,7 @@ async function run() {
       'draftStorageLoaded',
       'sourceReviewLoaded',
       'spellAvailabilityLoaded',
+      'classProgressionLoaded',
       'draftRecoveryLoaded'
     ];
     const missing = expectedFlags.filter(flag => result[flag] !== 'true');

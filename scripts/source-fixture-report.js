@@ -147,7 +147,7 @@ async function buildSourceReport(rawArgs) {
   for (const type of types) {
     if (!ELEMENT_TYPES.includes(type)) throw new Error(`Unsupported source fixture type: ${type}`);
   }
-  const source = await readSource(sourcePath, args.pageRange || entry?.pageRange || '', { spellAvailability: types.includes('spell') });
+  const source = await readSource(sourcePath, args.pageRange || entry?.pageRange || '', { spellAvailability: types.includes('spell'), classChoices: types.includes('class') });
 
   const { context, elements } = loadApp(sourceMeta);
   runInApp(context, `detectSourceMetaFromText(${JSON.stringify(source.pages)});`);

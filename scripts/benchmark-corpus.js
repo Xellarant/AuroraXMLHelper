@@ -89,6 +89,7 @@ function parseArgs(argv) {
 
 function loadApp(sourceMeta) {
   return loadAppHarness(sourceMeta, {
+    referenceIndex: true,
     defaults: {
       name: 'Benchmark Source',
       abbr: 'BENCH',
@@ -347,7 +348,7 @@ async function extractPdfPages(sourcePath, ranges, options = {}) {
   try {
     const selectedPageNumbers = selectPageNumbers(pdf.numPages, ranges);
     const pageByNumber = new Map();
-    const pagesToRead = options.spellAvailability ? Array.from({ length: pdf.numPages }, (_, index) => index + 1)
+    const pagesToRead = options.spellAvailability || options.classChoices ? Array.from({ length: pdf.numPages }, (_, index) => index + 1)
       : [...selectedPageNumbers, ...continuationPageNumbers(pdf.numPages, selectedPageNumbers)];
     for (const p of pagesToRead) {
       const page = await pdf.getPage(p);
@@ -357,7 +358,7 @@ async function extractPdfPages(sourcePath, ranges, options = {}) {
     return {
       pages: selectedPageNumbers.map(page => pageByNumber.get(page)),
       continuationPages: continuationPageNumbers(pdf.numPages, selectedPageNumbers).map(page => pageByNumber.get(page)),
-      availabilityPages: options.spellAvailability ? pagesToRead.map(page => pageByNumber.get(page)) : [],
+      availabilityPages: options.spellAvailability || options.classChoices ? pagesToRead.map(page => pageByNumber.get(page)) : [],
       totalPageCount: pdf.numPages
     };
   } finally { await pdf.destroy(); }
@@ -380,7 +381,7 @@ async function readSource(sourcePath, pageRange = '', options = {}) {
 async function benchmark(args) {
   const sourcePath = path.resolve(args.source);
   if (!fs.existsSync(sourcePath)) throw new Error(`Source path does not exist: ${args.source}`);
-  const source = await readSource(sourcePath, args.pageRange, { spellAvailability: args.types.includes('spell') });
+  const source = await readSource(sourcePath, args.pageRange, { spellAvailability: args.types.includes('spell'), classChoices: args.types.includes('class') });
   const sourceText = source.text;
   const sourceBase = path.basename(sourcePath, path.extname(sourcePath));
   const sourceMeta = {

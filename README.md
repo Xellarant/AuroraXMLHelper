@@ -32,7 +32,7 @@ No API key is required for the deterministic parser.
 | Magic Items | Rarity lines, attunement, charges, recharge, and descriptions |
 | Races | Core race fields, traits, language grants, and language choices |
 | Backgrounds | Skill/tool/language/equipment fields and background features |
-| Classes | Class traits, hit die, proficiencies, class features, spellcasting metadata, and subclass selection |
+| Classes | Class traits, progression, spell and cantrip gains, repeated improvements, subclass selection, and source option pickers |
 
 The generic "Other" parser is disabled for now. Each supported type has its own
 deterministic parser and Aurora XML generator.
@@ -153,12 +153,56 @@ review; remembered level corrections retain the new source reference.
 Base classes become Aurora spell supports. Conditional access is included as
 reference text in the spell description and requires the owning feature's grant,
 spellcasting extension, or choice rules. A review acknowledgement does not create
-those rules or grant a spell to a whole class. Class progression and choices are
-the next separate milestone.
+those rules or grant a spell to a whole class. Class choices can now generate
+owning option elements and a limited set of source-supported spell grants.
 
 Availability is established from the current source, rather than a universal
 database across books or editions. Unrecognized layouts, missing lists, conflicting
 metadata, and unclear conditions still need review.
+
+### Class progression and choices
+
+Expand **Class progression** to review or repair the level table. The editor
+accepts pipe-separated tables with Level and Features headers. It preserves
+unreadable values for review, flags missing or duplicate levels and decreasing
+counts, and retains unfamiliar columns without claiming to automate them.
+Click **Apply progression table** after editing; unapplied text stays in your
+draft and appears in unresolved items.
+
+A named feature is granted once at its first level. Repeated ability score
+improvements and other choices have their own schedules. Spell slots, known
+spells, prepared counts, cantrips, hexes, and Artificer plan counts use positive
+progression differences. Cantrip pickers retain both the acquisition level and
+the number gained. Proficiency bonus is left to Aurora's class system.
+
+**Class choices** shows the parent feature, choice type, level:count schedule,
+options, prerequisites, and source references. Supported source patterns include
+fighting styles, favored enemies and languages, inline curse options, hex and
+grand hex catalogues, and Artificer plan tables. Option catalogues can be read
+outside the selected pages; those additional pages are disclosed in the editor.
+They do not add other base features or subclasses to the selection.
+
+Use **Add choice**, **Add option**, or **Import or repair options from source
+text** for missed sections. Unknown prerequisites, incomplete catalogues, empty
+pickers, and insufficient eligible options stay unresolved. Ambiguous options
+are withheld. Choices are scoped to their class and source. Optional 2014 feats
+retain Aurora's optional-feats requirement; source-defined 2024 feat choices
+retain their actual levels.
+
+Option descriptions stay on the character sheet. Exact supported rules such as
+Archery, Defense, resolved cantrip grants, Find Familiar, and conditional bonus
+spell choices are generated where recognized. Situational effects, special
+companion statistics, cross-class fighting-style duplication, and unfamiliar
+resources still need review. Subclass and spell definitions must be installed
+with compatible supports in Aurora. Learning an Artificer plan does not create
+or equip an item. Known-spell replacement uses Aurora's spellcasting replacement
+support; hex and plan replacement instructions remain explicit, with no extra
+selections granted.
+
+Progression repairs, option edits, prerequisites, and schedules survive draft
+recovery. Remembered corrections retain the new extraction's option references.
+The [accuracy report](docs/accuracy-checks/2026-11-14/class-progression.md)
+records the existing-PDF checks and remaining source limitations.
 
 ### Draft recovery
 

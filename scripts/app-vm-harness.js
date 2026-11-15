@@ -120,6 +120,7 @@ function loadApp(sourceMeta = {}, options = {}) {
   for (const scriptPath of [
     path.join(repoRoot, 'src', 'aurora-xml-shape.js'),
     path.join(repoRoot, 'src', 'aurora-xml-patterns.js'),
+    ...(options.referenceIndex ? [path.join(repoRoot, 'src', 'aurora-reference-index.js')] : []),
     path.join(repoRoot, 'src', 'aurora-xml-repair.js'),
     path.join(repoRoot, 'src', 'aurora-authoring-templates.js'),
     path.join(repoRoot, 'src', 'pdf-text-layout.js'),
@@ -127,6 +128,7 @@ function loadApp(sourceMeta = {}, options = {}) {
     path.join(repoRoot, 'src', 'draft-storage.js'),
     path.join(repoRoot, 'src', 'source-review.js'),
     path.join(repoRoot, 'src', 'spell-availability.js'),
+    path.join(repoRoot, 'src', 'class-progression.js'),
     path.join(repoRoot, 'src', 'app.js')
   ]) {
     vm.runInContext(fs.readFileSync(scriptPath, 'utf8'), context, {

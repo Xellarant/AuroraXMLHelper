@@ -1491,7 +1491,7 @@ function parseClassesFromText(text, options = {}) {
     if (parsed.hitDie || parsed.features.length) classes.push(parsed);
     i = Math.max(i, end - 1);
   }
-  return uniqueByName(classes);
+  return uniqueByName(classes).map(cls => window.AuroraClassProgression.build(cls, text, options));
 }
 
 function legacyClassName(lines, index) {
@@ -1744,14 +1744,16 @@ function parseCoreClassTraitRows(lines) {
 function classTableHeaderKey(value) {
   const clean = cleanExtractedTitle(value).toLowerCase();
   if (/^level$/.test(clean)) return 'level';
-  if (/^features?$/.test(clean)) return 'features';
+  if (/^(?:class )?features?$/.test(clean)) return 'features';
+  if (/^(?:proficiency bonus|pb)$/.test(clean)) return 'proficiencyBonus';
   if (/^plans/.test(clean)) return 'plansKnown';
   if (/^magic items?$/.test(clean)) return 'magicItems';
   if (/^cantrips?(?: known)?$/.test(clean)) return 'cantrips';
   if (/^spells? known$/.test(clean)) return 'spellsKnown';
   if (/^hexes known$/.test(clean)) return 'hexesKnown';
+  if (/^(?:eldritch )?invocations known$/.test(clean)) return 'invocationsKnown';
   if (/^prepared/.test(clean)) return 'prepared';
-  const slot = clean.match(/^([1-9])(?:st|nd|rd|th)$/);
+  const slot = clean.match(/^([1-9])(?:st|nd|rd|th)?$/);
   if (slot) return `slots${slot[1]}`;
   return '';
 }
@@ -1766,7 +1768,7 @@ function parseClassProgressionRows(lines) {
     if (isMarkdownTableSeparator(markdownTableCells(lines[j] || ''))) j++;
     for (; j < lines.length; j++) {
       const cells = markdownTableCells(lines[j]);
-      if (cells.length < headerCells.length || isMarkdownTableSeparator(cells)) break;
+      if (!cells.length || isMarkdownTableSeparator(cells)) break;
       const row = {
         level: 0,
         features: [],
@@ -1778,26 +1780,37 @@ function parseClassProgressionRows(lines) {
         hexesKnown: null,
         slots: []
       };
+      if (cells.length !== headerCells.length) row._errors = ['The number of table cells does not match the header. Restore the missing cells.'];
       keys.forEach((key, index) => {
         const value = cells[index] || '';
-        if (!key) return;
-        if (key === 'level') row.level = parseOptionalTableNumber(value) || 0;
+        if (!key) {
+          if (headerCells[index]) (row.extraColumns ||= {})[headerCells[index]] = value;
+          return;
+        }
+        if (key === 'level') row.level = /^\d+(?:st|nd|rd|th)?$/i.test(value.trim()) ? parseInt(value, 10) : 0;
         else if (key === 'features') {
           row.features = splitListValue(value)
             .map(feature => normalizeExtractedName(feature))
             .filter(feature => feature && /[A-Za-z0-9]/.test(feature));
         } else if (/^slots/.test(key)) {
           const slotLevel = parseInt(key.replace('slots', ''), 10);
-          row.slots[slotLevel] = parseOptionalTableNumber(value);
+          row.slots[slotLevel] = classProgressionNumber(value, row, key);
         } else {
-          row[key] = parseOptionalTableNumber(value);
+          row[key] = classProgressionNumber(value, row, key);
         }
       });
-      if (row.level) rows.push(row);
+      rows.push(row);
     }
     i = Math.max(i, j - 1);
   }
   return rows;
+}
+
+function classProgressionNumber(value, row, key) {
+  if (/^[—–-]$/.test(value.trim())) return 0;
+  if (/^\+?\d+$/.test(value.trim())) return Number(value);
+  (row._errors ||= []).push(key + ' is unreadable (' + (value || 'empty') + '). Enter the number shown in the source.');
+  return null;
 }
 
 function applyCoreClassTraits(cls, traits) {
@@ -3154,6 +3167,9 @@ function focusReviewField(type, index, field = '') {
   let target = field && /^[a-zA-Z0-9_.]+$/.test(field) ? body?.querySelector(`[data-field="${field}"]`) : null;
   if (!target && field && /^[a-zA-Z]+$/.test(field)) target = document.getElementById(`${field}-${type}-${index}`)?.previousElementSibling?.querySelector('button');
   target ||= body?.querySelector('input, textarea, select');
+  for (let ancestor = target?.parentElement; ancestor && ancestor !== body; ancestor = ancestor.parentElement) {
+    if (ancestor.tagName === 'DETAILS') ancestor.open = true;
+  }
   (target || card)?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
   target?.focus?.({ preventScroll: true });
 }
@@ -3537,7 +3553,150 @@ function buildClassFields(cls, id) {
       <span class="section-label" style="margin:0; border:none; padding:0;">Features</span>
       <button class="btn btn-secondary" style="font-size:0.7rem; padding:0.3rem 0.75rem;" onclick="addFeature('${id}')">+ Add Feature</button>
     </div>
-    <div id="features-${id}">${(cls.features||[]).map((f,fi) => buildFeatureBlock(id, f, fi)).join('')}</div>`;
+    <div id="features-${id}">${(cls.features||[]).map((f,fi) => buildFeatureBlock(id, f, fi)).join('')}</div>
+    ${buildClassProgressionFields(cls, id)}`;
+}
+
+function classProgressionText(cls) {
+  const columns = [['level', 'Level'], ['proficiencyBonus', 'Proficiency Bonus'], ['features', 'Features'], ['cantrips', 'Cantrips'], ['spellsKnown', 'Spells Known'],
+    ['prepared', 'Prepared Spells'], ['hexesKnown', 'Hexes Known'], ['invocationsKnown', 'Invocations Known'],
+    ['plansKnown', 'Plans Known'], ['magicItems', 'Magic Items'], ...Array.from({ length: 9 }, (_, i) => ['slots.' + (i + 1), (i + 1) + ordinal(i + 1)])];
+  const value = (row, field) => field.startsWith('slots.') ? row.slots?.[Number(field.split('.')[1])] : row[field];
+  const included = columns.filter(([field]) => ['level', 'features'].includes(field)
+    || (cls.progression || []).some(row => value(row, field) != null));
+  for (const label of uniqueStrings((cls.progression || []).flatMap(row => Object.keys(row.extraColumns || {})))) included.push(['extra.' + label, label]);
+  if (!cls.progression?.length) included.push(['cantrips', 'Cantrips'], ['prepared', 'Prepared Spells'], ['slots.1', '1st']);
+  return ['| ' + included.map(([, label]) => label).join(' | ') + ' |',
+    '| ' + included.map(() => '---').join(' | ') + ' |',
+    ...(cls.progression || []).map(row => '| ' + included.map(([field]) => field === 'features' ? (row.features || []).join(', ') : field.startsWith('extra.') ? row.extraColumns?.[field.slice(6)] ?? '?' : value(row, field) ?? '?').join(' | ') + ' |')].join('\n');
+}
+
+function buildClassProgressionFields(cls, id) {
+  const choices = cls.choices ||= effectiveClassChoices(cls);
+  const pages = [...new Set(choices.flatMap(choice => (choice.options || []).filter(option => option._source?.continuation).map(option => option._source.page)))].sort((a, b) => a - b);
+  let html = '<details class="class-progression"><summary>Class progression (' + (cls.progression || []).length + ' levels)</summary>'
+    + (cls._progressionCorrected ? '<p>This table uses your applied corrections. Check the edited values against your source.</p>' : '')
+    + '<p>Check the table against your source. Each row starts with a class level. Separate cells with | and feature names with commas. Use — for zero and ? for an unreadable value.</p>'
+    + '<label>Progression table</label><textarea aria-label="Progression table" rows="12" spellcheck="false" data-id="' + id + '" data-field="progressionDraft" oninput="updateField(this)">'
+    + escHtml(cls.progressionDraft ?? classProgressionText(cls)) + '</textarea>'
+    + '<button type="button" class="btn btn-secondary" onclick="applyClassProgression(\'' + id + '\')">Apply progression table</button>'
+    + '<p role="status" id="progression-status-' + id + '"></p></details>';
+  html += '<details class="class-choices" data-field="choices" tabindex="-1"><summary>Class choices (' + choices.length + ')</summary>'
+    + (pages.length ? '<p>Option catalogues also read from PDF pages ' + window.AuroraSourceReview.pageLabel(pages) + '. Base features still use the selected pages.</p>' : '')
+    + '<p>Schedules use level:count pairs, such as 1:2, 5:1. These grant new selections; replacement rules stay in the source instructions.</p>';
+  choices.forEach((choice, ci) => {
+    const field = 'choices.' + ci + '.';
+    const input = (name, label, value, handler = 'updateNestedField') => '<div><label>' + label + '</label><input type="text" aria-label="' + label + '" data-id="' + id + '" data-field="' + field + name
+      + '" value="' + escAttr(value ?? '') + '" oninput="' + handler + '(this)" /></div>';
+    html += '<details><summary>' + escHtml(choice.name) + ' · ' + (choice.mode === 'options' ? (choice.options || []).length + ' options' : window.AuroraClassProgression.events(cls, choice).length + ' choice levels') + '</summary>' + buildSourceReference(choice)
+      + input('name', 'Choice name', choice.name) + input('feature', 'Parent feature', choice.feature)
+      + '<label>Choice type</label><select aria-label="Choice type" data-id="' + id + '" data-field="' + field + 'mode" onchange="updateClassChoiceMode(this)">'
+      + [['options', 'Source options'], ['asi', 'Ability score increases'], ['asiOrFeat', 'Ability score increases or optional feat'], ['feat', 'Feat'], ['language', 'Language'], ['unresolved', 'Needs review']]
+        .map(([value, label]) => '<option value="' + value + '"' + (choice.mode === value ? ' selected' : '') + '>' + label + '</option>').join('') + '</select>'
+      + input('scheduleText', 'New choices by class level', choice.scheduleText ?? window.AuroraClassProgression.events(cls, choice).map(event => event.level + ':' + event.count).join(', '), 'updateClassChoiceSchedule')
+      + '<button type="button" class="btn btn-secondary" onclick="resetClassChoiceSchedule(\'' + id + '\',' + ci + ')">Use source schedule</button>';
+    if (choice.replacement) html += '<p>' + escHtml(choice.replacement) + '</p>';
+    html += '<div data-field="' + field + 'options">';
+    (choice.mode === 'options' ? choice.options || [] : []).forEach((option, oi) => {
+      const nested = field + 'options.' + oi + '.';
+      html += '<details><summary>' + escHtml(option.name || 'New option') + '</summary>' + buildSourceReference(option)
+        + '<label>Option name</label><input type="text" data-id="' + id + '" data-field="' + nested + 'name" value="' + escAttr(option.name) + '" oninput="updateNestedField(this)" />'
+        + '<label>Description and situational rules</label><textarea rows="4" data-id="' + id + '" data-field="' + nested + 'description" oninput="updateNestedField(this)">' + escHtml(option.description || '') + '</textarea>'
+        + '<label>Minimum class level (blank for none)</label><input type="number" min="1" max="20" data-id="' + id + '" data-field="' + nested + 'minimumLevel" value="' + escAttr(option.minimumLevel || '') + '" oninput="updateNestedField(this)" />'
+        + '<label>Required class feature (blank for none)</label><input type="text" data-id="' + id + '" data-field="' + nested + 'requiredFeature" value="' + escAttr(option.requiredFeature || '') + '" oninput="updateNestedField(this)" />'
+        + '<label>Unresolved prerequisite (withholds this option until resolved)</label><input type="text" data-id="' + id + '" data-field="' + nested + 'unresolvedPrerequisite" value="' + escAttr(option.unresolvedPrerequisite || '') + '" oninput="updateNestedField(this)" />'
+        + '<button type="button" class="btn btn-secondary" onclick="removeClassChoice(\'' + id + '\',' + ci + ',' + oi + ')">Remove option</button></details>';
+    });
+    html += '</div>';
+    if (choice.mode === 'options') html += '<details><summary>Import or repair options from source text</summary><p>Paste the option section, including its heading. Artificer plan tables need their level headings and an Attunement column.</p>'
+      + '<textarea aria-label="Option source text" rows="6" data-id="' + id + '" data-field="' + field + 'catalogueDraft" oninput="updateNestedField(this)">' + escHtml(choice.catalogueDraft || '') + '</textarea>'
+      + '<button type="button" class="btn btn-secondary" onclick="importClassChoiceOptions(\'' + id + '\',' + ci + ')">Apply option section</button>'
+      + '<p role="status" id="choice-status-' + id + '-' + ci + '"></p></details>'
+      + '<button type="button" class="btn btn-secondary" onclick="addClassChoice(\'' + id + '\',' + ci + ')">Add option</button>';
+    html += '<button type="button" class="btn btn-secondary" onclick="removeClassChoice(\'' + id + '\',' + ci + ')">Remove choice</button></details>';
+  });
+  return html + '<button type="button" class="btn btn-secondary" onclick="addClassChoice(\'' + id + '\')">Add choice</button></details>';
+}
+
+function applyClassProgression(id) {
+  const { index } = parseId(id);
+  const cls = extractedData.class[index];
+  const text = cls.progressionDraft ?? classProgressionText(cls);
+  const rows = parseClassProgressionRows(normalizeTextLines(text));
+  if (!rows.length || rows.some(row => !row.level)) {
+    document.getElementById('progression-status-' + id).textContent = 'Table not applied. Include Level and Features headers, then one row per class level.';
+    return false;
+  }
+  cls.progression = rows;
+  cls.progressionAppliedText = text;
+  cls.progressionDraft = text;
+  cls._progressionCorrected = true;
+  buildReviewUI('class'); markChanged();
+  focusReviewField('class', index, 'progressionDraft');
+  document.getElementById('progression-status-' + id).textContent = 'Table applied. Check unresolved items for unreadable values or missing levels.';
+  return true;
+}
+
+function updateClassChoiceSchedule(el) {
+  updateNestedField(el);
+  const { index } = parseId(el.dataset.id);
+  const choice = extractedData.class[index].choices[Number(el.dataset.field.split('.')[1])];
+  choice.schedule = el.value.split(',').filter(value => value.trim()).map(value => {
+    const match = value.trim().match(/^(\d+)\s*:\s*(\d+)$/);
+    return match ? { level: Number(match[1]), count: Number(match[2]) } : { level: 0, count: 0 };
+  });
+}
+
+function updateClassChoiceMode(el) {
+  updateNestedField(el);
+  buildReviewUI('class');
+  focusReviewField('class', parseId(el.dataset.id).index, el.dataset.field);
+}
+
+function resetClassChoiceSchedule(id, ci) {
+  const cls = extractedData.class[parseId(id).index];
+  delete cls.choices[ci].schedule; delete cls.choices[ci].scheduleText;
+  buildReviewUI('class'); markChanged();
+  focusReviewField('class', parseId(id).index, 'choices.' + ci + '.scheduleText');
+}
+
+function importClassChoiceOptions(id, ci) {
+  const cls = extractedData.class[parseId(id).index];
+  const choice = cls.choices[ci];
+  const feature = cls.features.find(feature => legacyFeatureKey(feature.name) === legacyFeatureKey(choice.feature));
+  if (!feature) return false;
+  const text = normalizeTextLines(choice.catalogueDraft || '').join('\n');
+  const parsed = window.AuroraClassProgression.build({ ...cls, features: [{ ...feature, description: text }] }, text, { kind: 'pasted' });
+  const imported = parsed.choices.find(candidate => candidate.mode === 'options');
+  if (!imported?.options.length) {
+    document.getElementById('choice-status-' + id + '-' + ci).textContent = 'No options found. Include the catalogue heading and complete option definitions.';
+    return false;
+  }
+  choice.options = imported.options;
+  choice.catalogueIncomplete = false;
+  choice.catalogueAppliedText = choice.catalogueDraft;
+  buildReviewUI('class'); markChanged();
+  focusReviewField('class', parseId(id).index, 'choices.' + ci + '.catalogueDraft');
+  document.getElementById('choice-status-' + id + '-' + ci).textContent = 'Option section applied. Review the names, prerequisites, and unresolved items.';
+  return true;
+}
+
+function addClassChoice(id, ci) {
+  const cls = extractedData.class[parseId(id).index];
+  cls.choices ||= effectiveClassChoices(cls);
+  if (ci === undefined) cls.choices.push({ name: 'New choice', feature: cls.features?.[0]?.name || '', mode: 'options', schedule: [{ level: 1, count: 1 }], options: [] });
+  else cls.choices[ci].options.push({ name: '', description: '' });
+  buildReviewUI('class'); markChanged();
+  const field = ci === undefined ? 'choices.' + (cls.choices.length - 1) + '.name' : 'choices.' + ci + '.options.' + (cls.choices[ci].options.length - 1) + '.name';
+  focusReviewField('class', parseId(id).index, field);
+}
+
+function removeClassChoice(id, ci, oi) {
+  const cls = extractedData.class[parseId(id).index];
+  if (oi === undefined) cls.choices.splice(ci, 1);
+  else cls.choices[ci].options.splice(oi, 1);
+  buildReviewUI('class'); markChanged();
+  focusReviewField('class', parseId(id).index, oi === undefined ? 'choices' : 'choices.' + ci + '.name');
 }
 
 function buildOtherFields(item, id) {
@@ -3729,8 +3888,8 @@ function updateNestedField(el) {
     obj = obj[parts[i]];
   }
   const finalKey = parts[parts.length - 1];
-  const numericKeys = new Set(['level', 'count', 'hitDie', 'speed', 'archetypeLevel', 'charges']);
-  obj[finalKey] = numericKeys.has(finalKey) ? (parseInt(el.value) || 0) : el.value;
+  const numericKeys = new Set(['level', 'minimumLevel', 'count', 'hitDie', 'speed', 'archetypeLevel', 'charges']);
+  obj[finalKey] = finalKey === 'minimumLevel' ? (Number(el.value) || 0) : numericKeys.has(finalKey) ? (parseInt(el.value) || 0) : el.value;
   flashField(el);
 }
 
@@ -5679,6 +5838,21 @@ function validateAll(options = {}) {
       }
 
       if (type === 'class') {
+        if (item.progressionDraft !== undefined && item.progressionDraft !== item.progressionAppliedText) issues.push({
+          type, i, field: 'progressionDraft', msg: name + ': the progression table has unapplied edits. Apply the table before exporting.' });
+        for (const finding of window.AuroraClassProgression.findings(item)) issues.push({
+          ...finding, type, i, msg: name + ': ' + finding.msg
+        });
+        for (const choice of effectiveClassChoices(item)) {
+          for (const option of choice.options || []) {
+            const cantrip = String(option.description || '').replace(/\s+/g, ' ').match(/(?:you know the cantrip|you learn the)\s+([a-z][a-z' -]+?)(?:,\s*which| cantrip[.,])/i);
+            if (cantrip && !resolvedClassSpellId(cantrip[1], getSourceMeta())) issues.push({ type, i, field: 'choices',
+              source: option._source, msg: name + ': "' + option.name + '" grants ' + cantrip[1] + ', but no matching spell definition was found. Include that spell before using the option.' });
+          }
+        }
+        if (item.archetypeLevel && !(extractedData.archetype || []).some(archetype => archetype.class === name
+          && (archetype.supports || archetypeSupport(name)) === item.archetypeSupports)) issues.push({
+          type, i, field: 'archetypeSupports', msg: name + ': include or verify compatible subclass definitions for "' + item.archetypeSupports + '" in Aurora. A subclass picker is generated at level ' + item.archetypeLevel + '.' });
         if (!item.hitDie)
           issues.push({ type, i, field: 'hitDie', msg: `${label} (${name}): hit die is missing` });
         if (!item.features || item.features.length === 0)
@@ -7728,31 +7902,15 @@ function classFeatureElements(cls) {
 }
 
 function classProgressionFeatureGrants(cls) {
-  const progression = cls.progression || [];
-  if (!progression.length) {
-    return classFeatureElements(cls).map(feature => ({ name: feature.name, level: feature.level || 1 }));
-  }
-  const grants = [];
-  progression.forEach(row => {
-    (row.features || []).forEach(name => {
-      if (!name || isPlaceholderClassFeature({ name })) return;
-      if (!(cls.features || []).some(feature => legacyFeatureKey(feature.name) === legacyFeatureKey(name))) return;
-      grants.push({ name, level: row.level });
-    });
+  return classFeatureElements(cls).map(feature => {
+    const first = window.AuroraClassProgression.rows(cls.progression)
+      .find(row => (row.features || []).some(name => legacyFeatureKey(name) === legacyFeatureKey(feature.name)));
+    return { name: feature.name, level: first?.level || feature.level || 1 };
   });
-  return grants;
 }
 
 function progressionDeltas(rows, accessor) {
-  const deltas = [];
-  let previous = 0;
-  (rows || []).forEach(row => {
-    const value = accessor(row);
-    if (!Number.isFinite(value)) return;
-    if (value > previous) deltas.push({ level: row.level, value: value - previous });
-    previous = value;
-  });
-  return deltas;
+  return window.AuroraClassProgression.deltas(rows, accessor).map(event => ({ level: event.level, value: event.count }));
 }
 
 function classSkillSupports(skills) {
@@ -7910,13 +8068,13 @@ function classSpellcastingRules(cls) {
     const first = initialCantrips[0];
     const numberAttr = first.value > 1 ? ` number="${first.value}"` : '';
     rules.push(rule(
-      `\t\t\t<select type="Spell" name="Cantrip (${spellcastingName})" supports="$(spellcasting:list), 0"${numberAttr} spellcasting="${spellcastingName}" />`,
+      `\t\t\t<select type="Spell" name="Cantrip (${spellcastingName})" supports="$(spellcasting:list), 0" level="${first.level}"${numberAttr} spellcasting="${spellcastingName}" />`,
       `Choose ${first.value} ${cls.name} cantrips.`,
       'Cantrips column'
     ));
     initialCantrips.slice(1).forEach(delta => {
       rules.push(rule(
-        `\t\t\t<select type="Spell" name="Cantrip (${spellcastingName})" supports="$(spellcasting:list), 0" level="${delta.level}" spellcasting="${spellcastingName}" />`,
+        `\t\t\t<select type="Spell" name="Cantrip (${spellcastingName})" supports="$(spellcasting:list), 0" level="${delta.level}"${delta.value > 1 ? ' number="' + delta.value + '"' : ''} spellcasting="${spellcastingName}" />`,
         `Choose another ${cls.name} cantrip at level ${delta.level}.`,
         'Cantrips column'
       ));
@@ -7948,6 +8106,10 @@ function inferClassFeatureRules(cls, feature, meta) {
   const rules = [];
   const name = normalizeExtractedName(feature?.name || '');
   const text = String(feature?.description || '');
+  if (/^Familiar$/i.test(name) && /learn the find familiar spell/i.test(text.replace(/\s+/g, ' '))) {
+    const id = resolvedClassSpellId('Find Familiar', meta);
+    if (id) rules.push(rule('<grant type="Spell" id="' + id + '" spellcasting="' + escAttrXml(cls.name) + '" />', 'Learn Find Familiar; use the feature instructions for its ritual and forms.', text));
+  }
   if (/^Spellcasting$/i.test(name)) {
     rules.push(...classSpellcastingRules(cls));
   }
@@ -7970,13 +8132,7 @@ function inferClassFeatureRules(cls, feature, meta) {
       text
     ));
   }
-  if (/^Ability Score Improvement$/i.test(name)) {
-    rules.push(rule(
-      `\t\t\t<select type="Feat" name="Feat (${escAttrXml(cls.name)})" />`,
-      `Choose the Ability Score Improvement feat or another feat.`,
-      text
-    ));
-  }
+  rules.push(...classChoiceRules(cls, feature, meta));
   if (/^Magic Item Adept$/i.test(name)) {
     rules.push(rule(`\t\t\t<stat name="attunement:max" value="1" bonus="magic item adept" />`, 'Increase maximum attuned magic items to four.', text));
   }
@@ -7990,14 +8146,144 @@ function inferClassFeatureRules(cls, feature, meta) {
   if (/^Magic Item Master$/i.test(name)) {
     rules.push(rule(`\t\t\t<stat name="attunement:max" value="1" bonus="magic item master" />`, 'Increase maximum attuned magic items to six.', text));
   }
-  if (/^Epic Boon$/i.test(name)) {
-    rules.push(rule(
-      `\t\t\t<select type="Feat" name="Epic Boon (${escAttrXml(cls.name)})" supports="Epic Boon" />`,
-      'Choose an Epic Boon feat.',
-      text
-    ));
-  }
   return dedupeRules(rules);
+}
+
+function effectiveClassChoices(cls) {
+  return cls.choices || window.AuroraClassProgression.build({ ...cls }, '', {}).choices;
+}
+
+function classChoiceSupport(cls, choice, prefix) {
+  return prefix + '_CLASS_CHOICE_' + idify(cls.name) + '_' + idify(choice.name);
+}
+
+function validClassChoiceEvents(cls, choice) {
+  const events = window.AuroraClassProgression.events(cls, choice);
+  if (new Set(events.map(event => event.level)).size !== events.length) return [];
+  return events.filter(event => Number.isInteger(event.level) && event.level >= 1 && event.level <= 20
+    && Number.isInteger(event.count) && event.count > 0);
+}
+
+function exportableClassChoices(cls) {
+  const choices = effectiveClassChoices(cls);
+  return choices.filter(choice => choice.name && choices.filter(other => idify(other.name) === idify(choice.name)).length === 1
+    && ['options', 'asi', 'asiOrFeat', 'feat', 'language'].includes(choice.mode)
+    && (cls.features || []).some(feature => legacyFeatureKey(feature.name) === legacyFeatureKey(choice.feature)));
+}
+
+function usableClassOptions(cls, choice) {
+  return (choice.options || []).filter(option => option.name && option.description && !option.unresolvedPrerequisite
+    && (!option.minimumLevel || Number.isInteger(option.minimumLevel) && option.minimumLevel >= 1 && option.minimumLevel <= 20)
+    && (!option.requiredFeature || (cls.features || []).some(feature => legacyFeatureKey(feature.name) === legacyFeatureKey(option.requiredFeature)))
+    && choice.options.filter(other => idify(other.name) === idify(option.name)).length === 1);
+}
+
+function classChoiceRules(cls, feature, meta = getSourceMeta()) {
+  const rules = [];
+  for (const choice of exportableClassChoices(cls).filter(choice => legacyFeatureKey(choice.feature) === legacyFeatureKey(feature.name))) {
+    const support = classChoiceSupport(cls, choice, meta.prefix);
+    const usable = usableClassOptions(cls, choice);
+    if (choice.mode === 'unresolved' || (choice.mode === 'options' && !usable.length)) continue;
+    let cumulative = 0;
+    for (const event of validClassChoiceEvents(cls, choice).slice().sort((a, b) => a.level - b.level)) {
+      cumulative += event.count;
+      if (choice.mode === 'options') {
+        const eligible = usable.filter(option => (option.minimumLevel || 1) <= event.level
+          && (!option.requiredFeature || (cls.features || []).some(feature => legacyFeatureKey(feature.name) === legacyFeatureKey(option.requiredFeature) && Number(feature.level) <= event.level)));
+        if (eligible.length < cumulative && !eligible.some(option => option.repeatable)) continue;
+      }
+      const name = choice.name + ' (' + cls.name + ', level ' + event.level + ')';
+      let type = 'Class Feature';
+      let supports = support;
+      let number = event.count;
+      if (choice.mode === 'language') { type = 'Language'; supports = ''; }
+      if (choice.mode === 'asi') { type = 'Ability Score Improvement'; supports = 'Ability Score Improvement,Class'; number *= 2; }
+      if (choice.mode === 'feat') { type = 'Feat'; supports = choice.supports || ''; }
+      if (choice.mode === 'asiOrFeat') supports += '_' + event.level;
+      const xml = '<select type="' + type + '" name="' + escAttrXml(name) + '"'
+        + (supports ? ' supports="' + escAttrXml(supports) + '"' : '') + ' level="' + event.level + '"'
+        + (number > 1 ? ' number="' + number + '"' : '') + ' />';
+      rules.push(rule(xml, 'Choose ' + number + ' at ' + cls.name + ' level ' + event.level + '.', choice._source?.excerpt || feature.description));
+    }
+  }
+  return rules;
+}
+
+function resolvedClassSpellId(name, meta) {
+  const local = (extractedData.spell || []).filter(spell => legacyFeatureKey(spell.name) === legacyFeatureKey(name));
+  if (local.length === 1) return meta.prefix + '_SPELL_' + idify(local[0].name);
+  const reference = globalThis.AuroraReferenceIndex || window.AuroraReferenceIndex;
+  const matches = Object.entries(reference?.ids || {}).filter(([, entry]) => reference.types[entry[0]] === 'Spell'
+    && legacyFeatureKey(entry[1]) === legacyFeatureKey(name)).map(([id]) => id);
+  const canonical = canonicalSpellId(name, meta);
+  if (matches.includes(canonical)) return canonical;
+  const edition = meta.ruleset === '2024' ? /_PHB2024_|_PHB24_/ : /_PHB_/;
+  const preferred = matches.filter(id => edition.test(id));
+  return preferred.length === 1 ? preferred[0] : matches.length === 1 ? matches[0] : '';
+}
+
+function classOptionRules(cls, choice, option, meta) {
+  const text = String(option.description || '').replace(/\s+/g, ' ');
+  const rules = [];
+  // Infer only unconditional benefits with an exact supported shape.
+  if (/Fighting Style$/i.test(choice.feature) && /^Archery$/i.test(option.name)
+    && /gain a \+2 bonus to attack rolls.*with ranged weapons/i.test(text)) rules.push('<stat name="ranged:attack" value="2" />');
+  if (/Fighting Style$/i.test(choice.feature) && /^Defense$/i.test(option.name)
+    && /wearing armor.*\+1 bonus to AC/i.test(text)) rules.push('<stat name="ac:misc" value="1" bonus="fighting style" equipped="[armor:any]" />');
+  if (/^You (?:have|gain) (?:proficiency in|proficiency with) the (\w+) skill\./i.test(text)) {
+    const skill = text.match(/^You (?:have|gain) (?:proficiency in|proficiency with) the (\w+) skill\./i)[1];
+    if (SKILL_NAMES.some(value => value.toLowerCase() === skill.toLowerCase())) rules.push('<grant type="Proficiency" id="ID_PROFICIENCY_SKILL_' + idify(skill) + '" />');
+  }
+  const cantrip = text.match(/(?:you know the cantrip|you learn the)\s+([a-z][a-z' -]+?)(?:,\s*which| cantrip[.,])/i);
+  if (cantrip) {
+    const id = resolvedClassSpellId(cantrip[1], meta);
+    if (id) rules.push('<grant type="Spell" id="' + escAttrXml(id) + '" spellcasting="' + escAttrXml(cls.name) + '" />');
+  }
+  // These extra spells belong to the selected option, never the base class.
+  const bonusSpell = text.match(/You learn an additional ([A-Za-z'-]+) spell .*?at (\d+)(?:st|nd|rd|th) level,.*?again at ([^.]+)\./i);
+  if (bonusSpell && legacyFeatureKey(bonusSpell[1]) === legacyFeatureKey(cls.name)) {
+    const levels = [Number(bonusSpell[2]), ...[...bonusSpell[3].matchAll(/\b(\d+)(?:st|nd|rd|th)\b/g)].map(match => Number(match[1]))];
+    for (const level of [...new Set(levels)].filter(level => level >= 1 && level <= 20)) rules.push('<select type="Spell" name="' + escAttrXml(option.name + ' bonus spell (' + cls.name + ')')
+      + '" supports="$(spellcasting:list),$(spellcasting:slots)" level="' + level + '" spellcasting="' + escAttrXml(cls.name) + '" />');
+  }
+  return rules;
+}
+
+function classChoiceElements(cls, source, prefix, meta) {
+  const lines = [];
+  for (const choice of exportableClassChoices(cls).filter(choice => choice.mode === 'options' || choice.mode === 'asiOrFeat')) {
+    const support = classChoiceSupport(cls, choice, prefix);
+    if (choice.mode === 'asiOrFeat') {
+      for (const event of validClassChoiceEvents(cls, choice)) {
+        for (const feat of [false, true]) {
+          const requirements = classFeatureId(cls, choice.feature, prefix) + (feat ? ',ID_INTERNAL_OPTION_ALLOW_FEATS' : '');
+          lines.push('\t<element name="' + (feat ? 'Feat' : 'Ability Score Increase') + '" type="Class Feature" source="' + escAttrXml(source)
+            + '" id="' + support + '_' + event.level + (feat ? '_FEAT' : '_ABILITY') + '">');
+          lines.push('\t\t<supports>' + support + '_' + event.level + '</supports><requirements>' + requirements + '</requirements>');
+          lines.push('\t\t<description><p>' + (feat ? 'Choose a feat if optional feats are enabled.' : 'Increase one ability by 2 or two abilities by 1, to a maximum of 20.') + '</p></description>');
+          lines.push('\t\t<sheet display="false" /><rules><select type="' + (feat ? 'Feat' : 'Ability Score Improvement') + '" name="' + (feat ? 'Feat' : 'Ability Score Increase')
+            + ' (Level ' + event.level + ')"' + (feat ? '' : ' supports="Ability Score Improvement,Class" number="2"') + ' /></rules></element>');
+        }
+      }
+      continue;
+    }
+    for (const option of usableClassOptions(cls, choice)) {
+      const id = support + '_' + idify(option.name);
+      const requirements = [classFeatureId(cls, choice.feature, prefix)];
+      if (option.minimumLevel) requirements.push('[level:' + Number(option.minimumLevel) + ']');
+      if (option.requiredFeature) requirements.push(classFeatureId(cls, option.requiredFeature, prefix));
+      lines.push('\t<element name="' + escAttrXml(option.name) + '" type="Class Feature" source="' + escAttrXml(source) + '" id="' + id + '">');
+      lines.push('\t\t<supports>' + escXml(support) + '</supports>');
+      lines.push('\t\t<requirements>' + escXml(requirements.join(',')) + '</requirements>');
+      lines.push('\t\t<description><p>' + escXml(option.description) + '</p></description>');
+      lines.push('\t\t<sheet><description>' + escXml(option.description) + '</description></sheet>');
+      if (option.repeatable) lines.push('\t\t<setters><set name="allow duplicate">true</set></setters>');
+      const rules = classOptionRules(cls, choice, option, meta);
+      if (rules.length) lines.push('\t\t<rules>\n' + rules.map(xml => '\t\t\t' + xml).join('\n') + '\n\t\t</rules>');
+      lines.push('\t</element>');
+    }
+  }
+  return lines;
 }
 
 function genClassXml(cls, source, prefix, meta) {
@@ -8124,7 +8410,8 @@ function genClassXml(cls, source, prefix, meta) {
         const list = cls.spellcastingList || cls.name;
         const ability = cls.spellcastingAbility ? ` ability="${escAttrXml(cls.spellcastingAbility)}"` : '';
         const prepare = spellcastingPrepareAttribute(cls);
-        lines.push(`\t\t<spellcasting name="${escAttrXml(cls.name)}"${ability}${prepare}>`);
+        const replace = /\breplace\b.*\bspell\b|\bspell\b.*\breplace\b/is.test(f.description || '') ? ' allowReplace="true"' : '';
+        lines.push(`\t\t<spellcasting name="${escAttrXml(cls.name)}"${ability}${prepare}${replace}>`);
         lines.push(`\t\t\t<list known="true">${escXml(list)}</list>`);
         lines.push(`\t\t</spellcasting>`);
       }
@@ -8136,6 +8423,7 @@ function genClassXml(cls, source, prefix, meta) {
     lines.push(`\t</element>`);
   });
 
+  lines.push(...classChoiceElements(cls, source, prefix, meta));
   return lines;
 }
 

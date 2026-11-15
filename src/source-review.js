@@ -181,6 +181,14 @@
         if (original?._source) child._source = JSON.parse(JSON.stringify(original._source));
       }
     }
+    for (const choice of result.choices || []) {
+      const original = (current.choices || []).find(candidate => key(candidate.name) === key(choice.name) && key(candidate.feature) === key(choice.feature));
+      if (original?._source) choice._source = JSON.parse(JSON.stringify(original._source));
+      for (const option of choice.options || []) {
+        const source = (original?.options || []).find(candidate => key(candidate.name) === key(option.name))?._source;
+        if (source) option._source = JSON.parse(JSON.stringify(source));
+      }
+    }
     return result;
   }
 
