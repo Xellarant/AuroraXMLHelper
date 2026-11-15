@@ -1,0 +1,220 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<elements>
+	<info>
+		<name>XML Helper Class Acceptance - Spells</name>
+		<update version="0.1.0">
+			<file name="axhclass-spells.xml" url="axhclass-spells.xml" />
+		</update>
+	</info>
+
+	<element name="Copper Signal 1" type="Spell" source="XML Helper Class Acceptance" id="ID_AXHCLASS_SPELL_COPPER_SIGNAL_1">
+		<supports>Mistkeeper</supports>
+		<description>
+			<p>A harmless signal of copper light appears. Original synthetic acceptance content.</p>
+		</description>
+		<setters>
+			<set name="keywords"></set>
+			<set name="level">0</set>
+			<set name="school">Evocation</set>
+			<set name="time">1 action</set>
+			<set name="duration">1 minute</set>
+			<set name="range">30 feet</set>
+			<set name="hasVerbalComponent">true</set>
+			<set name="hasSomaticComponent">true</set>
+			<set name="hasMaterialComponent">false</set>
+			<set name="materialComponent" />
+			<set name="isConcentration">false</set>
+			<set name="isRitual">false</set>
+		</setters>
+	</element>
+
+	<element name="Copper Signal 2" type="Spell" source="XML Helper Class Acceptance" id="ID_AXHCLASS_SPELL_COPPER_SIGNAL_2">
+		<supports>Mistkeeper</supports>
+		<description>
+			<p>A harmless signal of copper light appears. Original synthetic acceptance content.</p>
+		</description>
+		<setters>
+			<set name="keywords"></set>
+			<set name="level">0</set>
+			<set name="school">Evocation</set>
+			<set name="time">1 action</set>
+			<set name="duration">1 minute</set>
+			<set name="range">30 feet</set>
+			<set name="hasVerbalComponent">true</set>
+			<set name="hasSomaticComponent">true</set>
+			<set name="hasMaterialComponent">false</set>
+			<set name="materialComponent" />
+			<set name="isConcentration">false</set>
+			<set name="isRitual">false</set>
+		</setters>
+	</element>
+
+	<element name="Copper Signal 3" type="Spell" source="XML Helper Class Acceptance" id="ID_AXHCLASS_SPELL_COPPER_SIGNAL_3">
+		<supports>Mistkeeper</supports>
+		<description>
+			<p>A harmless signal of copper light appears. Original synthetic acceptance content.</p>
+		</description>
+		<setters>
+			<set name="keywords"></set>
+			<set name="level">0</set>
+			<set name="school">Evocation</set>
+			<set name="time">1 action</set>
+			<set name="duration">1 minute</set>
+			<set name="range">30 feet</set>
+			<set name="hasVerbalComponent">true</set>
+			<set name="hasSomaticComponent">true</set>
+			<set name="hasMaterialComponent">false</set>
+			<set name="materialComponent" />
+			<set name="isConcentration">false</set>
+			<set name="isRitual">false</set>
+		</setters>
+	</element>
+
+	<element name="Copper Signal 4" type="Spell" source="XML Helper Class Acceptance" id="ID_AXHCLASS_SPELL_COPPER_SIGNAL_4">
+		<supports>Mistkeeper</supports>
+		<description>
+			<p>A harmless signal of copper light appears. Original synthetic acceptance content.</p>
+		</description>
+		<setters>
+			<set name="keywords"></set>
+			<set name="level">0</set>
+			<set name="school">Evocation</set>
+			<set name="time">1 action</set>
+			<set name="duration">1 minute</set>
+			<set name="range">30 feet</set>
+			<set name="hasVerbalComponent">true</set>
+			<set name="hasSomaticComponent">true</set>
+			<set name="hasMaterialComponent">false</set>
+			<set name="materialComponent" />
+			<set name="isConcentration">false</set>
+			<set name="isRitual">false</set>
+		</setters>
+	</element>
+
+	<element name="Copper Signal 5" type="Spell" source="XML Helper Class Acceptance" id="ID_AXHCLASS_SPELL_COPPER_SIGNAL_5">
+		<supports>Mistkeeper</supports>
+		<description>
+			<p>A harmless signal of copper light appears. Original synthetic acceptance content.</p>
+		</description>
+		<setters>
+			<set name="keywords"></set>
+			<set name="level">1</set>
+			<set name="school">Evocation</set>
+			<set name="time">1 action</set>
+			<set name="duration">1 minute</set>
+			<set name="range">30 feet</set>
+			<set name="hasVerbalComponent">true</set>
+			<set name="hasSomaticComponent">true</set>
+			<set name="hasMaterialComponent">false</set>
+			<set name="materialComponent" />
+			<set name="isConcentration">false</set>
+			<set name="isRitual">false</set>
+		</setters>
+	</element>
+
+	<element name="Copper Signal 6" type="Spell" source="XML Helper Class Acceptance" id="ID_AXHCLASS_SPELL_COPPER_SIGNAL_6">
+		<supports>Mistkeeper</supports>
+		<description>
+			<p>A harmless signal of copper light appears. Original synthetic acceptance content.</p>
+		</description>
+		<setters>
+			<set name="keywords"></set>
+			<set name="level">1</set>
+			<set name="school">Evocation</set>
+			<set name="time">1 action</set>
+			<set name="duration">1 minute</set>
+			<set name="range">30 feet</set>
+			<set name="hasVerbalComponent">true</set>
+			<set name="hasSomaticComponent">true</set>
+			<set name="hasMaterialComponent">false</set>
+			<set name="materialComponent" />
+			<set name="isConcentration">false</set>
+			<set name="isRitual">false</set>
+		</setters>
+	</element>
+
+	<element name="Copper Signal 7" type="Spell" source="XML Helper Class Acceptance" id="ID_AXHCLASS_SPELL_COPPER_SIGNAL_7">
+		<supports>Mistkeeper</supports>
+		<description>
+			<p>A harmless signal of copper light appears. Original synthetic acceptance content.</p>
+		</description>
+		<setters>
+			<set name="keywords"></set>
+			<set name="level">1</set>
+			<set name="school">Evocation</set>
+			<set name="time">1 action</set>
+			<set name="duration">1 minute</set>
+			<set name="range">30 feet</set>
+			<set name="hasVerbalComponent">true</set>
+			<set name="hasSomaticComponent">true</set>
+			<set name="hasMaterialComponent">false</set>
+			<set name="materialComponent" />
+			<set name="isConcentration">false</set>
+			<set name="isRitual">false</set>
+		</setters>
+	</element>
+
+	<element name="Copper Signal 8" type="Spell" source="XML Helper Class Acceptance" id="ID_AXHCLASS_SPELL_COPPER_SIGNAL_8">
+		<supports>Mistkeeper</supports>
+		<description>
+			<p>A harmless signal of copper light appears. Original synthetic acceptance content.</p>
+		</description>
+		<setters>
+			<set name="keywords"></set>
+			<set name="level">1</set>
+			<set name="school">Evocation</set>
+			<set name="time">1 action</set>
+			<set name="duration">1 minute</set>
+			<set name="range">30 feet</set>
+			<set name="hasVerbalComponent">true</set>
+			<set name="hasSomaticComponent">true</set>
+			<set name="hasMaterialComponent">false</set>
+			<set name="materialComponent" />
+			<set name="isConcentration">false</set>
+			<set name="isRitual">false</set>
+		</setters>
+	</element>
+
+	<element name="Copper Signal 9" type="Spell" source="XML Helper Class Acceptance" id="ID_AXHCLASS_SPELL_COPPER_SIGNAL_9">
+		<supports>Mistkeeper</supports>
+		<description>
+			<p>A harmless signal of copper light appears. Original synthetic acceptance content.</p>
+		</description>
+		<setters>
+			<set name="keywords"></set>
+			<set name="level">2</set>
+			<set name="school">Evocation</set>
+			<set name="time">1 action</set>
+			<set name="duration">1 minute</set>
+			<set name="range">30 feet</set>
+			<set name="hasVerbalComponent">true</set>
+			<set name="hasSomaticComponent">true</set>
+			<set name="hasMaterialComponent">false</set>
+			<set name="materialComponent" />
+			<set name="isConcentration">false</set>
+			<set name="isRitual">false</set>
+		</setters>
+	</element>
+
+	<element name="Copper Signal 10" type="Spell" source="XML Helper Class Acceptance" id="ID_AXHCLASS_SPELL_COPPER_SIGNAL_10">
+		<supports>Mistkeeper</supports>
+		<description>
+			<p>A harmless signal of copper light appears. Original synthetic acceptance content.</p>
+		</description>
+		<setters>
+			<set name="keywords"></set>
+			<set name="level">2</set>
+			<set name="school">Evocation</set>
+			<set name="time">1 action</set>
+			<set name="duration">1 minute</set>
+			<set name="range">30 feet</set>
+			<set name="hasVerbalComponent">true</set>
+			<set name="hasSomaticComponent">true</set>
+			<set name="hasMaterialComponent">false</set>
+			<set name="materialComponent" />
+			<set name="isConcentration">false</set>
+			<set name="isRitual">false</set>
+		</setters>
+	</element>
+
+</elements>

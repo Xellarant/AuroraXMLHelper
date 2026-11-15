@@ -46,6 +46,30 @@ test('spell and cantrip gains preserve their actual level and multi-cantrip incr
   assert.match(xml, /Spellcasting \(Mistkeeper\)"[^>]*level="5" number="2"/);
   assert.match(xml, /mistkeeper:spellcasting:slots:9" value="1" level="17"/);
   assert.match(xml, /spellcasting name="Mistkeeper" ability="Charisma" prepare="false" allowReplace="true"/);
+  assert.match(xml, /<list>Mistkeeper<\/list>/);
+  assert.doesNotMatch(xml, /<list known="true">/);
+  assert.match(xml, /<grant type="Grants" id="ID_INTERNAL_GRANTS_SPELLCASTING_FEATURE"/);
+});
+
+test('only explicit whole-list preparation grants every spell, never known-spell or spellbook casting', () => {
+  const { context, cls } = parsed();
+  cls.spellcastingPrepare = true;
+  cls.progression.forEach(row => { delete row.spellsKnown; });
+  const feature = cls.features.find(feature => feature.name === 'Spellcasting');
+  feature.description = 'You prepare the list of mistkeeper spells available to cast, choosing from the mistkeeper spell list.';
+  assert.match(context.genClassXml(cls, 'Test', 'ID_TEST').join('\n'), /<list known="true">Mistkeeper<\/list>/);
+  feature.description = 'You prepare mistkeeper spells from your spellbook, choosing from the mistkeeper spell list.';
+  assert.doesNotMatch(context.genClassXml(cls, 'Test', 'ID_TEST').join('\n'), /<list known="true">/);
+  feature.description = 'You prepare spells each morning.';
+  assert.doesNotMatch(context.genClassXml(cls, 'Test', 'ID_TEST').join('\n'), /<list known="true">/);
+  for (const description of ['You do not prepare spells from the mistkeeper spell list.',
+    'While holding a special book, you prepare spells from the mistkeeper spell list.']) {
+    feature.description = description;
+    assert.doesNotMatch(context.genClassXml(cls, 'Test', 'ID_TEST').join('\n'), /<list known="true">/);
+  }
+  feature.description = 'You prepare spells from the mistkeeper spell list.';
+  cls.progression[0].spellsKnown = 2;
+  assert.doesNotMatch(context.genClassXml(cls, 'Test', 'ID_TEST').join('\n'), /<list known="true">/);
 });
 
 test('sorted deltas do not inflate after decreases, duplicate levels, or invalid numbers', () => {

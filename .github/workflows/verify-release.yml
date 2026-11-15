@@ -26,6 +26,14 @@ jobs:
     # Keep the OS compatible with the pinned Playwright 1.57 browser build.
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - browser: chromium
+            install: --only-shell chromium
+          - browser: firefox
+            install: firefox
     steps:
       - name: Check out the deployed commit
         uses: actions/checkout@v4
@@ -34,21 +42,22 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
       - run: npm ci
-      - run: npx playwright install --with-deps --only-shell chromium
+      - run: npx playwright install --with-deps ${{ matrix.install }}
       - name: Verify deployed files and browser behavior
         run: npm run verify:release
         env:
           RELEASE_BASE_URL: https://xellarant.github.io/AuroraXMLHelper/
+          AURORA_BROWSER: ${{ matrix.browser }}
           RELEASE_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
           SMOKE_REPORT_DIR: artifacts/release
       - name: Keep release verification results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: release-verification
+          name: release-verification-${{ matrix.browser }}
           path: artifacts/release
           if-no-files-found: ignore
           retention-days: 14

@@ -11,7 +11,7 @@ test('browser UTF-8 decoding and Windows line endings do not cause a false relea
 
 test('release verification covers all local script dependencies and the PDF worker', () => {
   const paths = releaseFiles().map(file => file.file);
-  for (const required of ['index.html', 'src/user-messages.js', 'src/app.js', 'src/draft-storage.js', 'src/draft-recovery.js', 'vendor/pdf.min.mjs', 'vendor/pdf.worker.min.mjs', 'vendor/jszip.min.js']) {
+  for (const required of ['index.html', 'src/user-messages.js', 'src/remembered-corrections.js', 'src/app.js', 'src/draft-storage.js', 'src/draft-recovery.js', 'vendor/pdf.min.mjs', 'vendor/pdf.worker.min.mjs', 'vendor/jszip.min.js']) {
     assert.ok(paths.includes(required), `${required} must be verified on the deployed site`);
   }
 });

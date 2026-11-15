@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const net = require('node:net');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
-const { chromium } = require('playwright');
+const { chromium, firefox } = require('playwright');
 const { checkDraftRecovery, checkPdfExport } = require('./browser-draft-checks');
 
 const repoRoot = path.resolve(__dirname, '..');
@@ -87,6 +87,9 @@ async function stopStaticServer(child) {
 }
 
 function browserLaunchCandidates() {
+  const engine = process.env.AURORA_BROWSER || 'chromium';
+  if (!['chromium', 'firefox'].includes(engine)) throw new Error('Choose chromium or firefox for AURORA_BROWSER.');
+  if (engine === 'firefox') return [{ name: 'Playwright Firefox', options: { headless: true } }];
   if (process.env.AURORA_CHROME_PATH) {
     return [{
       name: `configured executable (${process.env.AURORA_CHROME_PATH})`,
@@ -127,7 +130,8 @@ async function launchBrowser() {
   const failures = [];
   for (const candidate of browserLaunchCandidates()) {
     try {
-      const browser = await chromium.launch(candidate.options);
+      const browserType = process.env.AURORA_BROWSER === 'firefox' ? firefox : chromium;
+      const browser = await browserType.launch(candidate.options);
       return { browser, browserName: candidate.name };
     } catch (error) {
       failures.push({
@@ -149,11 +153,8 @@ function explainLaunchFailure(error) {
     return [
       message,
       '',
-      'Playwright is installed, but its matching Chromium headless shell is missing.',
-      'Either run:',
-      '  npm run install:browser',
-      'or use installed Chrome/Edge with:',
-      '  $env:AURORA_BROWSER_CHANNEL="chrome"; npm run smoke:browser'
+      'The matching Playwright browser build is missing. Install it, then retry the browser check:',
+      process.env.AURORA_BROWSER === 'firefox' ? '  npx playwright install --with-deps firefox' : '  npm run install:browser'
     ].join('\n');
   }
   if (message.includes('spawn EPERM')) {
@@ -500,6 +501,7 @@ async function run() {
         jszipLoaded: document.documentElement.dataset.jszipLoaded,
         pdfLibLoaded: document.documentElement.dataset.pdfLibLoaded,
         pdfjsLoaded: document.documentElement.dataset.pdfjsLoaded,
+        correctionsLoaded: document.documentElement.dataset.correctionsLoaded,
         userMessagesLoaded: document.documentElement.dataset.userMessagesLoaded,
         auroraShapeLoaded: document.documentElement.dataset.auroraShapeLoaded,
         auroraPatternsLoaded: document.documentElement.dataset.auroraPatternsLoaded,
@@ -537,6 +539,7 @@ async function run() {
       'jszipLoaded',
       'pdfLibLoaded',
       'pdfjsLoaded',
+      'correctionsLoaded',
       'userMessagesLoaded',
       'auroraShapeLoaded',
       'auroraPatternsLoaded',

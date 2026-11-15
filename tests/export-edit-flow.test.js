@@ -264,7 +264,7 @@ test('a remembered field correction survives reload without replacing new source
   assert.equal(runInApp(second.context, 'generatedBaselineData.spell[0].range'), '90 feet');
 });
 
-test('an older full-entry correction retains its source location and raises a manual review warning', () => {
+test('an older full-entry correction keeps fresh content and offers review before reapplying edits', () => {
   const storage = {};
   const fixture = correctionWorkspace(sourceSpell(), storage);
   const key = fixture.context.overrideKeyForIndex('spell', 0);
@@ -273,12 +273,12 @@ test('an older full-entry correction retains its source location and raises a ma
   const current = sourceSpell({ description: 'Current source prose.', _source: { kind: 'pdf', fileName: 'current.pdf', page: 5, line: 2, excerpt: 'Current source.' } });
   const restored = correctionWorkspace(current, storage);
   assert.equal(restored.context.applyRememberedOverridesToExtractedData(), 1);
-  assert.equal(runInApp(restored.context, 'extractedData.spell[0].description'), 'Legacy replacement text.');
+  assert.equal(runInApp(restored.context, 'extractedData.spell[0].description'), 'Current source prose.');
   assert.equal(runInApp(restored.context, 'extractedData.spell[0]._source.page'), 5);
-  const warning = restored.context.validateAll({ includeXml: false }).find(issue => /older remembered correction replaced the full entry/.test(issue.msg));
+  const warning = restored.context.validateAll({ includeXml: false }).find(issue => /older correction has no field history/.test(issue.msg));
   assert.ok(warning);
   assert.equal(warning.category, 'source-review');
-  assert.match(warning.msg, /Revert to Generated.*Remember Correction/);
+  assert.match(warning.msg, /Review the saved correction.*Remember Correction/);
 });
 
 test('malformed correction field masks are rejected at load and cannot throw during application', () => {
@@ -302,7 +302,7 @@ test('a newly added blank class is not marked edited by lazy choice initializati
   assert.equal(runInApp(context, 'extractedData.class[0].progression.length'), 0);
 });
 
-test('a remembered nested feature edit warns when its whole collection replaces refreshed source data', () => {
+test('a remembered nested feature edit preserves refreshed prose, new siblings, and baseline data', () => {
   const storage = {};
   const meta = { name: 'Remembered Source', abbr: 'REM', year: '2016' };
   const first = loadApp(meta, { storage });
@@ -321,9 +321,9 @@ test('a remembered nested feature edit warns when its whole collection replaces 
   runInApp(second.context, 'extractedData = ' + JSON.stringify({ class: [refreshed] }) + '; ensureExtractedDataBuckets(); captureGeneratedBaseline();');
   assert.equal(second.context.applyRememberedOverridesToExtractedData(), 1);
   assert.equal(runInApp(second.context, 'extractedData.class[0].features[0].action'), 'Bonus Action');
-  const warning = second.context.validateAll({ includeXml: false }).find(issue => /remembered correction replaced the features collection/.test(issue.msg));
-  assert.ok(warning);
-  assert.equal(warning.category, 'source-review');
+  assert.equal(runInApp(second.context, 'extractedData.class[0].features[0].description'), 'Improved complete source prose.');
+  assert.equal(runInApp(second.context, 'extractedData.class[0].features.length'), 2);
+  assert.ok(!second.context.validateAll({ includeXml: false }).some(issue => /Saved correction/.test(issue.msg)));
   second.context.revertToGenerated('class-0');
   assert.equal(runInApp(second.context, 'extractedData.class[0].features[0].description'), 'Improved complete source prose.');
   assert.equal(runInApp(second.context, 'extractedData.class[0].features.length'), 2);

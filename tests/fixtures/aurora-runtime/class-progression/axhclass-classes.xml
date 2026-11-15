@@ -1,0 +1,287 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<elements>
+	<info>
+		<name>XML Helper Class Acceptance - Classes</name>
+		<update version="0.1.0">
+			<file name="axhclass-classes.xml" url="axhclass-classes.xml" />
+		</update>
+	</info>
+
+	<element name="Mistkeeper" type="Class" source="XML Helper Class Acceptance" id="ID_AXHCLASS_CLASS_MISTKEEPER">
+		<description>
+			<p>As a mistkeeper, you gain the following class features.</p>
+			<div element="ID_AXHCLASS_CLASS_FEATURE_MISTKEEPER_SPELLCASTING" />
+			<div element="ID_AXHCLASS_CLASS_FEATURE_MISTKEEPER_MIST_CURSE" />
+			<div element="ID_AXHCLASS_CLASS_FEATURE_MISTKEEPER_HEXES" />
+			<div element="ID_AXHCLASS_CLASS_FEATURE_MISTKEEPER_FAMILIAR" />
+			<div element="ID_AXHCLASS_CLASS_FEATURE_MISTKEEPER_ASI" />
+			<div element="ID_AXHCLASS_CLASS_FEATURE_MISTKEEPER_GRAND_HEX" />
+		</description>
+		<sheet display="false" />
+		<setters>
+			<set name="short">As a mistkeeper, you gain the following class features.</set>
+			<set name="hd">d8</set>
+			<set name="hp">8</set>
+		</setters>
+		<rules>
+			<!-- Source rule: Gain Wisdom saving throw proficiency. -->
+			<grant type="Proficiency" id="ID_PROFICIENCY_SAVINGTHROW_WISDOM" requirements="!ID_AXHCLASS_MULTICLASS_MISTKEEPER" />
+			<!-- Source rule: Gain Charisma saving throw proficiency. -->
+			<grant type="Proficiency" id="ID_PROFICIENCY_SAVINGTHROW_CHARISMA" requirements="!ID_AXHCLASS_MULTICLASS_MISTKEEPER" />
+			<!-- Source rule: Choose 2 class skill proficiencies. -->
+			<select type="Proficiency" name="Skill Proficiency (Mistkeeper)" number="2" supports="Skill,(Arcana||Survival)" requirements="!ID_AXHCLASS_MULTICLASS_MISTKEEPER" />
+			<!-- Source rule: Grant Spellcasting at Mistkeeper level 1. -->
+			<grant type="Class Feature" id="ID_AXHCLASS_CLASS_FEATURE_MISTKEEPER_SPELLCASTING" level="1" />
+			<!-- Source rule: Grant Mist Curse at Mistkeeper level 1. -->
+			<grant type="Class Feature" id="ID_AXHCLASS_CLASS_FEATURE_MISTKEEPER_MIST_CURSE" level="1" />
+			<!-- Source rule: Grant Hexes at Mistkeeper level 1. -->
+			<grant type="Class Feature" id="ID_AXHCLASS_CLASS_FEATURE_MISTKEEPER_HEXES" level="1" />
+			<!-- Source rule: Grant Familiar at Mistkeeper level 2. -->
+			<grant type="Class Feature" id="ID_AXHCLASS_CLASS_FEATURE_MISTKEEPER_FAMILIAR" level="2" />
+			<!-- Source rule: Grant Ability Score Improvement at Mistkeeper level 4. -->
+			<grant type="Class Feature" id="ID_AXHCLASS_CLASS_FEATURE_MISTKEEPER_ASI" level="4" />
+			<!-- Source rule: Grant Grand Hex at Mistkeeper level 11. -->
+			<grant type="Class Feature" id="ID_AXHCLASS_CLASS_FEATURE_MISTKEEPER_GRAND_HEX" level="11" />
+		</rules>
+		<multiclass id="ID_AXHCLASS_MULTICLASS_MISTKEEPER">
+			<prerequisite>Charisma 13</prerequisite>
+			<requirements>[cha:13]</requirements>
+			<setters>
+				<set name="multiclass proficiencies">one skill from the Mistkeeper skill list</set>
+			</setters>
+			<rules>
+				<grant type="Grants" id="ID_INTERNAL_GRANT_MULTICLASS" />
+				<select type="Proficiency" name="Skill Proficiency (Mistkeeper Multiclass)" supports="Skill,(Arcana||Survival)" />
+			</rules>
+		</multiclass>
+	</element>
+	<element name="Spellcasting" type="Class Feature" source="XML Helper Class Acceptance" id="ID_AXHCLASS_CLASS_FEATURE_MISTKEEPER_SPELLCASTING">
+		<compendium display="false" />
+		<description>
+			<p><em>1st-level Mistkeeper feature</em></p>
+			<p>Charisma is your spellcasting ability for your spells.
+You know two spells. When you gain a level, you can replace one spell you know with another spell.</p>
+		</description>
+		<sheet>
+			<description>Charisma is your spellcasting ability for your spells.
+You know two spells. When you gain a level, you can replace one spell you know with another spell.</description>
+		</sheet>
+		<spellcasting name="Mistkeeper" ability="Charisma" prepare="false" allowReplace="true">
+			<list>Mistkeeper</list>
+		</spellcasting>
+		<rules>
+			<!-- Source rule: Enable Aurora spellcasting feature prerequisites. -->
+			<grant type="Grants" id="ID_INTERNAL_GRANTS_SPELLCASTING_FEATURE" />
+			<!-- Source rule: Increase level 1 spell slots by 2 at Mistkeeper level 1. -->
+			<stat name="mistkeeper:spellcasting:slots:1" value="2" level="1" />
+			<!-- Source rule: Increase level 1 spell slots by 1 at Mistkeeper level 2. -->
+			<stat name="mistkeeper:spellcasting:slots:1" value="1" level="2" />
+			<!-- Source rule: Increase level 1 spell slots by 1 at Mistkeeper level 3. -->
+			<stat name="mistkeeper:spellcasting:slots:1" value="1" level="3" />
+			<!-- Source rule: Increase level 2 spell slots by 2 at Mistkeeper level 3. -->
+			<stat name="mistkeeper:spellcasting:slots:2" value="2" level="3" />
+			<!-- Source rule: Increase level 2 spell slots by 1 at Mistkeeper level 4. -->
+			<stat name="mistkeeper:spellcasting:slots:2" value="1" level="4" />
+			<!-- Source rule: Increase level 3 spell slots by 2 at Mistkeeper level 5. -->
+			<stat name="mistkeeper:spellcasting:slots:3" value="2" level="5" />
+			<!-- Source rule: Increase level 3 spell slots by 1 at Mistkeeper level 6. -->
+			<stat name="mistkeeper:spellcasting:slots:3" value="1" level="6" />
+			<!-- Source rule: Increase level 4 spell slots by 1 at Mistkeeper level 7. -->
+			<stat name="mistkeeper:spellcasting:slots:4" value="1" level="7" />
+			<!-- Source rule: Increase level 4 spell slots by 1 at Mistkeeper level 8. -->
+			<stat name="mistkeeper:spellcasting:slots:4" value="1" level="8" />
+			<!-- Source rule: Increase level 4 spell slots by 1 at Mistkeeper level 9. -->
+			<stat name="mistkeeper:spellcasting:slots:4" value="1" level="9" />
+			<!-- Source rule: Increase level 5 spell slots by 1 at Mistkeeper level 9. -->
+			<stat name="mistkeeper:spellcasting:slots:5" value="1" level="9" />
+			<!-- Source rule: Increase level 5 spell slots by 1 at Mistkeeper level 10. -->
+			<stat name="mistkeeper:spellcasting:slots:5" value="1" level="10" />
+			<!-- Source rule: Increase level 5 spell slots by 1 at Mistkeeper level 18. -->
+			<stat name="mistkeeper:spellcasting:slots:5" value="1" level="18" />
+			<!-- Source rule: Increase level 6 spell slots by 1 at Mistkeeper level 11. -->
+			<stat name="mistkeeper:spellcasting:slots:6" value="1" level="11" />
+			<!-- Source rule: Increase level 6 spell slots by 1 at Mistkeeper level 19. -->
+			<stat name="mistkeeper:spellcasting:slots:6" value="1" level="19" />
+			<!-- Source rule: Increase level 7 spell slots by 1 at Mistkeeper level 13. -->
+			<stat name="mistkeeper:spellcasting:slots:7" value="1" level="13" />
+			<!-- Source rule: Increase level 7 spell slots by 1 at Mistkeeper level 20. -->
+			<stat name="mistkeeper:spellcasting:slots:7" value="1" level="20" />
+			<!-- Source rule: Increase level 8 spell slots by 1 at Mistkeeper level 15. -->
+			<stat name="mistkeeper:spellcasting:slots:8" value="1" level="15" />
+			<!-- Source rule: Increase level 9 spell slots by 1 at Mistkeeper level 17. -->
+			<stat name="mistkeeper:spellcasting:slots:9" value="1" level="17" />
+			<!-- Source rule: Increase known cantrips by 2 at Mistkeeper level 1. -->
+			<stat name="mistkeeper:cantrips:known" value="2" level="1" />
+			<!-- Source rule: Increase known cantrips by 2 at Mistkeeper level 4. -->
+			<stat name="mistkeeper:cantrips:known" value="2" level="4" />
+			<!-- Source rule: Choose 2 additional Mistkeeper spells at level 1. -->
+			<select type="Spell" name="Spellcasting (Mistkeeper)" supports="$(spellcasting:list),$(spellcasting:slots)" level="1" number="2" spellcasting="Mistkeeper" />
+			<!-- Source rule: Choose 2 additional Mistkeeper spells at level 5. -->
+			<select type="Spell" name="Spellcasting (Mistkeeper)" supports="$(spellcasting:list),$(spellcasting:slots)" level="5" number="2" spellcasting="Mistkeeper" />
+			<!-- Source rule: Choose 2 Mistkeeper cantrips. -->
+			<select type="Spell" name="Cantrip (Mistkeeper)" supports="$(spellcasting:list), 0" level="1" number="2" spellcasting="Mistkeeper" />
+			<!-- Source rule: Choose another Mistkeeper cantrip at level 4. -->
+			<select type="Spell" name="Cantrip (Mistkeeper)" supports="$(spellcasting:list), 0" level="4" number="2" spellcasting="Mistkeeper" />
+		</rules>
+	</element>
+	<element name="Mist Curse" type="Class Feature" source="XML Helper Class Acceptance" id="ID_AXHCLASS_CLASS_FEATURE_MISTKEEPER_MIST_CURSE">
+		<compendium display="false" />
+		<description>
+			<p><em>1st-level Mistkeeper feature</em></p>
+			<p>Choose the form of your curse from the options below.
+Ember. You learn the produce flame cantrip, which does not count against your cantrips known.
+Wanderer. You can move quietly when there is mist.</p>
+		</description>
+		<sheet>
+			<description>Choose the form of your curse from the options below.
+Ember. You learn the produce flame cantrip, which does not count against your cantrips known.
+Wanderer. You can move quietly when there is mist.</description>
+		</sheet>
+		<rules>
+			<!-- Source rule: Choose 1 at Mistkeeper level 1. -->
+<select type="Class Feature" name="Mist Curse (Mistkeeper, level 1)" supports="ID_AXHCLASS_CLASS_CHOICE_MISTKEEPER_MIST_CURSE" level="1" />
+		</rules>
+	</element>
+	<element name="Hexes" type="Class Feature" source="XML Helper Class Acceptance" id="ID_AXHCLASS_CLASS_FEATURE_MISTKEEPER_HEXES">
+		<compendium display="false" />
+		<description>
+			<p><em>1st-level Mistkeeper feature</em></p>
+			<p>At 1st level, you gain two hexes of your choice, as shown in the Hexes Known column.
+When you gain a level, you can replace one hex you know with another hex.</p>
+		</description>
+		<sheet>
+			<description>At 1st level, you gain two hexes of your choice, as shown in the Hexes Known column.
+When you gain a level, you can replace one hex you know with another hex.</description>
+		</sheet>
+		<rules>
+			<!-- Source rule: Choose 2 at Mistkeeper level 1. -->
+<select type="Class Feature" name="Hexes (Mistkeeper, level 1)" supports="ID_AXHCLASS_CLASS_CHOICE_MISTKEEPER_HEXES" level="1" number="2" />
+			<!-- Source rule: Choose 1 at Mistkeeper level 5. -->
+<select type="Class Feature" name="Hexes (Mistkeeper, level 5)" supports="ID_AXHCLASS_CLASS_CHOICE_MISTKEEPER_HEXES" level="5" />
+		</rules>
+	</element>
+	<element name="Familiar" type="Class Feature" source="XML Helper Class Acceptance" id="ID_AXHCLASS_CLASS_FEATURE_MISTKEEPER_FAMILIAR">
+		<compendium display="false" />
+		<description>
+			<p><em>2nd-level Mistkeeper feature</em></p>
+			<p>At 2nd level, you learn the find familiar spell and can cast it as a ritual.</p>
+		</description>
+		<sheet>
+			<description>At 2nd level, you learn the find familiar spell and can cast it as a ritual.</description>
+		</sheet>
+		<rules>
+			<!-- Source rule: Learn Find Familiar; use the feature instructions for its ritual and forms. -->
+<grant type="Spell" id="ID_PHB_SPELL_FIND_FAMILIAR" spellcasting="Mistkeeper" />
+		</rules>
+	</element>
+	<element name="Ability Score Improvement" type="Class Feature" source="XML Helper Class Acceptance" id="ID_AXHCLASS_CLASS_FEATURE_MISTKEEPER_ASI">
+		<compendium display="false" />
+		<description>
+			<p><em>4th-level Mistkeeper feature</em></p>
+			<p>When you reach 4th level, and again at 8th, 12th, 16th, and 19th level,
+you can increase one ability score by 2 or two ability scores by 1, to a maximum of 20.</p>
+		</description>
+		<sheet>
+			<description>When you reach 4th level, and again at 8th, 12th, 16th, and 19th level,
+you can increase one ability score by 2 or two ability scores by 1, to a maximum of 20.</description>
+		</sheet>
+		<rules>
+			<!-- Source rule: Choose 2 at Mistkeeper level 4. -->
+<select type="Ability Score Improvement" name="Ability Score Improvement (Mistkeeper, level 4)" supports="Ability Score Improvement,Class" level="4" number="2" />
+			<!-- Source rule: Choose 2 at Mistkeeper level 8. -->
+<select type="Ability Score Improvement" name="Ability Score Improvement (Mistkeeper, level 8)" supports="Ability Score Improvement,Class" level="8" number="2" />
+			<!-- Source rule: Choose 2 at Mistkeeper level 12. -->
+<select type="Ability Score Improvement" name="Ability Score Improvement (Mistkeeper, level 12)" supports="Ability Score Improvement,Class" level="12" number="2" />
+			<!-- Source rule: Choose 2 at Mistkeeper level 16. -->
+<select type="Ability Score Improvement" name="Ability Score Improvement (Mistkeeper, level 16)" supports="Ability Score Improvement,Class" level="16" number="2" />
+			<!-- Source rule: Choose 2 at Mistkeeper level 19. -->
+<select type="Ability Score Improvement" name="Ability Score Improvement (Mistkeeper, level 19)" supports="Ability Score Improvement,Class" level="19" number="2" />
+		</rules>
+	</element>
+	<element name="Grand Hex" type="Class Feature" source="XML Helper Class Acceptance" id="ID_AXHCLASS_CLASS_FEATURE_MISTKEEPER_GRAND_HEX">
+		<compendium display="false" />
+		<description>
+			<p><em>11th-level Mistkeeper feature</em></p>
+			<p>By 11th level you learn one Grand Hex, and another at 13th, 15th, and 18th level.</p>
+		</description>
+		<sheet>
+			<description>By 11th level you learn one Grand Hex, and another at 13th, 15th, and 18th level.</description>
+		</sheet>
+		<rules>
+			<!-- Source rule: Choose 1 at Mistkeeper level 11. -->
+<select type="Class Feature" name="Grand Hex (Mistkeeper, level 11)" supports="ID_AXHCLASS_CLASS_CHOICE_MISTKEEPER_GRAND_HEX" level="11" />
+			<!-- Source rule: Choose 1 at Mistkeeper level 13. -->
+<select type="Class Feature" name="Grand Hex (Mistkeeper, level 13)" supports="ID_AXHCLASS_CLASS_CHOICE_MISTKEEPER_GRAND_HEX" level="13" />
+			<!-- Source rule: Choose 1 at Mistkeeper level 15. -->
+<select type="Class Feature" name="Grand Hex (Mistkeeper, level 15)" supports="ID_AXHCLASS_CLASS_CHOICE_MISTKEEPER_GRAND_HEX" level="15" />
+			<!-- Source rule: Choose 1 at Mistkeeper level 18. -->
+<select type="Class Feature" name="Grand Hex (Mistkeeper, level 18)" supports="ID_AXHCLASS_CLASS_CHOICE_MISTKEEPER_GRAND_HEX" level="18" />
+		</rules>
+	</element>
+	<element name="Ember" type="Class Feature" source="XML Helper Class Acceptance" id="ID_AXHCLASS_CLASS_CHOICE_MISTKEEPER_MIST_CURSE_EMBER">
+		<supports>ID_AXHCLASS_CLASS_CHOICE_MISTKEEPER_MIST_CURSE</supports>
+		<requirements>ID_AXHCLASS_CLASS_FEATURE_MISTKEEPER_MIST_CURSE</requirements>
+		<description><p>You learn the produce flame cantrip, which does not count against your cantrips known.</p></description>
+		<sheet><description>You learn the produce flame cantrip, which does not count against your cantrips known.</description></sheet>
+		<rules>
+			<grant type="Spell" id="ID_PHB_SPELL_PRODUCE_FLAME" spellcasting="Mistkeeper" />
+		</rules>
+	</element>
+	<element name="Wanderer" type="Class Feature" source="XML Helper Class Acceptance" id="ID_AXHCLASS_CLASS_CHOICE_MISTKEEPER_MIST_CURSE_WANDERER">
+		<supports>ID_AXHCLASS_CLASS_CHOICE_MISTKEEPER_MIST_CURSE</supports>
+		<requirements>ID_AXHCLASS_CLASS_FEATURE_MISTKEEPER_MIST_CURSE</requirements>
+		<description><p>You can move quietly when there is mist.</p></description>
+		<sheet><description>You can move quietly when there is mist.</description></sheet>
+	</element>
+	<element name="Fog Bell" type="Class Feature" source="XML Helper Class Acceptance" id="ID_AXHCLASS_CLASS_CHOICE_MISTKEEPER_HEXES_FOG_BELL">
+		<supports>ID_AXHCLASS_CLASS_CHOICE_MISTKEEPER_HEXES</supports>
+		<requirements>ID_AXHCLASS_CLASS_FEATURE_MISTKEEPER_HEXES</requirements>
+		<description><p>As an action, you make a sound in the fog.</p></description>
+		<sheet><description>As an action, you make a sound in the fog.</description></sheet>
+	</element>
+	<element name="Mist Anchor" type="Class Feature" source="XML Helper Class Acceptance" id="ID_AXHCLASS_CLASS_CHOICE_MISTKEEPER_HEXES_MIST_ANCHOR">
+		<supports>ID_AXHCLASS_CLASS_CHOICE_MISTKEEPER_HEXES</supports>
+		<requirements>ID_AXHCLASS_CLASS_FEATURE_MISTKEEPER_HEXES,ID_AXHCLASS_CLASS_FEATURE_MISTKEEPER_FAMILIAR</requirements>
+		<description><p>You can anchor your familiar in a patch of mist.
+You must have the Familiar feature to choose this hex.</p></description>
+		<sheet><description>You can anchor your familiar in a patch of mist.
+You must have the Familiar feature to choose this hex.</description></sheet>
+	</element>
+	<element name="Rain Shield" type="Class Feature" source="XML Helper Class Acceptance" id="ID_AXHCLASS_CLASS_CHOICE_MISTKEEPER_HEXES_RAIN_SHIELD">
+		<supports>ID_AXHCLASS_CLASS_CHOICE_MISTKEEPER_HEXES</supports>
+		<requirements>ID_AXHCLASS_CLASS_FEATURE_MISTKEEPER_HEXES</requirements>
+		<description><p>You can protect one creature from rain.</p></description>
+		<sheet><description>You can protect one creature from rain.</description></sheet>
+	</element>
+	<element name="Soft Steps" type="Class Feature" source="XML Helper Class Acceptance" id="ID_AXHCLASS_CLASS_CHOICE_MISTKEEPER_HEXES_SOFT_STEPS">
+		<supports>ID_AXHCLASS_CLASS_CHOICE_MISTKEEPER_HEXES</supports>
+		<requirements>ID_AXHCLASS_CLASS_FEATURE_MISTKEEPER_HEXES</requirements>
+		<description><p>You can cross a puddle silently.</p></description>
+		<sheet><description>You can cross a puddle silently.</description></sheet>
+	</element>
+	<element name="Cloud Seat" type="Class Feature" source="XML Helper Class Acceptance" id="ID_AXHCLASS_CLASS_CHOICE_MISTKEEPER_GRAND_HEX_CLOUD_SEAT">
+		<supports>ID_AXHCLASS_CLASS_CHOICE_MISTKEEPER_GRAND_HEX</supports>
+		<requirements>ID_AXHCLASS_CLASS_FEATURE_MISTKEEPER_GRAND_HEX</requirements>
+		<description><p>You can rest on a small cloud.</p></description>
+		<sheet><description>You can rest on a small cloud.</description></sheet>
+	</element>
+	<element name="Deep Mist" type="Class Feature" source="XML Helper Class Acceptance" id="ID_AXHCLASS_CLASS_CHOICE_MISTKEEPER_GRAND_HEX_DEEP_MIST">
+		<supports>ID_AXHCLASS_CLASS_CHOICE_MISTKEEPER_GRAND_HEX</supports>
+		<requirements>ID_AXHCLASS_CLASS_FEATURE_MISTKEEPER_GRAND_HEX</requirements>
+		<description><p>You can make a bank of mist.</p></description>
+		<sheet><description>You can make a bank of mist.</description></sheet>
+	</element>
+	<element name="Distant Bell" type="Class Feature" source="XML Helper Class Acceptance" id="ID_AXHCLASS_CLASS_CHOICE_MISTKEEPER_GRAND_HEX_DISTANT_BELL">
+		<supports>ID_AXHCLASS_CLASS_CHOICE_MISTKEEPER_GRAND_HEX</supports>
+		<requirements>ID_AXHCLASS_CLASS_FEATURE_MISTKEEPER_GRAND_HEX</requirements>
+		<description><p>You can sound a bell in the distance.</p></description>
+		<sheet><description>You can sound a bell in the distance.</description></sheet>
+	</element>
+	<element name="Fog House" type="Class Feature" source="XML Helper Class Acceptance" id="ID_AXHCLASS_CLASS_CHOICE_MISTKEEPER_GRAND_HEX_FOG_HOUSE">
+		<supports>ID_AXHCLASS_CLASS_CHOICE_MISTKEEPER_GRAND_HEX</supports>
+		<requirements>ID_AXHCLASS_CLASS_FEATURE_MISTKEEPER_GRAND_HEX</requirements>
+		<description><p>You can shelter in a house of fog.</p></description>
+		<sheet><description>You can shelter in a house of fog.</description></sheet>
+	</element>
+
+</elements>

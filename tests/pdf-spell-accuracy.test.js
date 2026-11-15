@@ -84,3 +84,17 @@ test('missing referenced stat blocks are visible in review and validation, and e
   assert.ok(xml.includes('&lt;script&gt;unsafe&lt;/script&gt;'));
   assert.ok(!xml.includes('<script>'));
 });
+
+
+test('split cantrip headings and duration labels recover complete OCR spell metadata', () => {
+  const { context } = loadApp();
+  const text = ['Copper Blade', 'Evocation ca ntrip', 'Casting Time: 1 action', 'Range: 5 f eet',
+    'Components: V, S', 'Duratio n: Instantan eo us', 'A harmless copper flash appears.'].join('\n');
+  const [spell] = context.parseSpellsFromText(text);
+  assert.equal(spell.name, 'Copper Blade');
+  assert.equal(spell.level, 0);
+  assert.equal(spell.range, '5 feet');
+  assert.equal(spell.duration, 'Instantaneous');
+  assert.equal(spell.description, 'A harmless copper flash appears.');
+  assert.equal(context.parseSpellKind('You gain a ca ntrip.'), null, 'Prose must not become a spell heading.');
+});
