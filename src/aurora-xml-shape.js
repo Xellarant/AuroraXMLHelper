@@ -12,6 +12,17 @@
     return options?.DOMParser || root.DOMParser || root.window?.DOMParser;
   }
 
+  const children = (node, name) => Array.from(node?.children || []).filter(child => child.tagName === name);
+  const child = (node, name) => children(node, name)[0];
+
+  function xmlParseError(doc) {
+    const nodes = doc.getElementsByTagNameNS
+      ? Array.from(doc.getElementsByTagNameNS('*', 'parsererror'))
+      : [doc.querySelector('parsererror')].filter(Boolean);
+    return nodes.find(node => node === doc.documentElement || node.namespaceURI === undefined
+      || ['http://www.mozilla.org/newlayout/xml/parsererror.xml', 'http://www.w3.org/1999/xhtml'].includes(node.namespaceURI)) || null;
+  }
+
   function validateAuroraXmlDocuments(docs, scopeLabel, options = {}) {
     const issues = [];
     const DOMParserCtor = resolveDOMParser(options);
@@ -27,35 +38,52 @@
 
     docs.forEach(({ fileName, xml }) => {
       const doc = parser.parseFromString(xml, 'application/xml');
-      const parseError = doc.querySelector('parsererror');
+      const parseError = xmlParseError(doc);
       if (parseError) {
-        addIssue(fileName, 'XmlParse', parseError.textContent.trim().slice(0, 180));
+        addIssue(fileName, 'XmlParse', parseError.textContent.trim().slice(0, 180) || 'The parser reported invalid XML syntax.');
         return;
       }
 
       const rootElement = doc.documentElement;
-      if (!rootElement || rootElement.tagName !== 'elements') {
-        addIssue(fileName, 'RootShape', `Unexpected root '${rootElement?.tagName || '(none)'}'; expected 'elements'.`);
+      if (!rootElement || !['elements', 'index'].includes(rootElement.tagName)) {
+        addIssue(fileName, 'RootShape', `Unexpected root '${rootElement?.tagName || '(none)'}'; expected 'elements' or 'index'.`);
         return;
       }
 
-      const info = rootElement.querySelector('info');
+      const isIndex = rootElement.tagName === 'index';
+      const prefix = isIndex ? 'Index' : 'Elements';
+      const path = '/' + rootElement.tagName;
+      const info = child(rootElement, 'info');
       if (!info) {
-        addIssue(fileName, 'ElementsInfo', 'Missing /elements/info node.');
+        addIssue(fileName, prefix + 'Info', 'Missing ' + path + '/info node.');
       } else {
-        if (info.querySelector('n')) addIssue(fileName, 'ElementsInfo', 'Uses /elements/info/n; Aurora metadata should use /elements/info/name.');
-        const update = info.querySelector('update');
+        if (!isIndex && child(info, 'n')) addIssue(fileName, 'ElementsInfo', 'Uses /elements/info/n; Aurora metadata should use /elements/info/name.');
+        const update = child(info, 'update');
         if (!update) {
-          addIssue(fileName, 'ElementsUpdate', 'Missing /elements/info/update node.');
+          addIssue(fileName, prefix + 'Update', 'Missing ' + path + '/info/update node.');
         } else {
-          if (!update.getAttribute('version')?.trim()) addIssue(fileName, 'ElementsUpdate', 'Update node is missing a non-empty version attribute.');
-          Array.from(update.querySelectorAll('file')).forEach(fileNode => {
+          if (!update.getAttribute('version')?.trim()) addIssue(fileName, prefix + 'Update', 'Update node is missing a non-empty version attribute.');
+          children(update, 'file').forEach(fileNode => {
             const name = fileNode.getAttribute('name') || '';
             const url = fileNode.getAttribute('url') || '';
-            if (!name.trim()) addIssue(fileName, 'ElementsUpdate', 'File node is missing a non-empty name attribute.');
-            if (!url.trim()) addIssue(fileName, 'ElementsUpdate', `File node '${name}' is missing a non-empty url attribute.`);
+            if (!name.trim()) addIssue(fileName, prefix + 'Update', 'File node is missing a non-empty name attribute.');
+            if (!url.trim()) addIssue(fileName, prefix + 'Update', `File node '${name}' is missing a non-empty url attribute.`);
           });
         }
+      }
+
+      if (isIndex) {
+        const files = child(rootElement, 'files');
+        if (!files) addIssue(fileName, 'IndexFiles', 'Missing /index/files node.');
+        const names = new Set();
+        for (const file of children(files, 'file')) {
+          const name = file.getAttribute('name') || '';
+          if (!name.trim()) addIssue(fileName, 'IndexFiles', 'File node is missing a non-empty name attribute.');
+          if (!file.getAttribute('url')?.trim()) addIssue(fileName, 'IndexFiles', 'File node ' + name + ' is missing a non-empty url attribute.');
+          if (names.has(name)) addIssue(fileName, 'IndexFiles', 'Index contains duplicate file name ' + name + '.');
+          names.add(name);
+        }
+        return;
       }
 
       Array.from(rootElement.children).filter(node => node.tagName === 'element').forEach(element => {
@@ -72,9 +100,9 @@
         }
 
         if (element.getAttribute('type') === 'Class') {
-          const hd = element.querySelector('setters > set[name="hd"]');
+          const hd = children(child(element, 'setters'), 'set').find(setter => setter.getAttribute('name') === 'hd');
           if (!hd || !hd.textContent.trim()) addIssue(fileName, 'ClassShape', `Class '${id}' is missing a non-empty hd setter.`);
-          Array.from(element.querySelectorAll('multiclass')).forEach(multiclass => {
+          children(element, 'multiclass').forEach(multiclass => {
             if (!multiclass.getAttribute('id')?.trim()) addIssue(fileName, 'ClassShape', `Class '${id}' has a multiclass node without an id attribute.`);
           });
         }
@@ -92,6 +120,7 @@
   }
 
   return {
-    validateAuroraXmlDocuments
+    validateAuroraXmlDocuments,
+    xmlParseError
   };
 });

@@ -43,3 +43,24 @@ test('a stale release or request failure produces a bounded failure with file de
     timeoutMs: 0, fetchImpl: async () => { throw new Error('Network failure'); }
   }), /index.html: Network failure/);
 });
+
+test('the overall release deadline also bounds a slow request in the last attempt', async () => {
+  let configured;
+  const started = Date.now();
+  await assert.rejects(waitForRelease('https://example.test/project/', files, {
+    timeoutMs: 20, requestTimeoutMs: 1000,
+    fetchImpl: async (url, options) => {
+      configured = options.signal;
+      return new Promise((resolve, reject) => options.signal.addEventListener('abort', () => reject(new Error('Request deadline reached')), { once: true }));
+    }
+  }), /Request deadline reached/);
+  assert.equal(configured.aborted, true);
+  assert.ok(Date.now() - started < 500, 'A 20ms overall deadline must not wait for a 1000ms per-request timeout.');
+});
+
+test('empty checks and invalid wait settings cannot produce a misleading successful release', async () => {
+  await assert.rejects(inspectRelease('https://example.test/project/', []), /at least one expected file/);
+  await assert.rejects(waitForRelease('https://example.test/project/', files, { timeoutMs: NaN }), /nonnegative numbers/);
+  await assert.rejects(waitForRelease('https://example.test/project/', files, { intervalMs: -1 }), /nonnegative numbers/);
+  await assert.rejects(inspectRelease('https://example.test/project/', files, { requestTimeoutMs: 0 }), /positive number/);
+});

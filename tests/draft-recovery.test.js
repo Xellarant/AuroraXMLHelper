@@ -113,3 +113,37 @@ test('unavailable browser storage produces a recoverable error', () => {
   const store = draft.createStore({ getItem() { throw new Error('SecurityError'); } });
   assert.throws(() => store.load(), /unavailable/);
 });
+
+test('malformed nested entries and skipped records are rejected before restoration mutates the workspace', () => {
+  const cases = [
+    value => { value.data.spell = [{ name: 'Spell', classes: 'Wizard' }]; },
+    value => { value.data.class = [{ name: 'Class', features: 'Feature' }]; },
+    value => { value.data.class = [{ name: 'Class', skillChoices: { from: 'Arcana' } }]; },
+    value => { value.data.class = [{ name: 'Class', choices: [{ name: 'Choice', feature: 'Feature', mode: 'options', options: [], levels: '1, 4' }] }]; },
+    value => { value.baseline.background = [{ name: 'Background', abilityScores: {} }]; },
+    value => { value.data.race = [{ name: 'Race', traits: [null] }]; },
+    value => { value.data.class = [{ name: 'Class', _source: { progression: {} } }]; },
+    value => { value.data.spell = [{ name: 'Spell', _source: { related: [null] } }]; },
+    value => { value.data.feat = [{ name: 42, benefits: ['Benefit'] }]; },
+    value => { value.skipped = [null]; },
+    value => { value.skipped = [{ type: 'spell', item: { name: 'Spell', classes: {} } }]; }
+  ];
+  for (const mutate of cases) {
+    const value = workspace();
+    mutate(value);
+    assert.throws(() => draft.encode(value), /invalid/i);
+  }
+  const incomplete = workspace();
+  incomplete.data.class = [{ name: '', features: [], skillChoices: { from: [] } }];
+  incomplete.data.spell = [{ name: '', level: '', classes: [] }];
+  assert.doesNotThrow(() => draft.encode(incomplete), 'Ordinary incomplete entries must stay recoverable.');
+});
+
+test('remembered records can use the same complete shape check as workspace drafts', () => {
+  assert.equal(draft.validElementRecord('feat', { name: 'Edited Feat', benefits: ['Benefit'] }), true);
+  assert.equal(draft.validElementRecord('spell', { name: 'Spell', classes: [] }), true);
+  assert.equal(draft.validElementRecord('spell', { name: 'Spell', availability: {} }), false);
+  assert.equal(draft.validElementRecord('class', { name: 'Class', choices: 'wrong shape' }), false);
+  assert.equal(draft.validElementRecord('class', { name: 'Class', features: [{ name: 'Feature', description: 'Rules.' }] }), true);
+  assert.equal(draft.validElementRecord('arbitrary', { name: 'Unknown' }), false);
+});

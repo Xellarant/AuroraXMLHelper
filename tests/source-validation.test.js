@@ -1,10 +1,10 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 const { generateFromFixtureFile, repoRoot } = require('./fixture-harness');
 const { sourceLineRecords, sourceContextForName } = require('../scripts/benchmark-corpus');
 const { buildSourceReport } = require('../scripts/source-fixture-report');
+const temporaryDirectory = require('./temp-directories').temporaryDirectories();
 const {
   createSourceModel,
   validateSourceModel,
@@ -332,7 +332,7 @@ test('markdown table extraction keeps headers and rows', () => {
 });
 
 test('source fixture reporting forwards manifest pageRange to the source reader', async () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'aurora-xml-helper-source-range-'));
+  const tempRoot = temporaryDirectory('aurora-xml-helper-source-range-');
   const sourcePath = path.join(tempRoot, 'fixture.txt');
   fs.writeFileSync(sourcePath, [
     'Range Spark',

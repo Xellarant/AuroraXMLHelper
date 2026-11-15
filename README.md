@@ -56,7 +56,9 @@ such as `24-32` to focus extraction on a known section.
 
 Click **Parse PDF**. The parser scans the selected pages with repeatable layout
 rules. It is intentionally conservative: it prefers fewer high-confidence
-elements over guessed content.
+elements over guessed content. You can cancel an active parse. Replacement parsing
+asks before replacing existing entries; failure or an empty result keeps the prior
+workspace and its source details.
 
 ### 4. Review and edit
 
@@ -88,7 +90,14 @@ applied automatically the next time the same generated element appears. Use
 **Forget** to stop reusing a remembered correction without reverting the current
 edit. Remembered corrections reuse content while preserving the newly parsed
 source references, so a previous page number or manual source check is not
-carried into a different extraction.
+carried into a different extraction. New corrections reuse only changed fields.
+Corrections to nested features, choices, or benefits replace that whole collection
+and raise a review warning; compare the fresh source before using them. Older
+whole-entry corrections also raise a warning. Use **Revert to Generated** to recover
+the new parser output before reapplying intended edits.
+
+Removed entries and nested features, traits, benefits, choices, and options offer
+**Undo removal** for the last removal in the open workspace.
 
 You can also click **Manual Author** to start without a parsed PDF result, add a
 blank element for any supported type, or paste a missed section into the review
@@ -120,6 +129,7 @@ The element detail picker adapts to the selected starter: spell lists and spell
 setters, feat supports and prerequisite text, or common gear, weapon, armor, and
 magic item setters. It replaces an existing value with the same property name.
 Feat prerequisite text is for display and does not create a dynamic requirement.
+Leave optional Feat supports or prerequisite values blank to clear them.
 
 ### 5. Download
 
@@ -127,6 +137,9 @@ Feat prerequisite text is for display and does not create a dynamic requirement.
 - **Single XML** creates one combined XML file for quick testing.
 
 If incomplete elements were skipped, the ZIP includes `skipped-elements.txt`.
+Known review findings accompany exports in `unresolved-items.txt` inside the ZIP
+or a comment in Single XML. Previewing XML keeps the pending-edit indicator;
+edits made during ZIP creation remain marked as pending.
 
 ### Spell availability
 
@@ -465,3 +478,10 @@ reported XML shape issues.
 ---
 
 Good luck and happy dungeoning.
+
+
+## Feature and workflow review
+
+The [November 2026 audit](docs/accuracy-checks/2026-11-14/feature-flow-audit/README.md)
+records the parsing, editing, authoring, repair, recovery, export, and code quality
+fixes, their checks, and remaining limitations.

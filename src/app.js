@@ -6,14 +6,18 @@ let extractedData = {}; // { spell: [...], archetype: [...], item: [...], feat: 
 let skippedItems = []; // items filtered out for being < 80% complete
 let apiKey = '';
 let useOllama = false;
-let ollamaModel = 'qwen3:8b';
 let generatedBaselineData = {};
 let sourceReviewContext = null;
 let reviewIssues = [];
 let reviewRefreshTimer;
+let extractionBusy = false;
+let extractionGeneration = 0;
+let extractionSnapshot = null;
+let activePdfDocument = null;
+let pendingFileDetails = null;
+let editRevision = 0;
 const OVERRIDE_STORAGE_KEY = 'aurora_xml_helper_overrides_v1';
-const LEGACY_AI_EXTRACTION_ENABLED = false;
-let rememberedOverrides = loadRememberedOverrides();
+let rememberedOverrides = {};
 
 const TYPE_LABELS = {
   spell: 'Spells',
@@ -28,6 +32,7 @@ const TYPE_LABELS = {
 };
 
 const ELEMENT_TYPES = ['spell', 'archetype', 'item', 'feat', 'magic', 'race', 'background', 'class', 'other'];
+rememberedOverrides = loadRememberedOverrides();
 const MANUAL_AUTHOR_TYPES = ELEMENT_TYPES;
 const PDFJS_WORKER_SRC = './vendor/pdf.worker.min.mjs';
 const WORKSPACE_VIEWS = ['parse', 'repair', 'author'];
@@ -52,8 +57,8 @@ const AUTHORING_ELEMENT_PROPERTY_OPTIONS = {
     { id: 'isRitual', label: 'Ritual', key: 'isRitual', value: 'false' }
   ],
   feat: [
-    { id: 'supports', label: 'Feat category / supports', node: 'supports', value: '', help: 'Replace the support tags, such as Epic Boon. Leave empty only if the feat has no support tags.' },
-    { id: 'prerequisite', label: 'Prerequisite', node: 'prerequisite', value: '', help: 'Adds the display prerequisite text. It does not create a dynamic requirements expression.' }
+    { id: 'supports', label: 'Feat category / supports', node: 'supports', value: '', allowEmpty: true, help: 'Replace the support tags, such as Epic Boon. Leave empty to clear the tags when the feat has none.' },
+    { id: 'prerequisite', label: 'Prerequisite', node: 'prerequisite', value: '', allowEmpty: true, help: 'Adds the display prerequisite text, or clears it when left empty. It does not create or remove a dynamic requirements expression.' }
   ],
   gear: [
     { id: 'category', label: 'Category', key: 'category', value: 'Adventuring Gear' },
@@ -117,11 +122,18 @@ window.addEventListener('DOMContentLoaded', () => {
   updateTypeCheck();
   checkExtractReady();
   setupRepairPreviewActions();
+  for (const id of ['sourceName', 'sourceAbbr', 'sourceAuthor', 'sourceYear']) {
+    document.getElementById(id)?.addEventListener('input', () => {
+      if (id === 'sourceAbbr') document.getElementById(id).dataset.userEdited = '1';
+      markChanged();
+    });
+  }
   // Mark initially checked boxes
   document.querySelectorAll('.type-check input:checked').forEach(cb => {
     cb.closest('.type-check').classList.add('checked');
   });
   renderAuthoringTemplates();
+  labelEditorControls(document);
   switchWorkspaceView('parse');
 });
 
@@ -137,6 +149,111 @@ function switchWorkspaceView(viewName) {
     tab.setAttribute('aria-selected', isActive ? 'true' : 'false');
   });
   window.AuroraDraftRecovery?.changed();
+}
+
+function confirmAction(message, options = {}) {
+  const dialog = document.getElementById('workspaceConfirm');
+  if (typeof dialog?.showModal !== 'function') return confirm(message);
+  if (dialog.open) return false;
+  document.getElementById('workspaceConfirmTitle').textContent = options.title || 'Confirm change';
+  document.getElementById('workspaceConfirmMessage').textContent = message;
+  document.getElementById('workspaceConfirmAccept').textContent = options.acceptLabel || 'Continue';
+  return new Promise(resolve => {
+    const previousFocus = document.activeElement;
+    const finish = () => {
+      dialog.removeEventListener('close', finish);
+      previousFocus?.focus?.();
+      resolve(dialog.returnValue === 'accept');
+    };
+    dialog.addEventListener('close', finish);
+    dialog.returnValue = 'cancel';
+    dialog.showModal();
+    document.getElementById('workspaceConfirmCancel').focus();
+  });
+}
+
+function performConfirmed(message, action, options) {
+  const result = confirmAction(message, options);
+  return result && typeof result.then === 'function' ? result.then(accepted => accepted ? action() : false) : result ? action() : false;
+}
+
+let editorControlSequence = 0;
+function labelEditorControls(root) {
+  root?.querySelectorAll('label').forEach(label => {
+    if (label.htmlFor) return;
+    const next = label.nextElementSibling;
+    const control = label.querySelector('input, select, textarea') || (next?.matches('input, select, textarea') ? next : null);
+    if (!control) return;
+    control.id ||= 'editor-control-' + ++editorControlSequence;
+    label.htmlFor = control.id;
+  });
+}
+
+function hasParseWork() {
+  return Object.values(extractedData).some(items => Array.isArray(items) && items.length)
+    || skippedItems.length > 0 || Boolean(document.getElementById('manualSourceText')?.value.trim());
+}
+
+function sourceFieldSnapshot() {
+  return Object.fromEntries(['sourceName', 'sourceAbbr', 'sourceAuthor', 'sourceYear'].map(id => {
+    const field = document.getElementById(id);
+    return [id, { value: field.value, dataset: { ...field.dataset } }];
+  }));
+}
+
+function restoreSourceFields(fields) {
+  for (const [id, saved] of Object.entries(fields)) {
+    const field = document.getElementById(id);
+    field.value = saved.value;
+    for (const name of ['userEdited', 'rulesetEvidence']) {
+      delete field.dataset[name];
+      if (saved.dataset[name]) field.dataset[name] = saved.dataset[name];
+    }
+  }
+  updateSourceRulesetDecisionDisplay();
+}
+
+function setExtractionBusy(busy) {
+  extractionBusy = busy;
+  document.querySelectorAll('#stepUpload input, #stepOptions input, #stepOptions select, #stepOptions button').forEach(field => {
+    if (busy) {
+      field.dataset.disabledBeforeParse = field.disabled ? '1' : '0';
+      field.disabled = true;
+    } else if (field.dataset.disabledBeforeParse !== undefined) {
+      field.disabled = field.dataset.disabledBeforeParse === '1';
+      delete field.dataset.disabledBeforeParse;
+    }
+  });
+  document.getElementById('cancelExtractBtn')?.classList.toggle('hidden', !busy);
+  document.getElementById('extractSpinner')?.classList.toggle('hidden', !busy);
+  checkExtractReady();
+}
+
+function invalidateExtraction(options = {}) {
+  extractionGeneration++;
+  const pdf = activePdfDocument;
+  activePdfDocument = null;
+  if (pdf) Promise.resolve().then(() => pdf.destroy()).catch(() => {});
+  if (options.restore !== false && extractionSnapshot) {
+    extractedData = extractionSnapshot.data;
+    generatedBaselineData = extractionSnapshot.baseline;
+    skippedItems = extractionSnapshot.skipped;
+    sourceReviewContext = extractionSnapshot.context;
+    discoveredPageRanges = extractionSnapshot.ranges;
+    restoreSourceFields(extractionSnapshot.fields);
+  }
+  extractionSnapshot = null;
+  setExtractionBusy(false);
+}
+
+function cancelExtraction() {
+  invalidateExtraction();
+  document.getElementById('extractProgress').classList.add('hidden');
+  document.getElementById('reviewArea').classList.remove('hidden');
+  buildReviewUI();
+  const error = document.getElementById('extractErrors');
+  error.className = 'alert alert-info';
+  error.textContent = 'Parsing cancelled. Your previous work has been kept.';
 }
 
 function getPdfJsLib() {
@@ -162,209 +279,23 @@ async function ensurePdfJsLoaded() {
 // Ollama provider
 // ---------------------------------------------
 
-function toggleOllama(on) {
-  if (!LEGACY_AI_EXTRACTION_ENABLED) {
-    useOllama = false;
-    setKeyStatus(true);
-    showKeyTestResult(false, legacyAiDisabledMessage());
-    return;
-  }
-  useOllama = on;
-  localStorage.setItem('use_ollama', on ? 'true' : 'false');
-  document.getElementById('ollamaSection').classList.toggle('hidden', !on);
-  document.getElementById('geminiSection').style.opacity = on ? '0.4' : '1';
-  document.getElementById('keyStatus').textContent = on ? 'OK: Using Ollama' : (apiKey ? 'OK: API key saved' : 'API key not set');
-  document.getElementById('keyStatus').className = on ? 'key-set' : (apiKey ? 'key-set' : 'key-unset');
-  checkExtractReady();
+// Compatibility entrypoints for older saved pages; extraction is local-only.
+function toggleOllama() { useOllama = false; showKeyTestResult(false, legacyAiDisabledMessage()); }
+function saveOllamaPrefs() {}
+async function testOllama() { showLegacyAiDisabled('ollamaTestResult'); }
+async function ollamaRaw() { throw new Error(legacyAiDisabledMessage()); }
+function toggleKeyVisibility() {}
+function saveKey() { apiKey = ''; showKeyTestResult(false, legacyAiDisabledMessage()); }
+function setKeyStatus() {
+  const status = document.getElementById('keyStatus');
+  if (status) { status.textContent = 'Deterministic mode'; status.className = 'key-set'; }
 }
-
-function saveOllamaPrefs() {
-  if (!LEGACY_AI_EXTRACTION_ENABLED) return;
-  const model = document.getElementById('ollamaModelInput').value.trim();
-  if (model) {
-    ollamaModel = model;
-    localStorage.setItem('ollama_model', model);
-  }
-}
-
-async function testOllama() {
-  if (!LEGACY_AI_EXTRACTION_ENABLED) {
-    showLegacyAiDisabled('ollamaTestResult');
-    return;
-  }
-  const btn = document.querySelector('#ollamaSection .btn-secondary');
-  const resultEl = document.getElementById('ollamaTestResult');
-  btn.disabled = true;
-  btn.textContent = 'Testing...';
-  resultEl.className = 'hidden';
-  try {
-    saveOllamaPrefs();
-    const resp = await fetch('http://localhost:11434/api/tags');
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const data = await resp.json();
-    const models = (data.models || []).map(m => m.name);
-    const found = models.some(m => m.startsWith(ollamaModel.split(':')[0]));
-    resultEl.className = 'alert alert-success';
-    resultEl.textContent = found
-      ? `Connected. Model "${ollamaModel}" found.`
-      : `Connected. Note: "${ollamaModel}" not found. Available: ${models.slice(0,5).join(', ')}${models.length > 5 ? '...' : ''}`;
-    resultEl.classList.remove('hidden');
-  } catch(e) {
-    resultEl.className = 'alert alert-error';
-    resultEl.textContent = `Could not reach Ollama at localhost:11434 - ${e.message}`;
-    resultEl.classList.remove('hidden');
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'Test Connection';
-  }
-}
-
-// ---------------------------------------------
-// PDF text extraction via PDF.js (for Ollama mode)
-// ---------------------------------------------
-const MAX_WORDS = 12000;
-
-async function extractTextFromChunk(uint8Array) {
-  try {
-    // PDF.js is loaded by index.html and exposed on window for the static app.
-    const pdfjsLib = await ensurePdfJsLoaded();
-    // Use the vendored worker module so PDF.js works without CDN access.
-    pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_SRC;
-    const loadingTask = pdfjsLib.getDocument({ data: uint8Array, disableWorker: true });
-    const pdf = await loadingTask.promise;
-    const pageTexts = [];
-    for (let p = 1; p <= pdf.numPages; p++) {
-      const page = await pdf.getPage(p);
-      const content = await page.getTextContent();
-      pageTexts.push(content.items.map(i => i.str).join(' '));
-    }
-    let full = pageTexts.join('\n');
-    // Truncate to MAX_WORDS
-    const words = full.split(/\s+/);
-    if (words.length > MAX_WORDS) full = words.slice(0, MAX_WORDS).join(' ') + '\n[...truncated]';
-    return full;
-  } catch(e) {
-    console.warn('PDF.js extraction failed:', e.message);
-    return ''; // caller will handle empty text
-  }
-}
-
-// ---------------------------------------------
-// Ollama raw call - mirrors geminiRaw shape
-// ---------------------------------------------
-async function ollamaRaw(textContent, promptText) {
-  if (!LEGACY_AI_EXTRACTION_ENABLED) {
-    throw new Error(legacyAiDisabledMessage());
-  }
-  const body = {
-    model: ollamaModel,
-    format: 'json',
-    stream: false,
-    messages: [{ role: 'user', content: textContent + '\n\n' + promptText }]
-  };
-
-  let lastErr;
-  for (let attempt = 0; attempt < 4; attempt++) {
-    if (attempt > 0) {
-      const waitSec = [10, 20, 40][attempt - 1];
-      setProgress(null, `Ollama busy - retrying in ${waitSec}s (${attempt}/3)...`);
-      await new Promise(r => setTimeout(r, waitSec * 1000));
-    }
-    try {
-      const resp = await fetch('http://localhost:11434/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      });
-      if (resp.ok) {
-        const data = await resp.json();
-        const text = data.message?.content || '';
-        if (!text) throw new Error('Empty response from Ollama');
-        return { text, truncated: false };
-      }
-      lastErr = new Error(`HTTP ${resp.status}`);
-      if (resp.status < 500) break;
-    } catch(e) {
-      lastErr = e;
-    }
-  }
-  throw lastErr || new Error('Ollama request failed');
-}
-
-
-// ---------------------------------------------
-// API Key
-// ---------------------------------------------
-function toggleKeyVisibility() {
-  const input = document.getElementById('apiKeyInput');
-  const btn = document.getElementById('keyVisBtn');
-  const isHidden = input.type === 'password';
-  input.type = isHidden ? 'text' : 'password';
-  btn.textContent = isHidden ? 'Hide' : 'Show';
-  btn.title = isHidden ? 'Hide key' : 'Show key';
-}
-
-function saveKey() {
-  if (!LEGACY_AI_EXTRACTION_ENABLED) {
-    apiKey = '';
-    setKeyStatus(true);
-    showKeyTestResult(false, legacyAiDisabledMessage());
-    return;
-  }
-  const val = document.getElementById('apiKeyInput').value.trim();
-  if (!val) { showKeyTestResult(false, 'Please enter an API key.'); return; }
-  apiKey = val;
-  localStorage.setItem('gemini_api_key', val);
-  setKeyStatus(true);
-  checkExtractReady();
-  showKeyTestResult(true, 'Key saved. Use Test Key to verify it works.');
-}
-
-function setKeyStatus(ok) {
-  const el = document.getElementById('keyStatus');
-  el.textContent = 'Deterministic mode';
-  el.className = 'key-set';
-}
-
-async function testKey() {
-  if (!LEGACY_AI_EXTRACTION_ENABLED) {
-    showKeyTestResult(false, legacyAiDisabledMessage());
-    return;
-  }
-  const val = document.getElementById('apiKeyInput').value.trim();
-  if (!val) { showKeyTestResult(false, 'Please enter a key first.'); return; }
-  const btn = document.getElementById('testKeyBtn');
-  btn.disabled = true;
-  btn.textContent = 'Testing...';
-  showKeyTestResult(null, '');
-  try {
-    const resp = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${val}`,
-      { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contents: [{ parts: [{ text: 'Say OK' }] }], generationConfig: { maxOutputTokens: 5 } }) }
-    );
-    const data = await resp.json();
-    if (!resp.ok) throw new Error(data.error?.message || `HTTP ${resp.status}`);
-    showKeyTestResult(true, 'Key is valid and working.');
-    // Auto-save if test passes
-    apiKey = val;
-    localStorage.setItem('gemini_api_key', val);
-    setKeyStatus(true);
-    checkExtractReady();
-  } catch(err) {
-    showKeyTestResult(false, 'Error: ' + err.message);
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'Test Key';
-  }
-}
-
-function showKeyTestResult(ok, msg) {
-  const el = document.getElementById('keyTestResult');
-  if (!msg) { el.classList.add('hidden'); return; }
-  el.className = 'alert ' + (ok ? 'alert-success' : 'alert-error');
-  el.textContent = msg;
-  el.classList.remove('hidden');
+async function testKey() { showKeyTestResult(false, legacyAiDisabledMessage()); }
+function showKeyTestResult(ok, message) {
+  const element = document.getElementById('keyTestResult');
+  element.className = 'alert alert-info';
+  element.textContent = message;
+  element.classList.toggle('hidden', !message);
 }
 
 function legacyAiDisabledMessage() {
@@ -388,11 +319,20 @@ function handleDrop(e) {
   e.preventDefault();
   handleDragLeave();
   const f = e.dataTransfer.files[0];
-  if (f && f.type === 'application/pdf') setFile(f);
+  if (f) setFile(f);
 }
 function handleFileSelect(e) { if (e.target.files[0]) setFile(e.target.files[0]); }
 
 function setFile(f) {
+  if (extractionBusy) return false;
+  if (!f || !/\.pdf$/i.test(f.name || '') && f.type !== 'application/pdf') {
+    const warning = document.getElementById('fileSizeWarning');
+    warning.className = 'alert alert-warning';
+    warning.textContent = 'Choose a PDF file. Your current work has been kept.';
+    document.getElementById('pdfFile').value = '';
+    return false;
+  }
+  const firstSelection = !pdfFile && !hasParseWork();
   pdfFile = f;
   document.getElementById('uploadZone').classList.add('hidden');
   const info = document.getElementById('fileInfo');
@@ -404,43 +344,56 @@ function setFile(f) {
   if (mb > 30) {
     warn.textContent = mb > 80
       ? `Warning: very large file (${mb.toFixed(0)} MB) - local text parsing may take several minutes. A manual page range is recommended.`
-      : `Note: large file (${mb.toFixed(0)} MB) - local text parsing will scan the full PDF unless you provide a page range.`;
+      : `Note: large file (${mb.toFixed(0)} MB) - text is read from the whole PDF for layout and source context. A page range limits which entries are extracted.`;
     warn.className = mb > 80 ? 'alert alert-warning' : 'alert alert-info';
     warn.classList.remove('hidden');
   } else {
     warn.classList.add('hidden');
   }
-  // Always pre-fill from filename; user can override afterwards
-  const nameVal = f.name.replace(/\.pdf$/i, '').replace(/[_-]/g, ' ').trim();
-  document.getElementById('sourceName').value = nameVal;
+  pendingFileDetails = { file: f, previous: sourceFieldSnapshot(), firstSelection };
+  if (!hasParseWork()) applyPendingFileDetails(f);
+  else {
+    warn.textContent = 'This PDF is selected for the next parse. Your current results and source details are kept until parsing succeeds.';
+    warn.className = 'alert alert-info';
+  }
+  checkExtractReady();
+  ensurePdfJsLoaded().then(checkExtractReady).catch(() => checkExtractReady());
+  window.AuroraDraftRecovery?.changed();
+  return true;
+}
+
+function applyPendingFileDetails(file) {
+  if (pendingFileDetails?.file !== file) return;
+  const previous = pendingFileDetails.previous;
+  const unchanged = id => document.getElementById(id).value === previous[id].value
+    && (!pendingFileDetails.firstSelection || !previous[id].value);
+  const nameVal = file.name.replace(/\.pdf$/i, '').replace(/[_-]/g, ' ').trim();
+  if (unchanged('sourceName')) document.getElementById('sourceName').value = nameVal;
   const inferredYear = inferPublicationYear(nameVal);
   const yearEl = document.getElementById('sourceYear');
-  if (yearEl) {
+  if (yearEl && unchanged('sourceYear')) {
     yearEl.value = inferredYear ? String(inferredYear) : '';
     delete yearEl.dataset.rulesetEvidence;
   }
   // Reset user-edited flag so abbr auto-fills fresh for this file
   const abbrEl = document.getElementById('sourceAbbr');
-  delete abbrEl.dataset.userEdited;
-  autoFillAbbr(nameVal);
+  if (unchanged('sourceAbbr')) {
+    delete abbrEl.dataset.userEdited;
+    autoFillAbbr(document.getElementById('sourceName').value);
+  }
   // Clear author so it gets re-detected for this file
-  document.getElementById('sourceAuthor').value = '';
+  if (unchanged('sourceAuthor')) document.getElementById('sourceAuthor').value = '';
   updateSourceRulesetDecisionDisplay();
-  checkExtractReady();
-  ensurePdfJsLoaded()
-    .then(checkExtractReady)
-    .catch(() => checkExtractReady());
-  window.AuroraDraftRecovery?.changed();
 }
 
 function clearFile() {
+  if (extractionBusy) return;
   pdfFile = null;
+  pendingFileDetails = null;
   document.getElementById('pdfFile').value = '';
   document.getElementById('fileInfo').classList.add('hidden');
   document.getElementById('fileSizeWarning')?.classList.add('hidden');
   document.getElementById('uploadZone').classList.remove('hidden');
-  const yearEl = document.getElementById('sourceYear');
-  if (yearEl) delete yearEl.dataset.rulesetEvidence;
   updateSourceRulesetDecisionDisplay();
   checkExtractReady();
   window.AuroraDraftRecovery?.changed();
@@ -461,7 +414,7 @@ function getSelectedTypes() {
 function checkExtractReady() {
   const pdfReady = Boolean(getPdfJsLib());
   const selectedTypeCount = getSelectedTypes().length;
-  const ready = pdfFile && selectedTypeCount > 0 && pdfReady;
+  const ready = !extractionBusy && pdfFile && selectedTypeCount > 0 && pdfReady;
   const button = document.getElementById('extractBtn');
   if (button) button.disabled = !ready;
   const hint = document.getElementById('extractHint');
@@ -477,245 +430,8 @@ function checkExtractReady() {
 // ---------------------------------------------
 // Prompts per element type
 // ---------------------------------------------
-const PROMPTS = {
-  spell: `Extract ALL spells from this PDF. Return a JSON array where every element has:
-name, school, level (integer 0-9), castingTime, range,
-hasVerbal (bool), hasSomatic (bool), hasMaterial (bool), material (string),
-duration, isConcentration (bool), isRitual (bool), isTechnomagic (bool),
-classes (array of strings from: Bard, Cleric, Druid, Sorcerer, Warlock, Wizard),
-description (complete full text of the spell),
-higherLevels (At Higher Levels text, empty string if none).
-Include every spell. Do not truncate descriptions.`,
-
-  archetype: `Extract ALL subclasses and archetypes from this PDF. Return a JSON array where every element has:
-name, class (parent class name e.g. Barbarian), supports (Aurora category - use exactly:
-Primal Path, Bard College, Divine Domain, Druid Circle, Martial Archetype, Monastic Tradition,
-Sacred Oath, Ranger Archetype, Roguish Archetype, Sorcerous Origin, Otherworldly Patron, Arcane Tradition),
-description (flavour text only),
-features (array of objects with: name, level (integer), action (e.g. Bonus Action, or empty string),
-usage (e.g. 1/Short Rest, or empty string), description (COMPLETE mechanical text of the feature
-including every bullet point, every condition, every number - do not summarise or truncate)).
-Include every subclass and every one of its features.`,
-
-  item: `Extract ALL equipment, weapons, armor, tools, and gear from this PDF.
-Return a JSON array where every element has:
-name, category (Weapons/Armor/Tools/Gear),
-cost (number only e.g. "50"), currency (gp/sp/cp),
-weight (number only e.g. "2"),
-description (the full descriptive text for this item - include special rules, usage instructions,
-and any mechanics not captured in other fields. Do NOT repeat the item name, cost, weight,
-damage dice, or properties list in this field as those are stored separately),
-damage (e.g. 2d6 piercing, empty if not a weapon),
-damageType (empty if not a weapon),
-properties (comma-separated weapon/armor properties e.g. "reload 6, two-handed, burst fire", empty if none).
-Include every item listed in equipment tables and descriptions.
-Keep descriptions focused - omit flavour text that simply restates the item category or reiterates stats.`,
-  feat: `Extract ALL feats from this PDF.
-Return a JSON array where every element has:
-name (string),
-prerequisite (string, empty if none),
-fullText (string - the COMPLETE text of the feat exactly as it appears in the PDF,
-including the opening sentence AND every bullet point. Do not omit anything.).
-Include every feat.`,
-
-  magic: `Extract ALL magic items from this PDF. Return a JSON array where every element has:
-name, type (e.g. Wondrous Item, Weapon, Armor, Ring, Staff, Wand, Potion, Scroll),
-rarity (Common/Uncommon/Rare/Very Rare/Legendary/Artifact),
-requiresAttunement (bool),
-description (complete full text including all properties, charges, and effects),
-charges (integer, 0 if none),
-recharge (text describing when charges reset, empty if not applicable).
-Include every magic item.`,
-
-  race: `Extract ALL races and species from this PDF.
-Return a JSON array where every element has:
-name (string), description (string - flavour text only),
-size (string - e.g. "Medium"), speed (integer - base walking speed),
-abilityScores (object - e.g. {"strength":2,"dexterity":1}, omit if none),
-languages (array of strings),
-traits (array of objects with: name (string), description (string - complete mechanical text)),
-subraces (array of objects with: name (string), description (string)) - empty if none.
-Include every race. Do not truncate trait descriptions.`,
-
-  background: `Extract ALL backgrounds from this PDF.
-Return a JSON array where every element has:
-name (string), description (string - flavour text only),
-skillProficiencies (array of skill name strings e.g. ["Arcana","History"]),
-toolProficiencies (array of strings, empty if none),
-languages (array of strings, use "Any" if player chooses),
-equipment (string - starting equipment list),
-features (array of objects with: name (string), description (string - complete text)).`,
-
-  class: `Extract ALL classes from this PDF.
-Return a JSON array where every element has:
-name (string), description (string - flavour text only),
-hitDie (integer - e.g. 8 for d8),
-savingThrows (array of ability name strings e.g. ["Wisdom","Charisma"]),
-armorProficiencies (array - e.g. ["Light Armor","Shields"]),
-weaponProficiencies (array - e.g. ["Simple Weapons"]),
-skillChoices (object with: count (integer), from (array of skill names)),
-startingEquipment (string),
-archetypeLevel (integer - level at which archetype is chosen, e.g. 3),
-archetypeLabel (string - e.g. "Primal Path"),
-archetypeSupports (string - the supports tag value for archetype selection),
-features (array of objects with: name (string), level (integer), action (string), usage (string), description (string - COMPLETE mechanical text)).
-Include every class and all its features. Do not truncate.`,
-
-  other: `Extract ALL elements from this PDF that do not fit into spells, subclasses, equipment, feats, or magic items. This includes things like races, classes, backgrounds, companions, vehicles, monsters, or any other custom content.
-Return a JSON array where every element has:
-name (string),
-type (string - the specific element type, e.g. "Race", "Class", "Background", "Monster"),
-description (complete full text of the element including all traits, features, and mechanics).
-Include every such element. If nothing of this kind exists in the PDF, return an empty array.`
-};
-
-
-
-
-// ---------------------------------------------
-// PDF chunking via pdf-lib
-// ---------------------------------------------
-const PAGES_PER_CHUNK = 50;   // ~13K tokens/chunk, safely under 1M context limit
-const INLINE_LIMIT_MB = 19;   // still used for TOC/meta calls on small files
-
-// Split a File into an array of Uint8Array chunks, each PAGES_PER_CHUNK pages
-async function splitPdfIntoChunks(file, progressCallback) {
-  progressCallback('Loading PDF for chunking...', 0.02);
-  const arrayBuf = await file.arrayBuffer();
-  let srcDoc;
-  try {
-    srcDoc = await PDFLib.PDFDocument.load(arrayBuf, { ignoreEncryption: true, throwOnInvalidObject: false });
-  } catch(e) {
-    console.error('pdf-lib load failed:', e);
-    throw new Error(`pdf-lib could not parse this PDF: ${e.message}`);
-  }
-  const totalPages = srcDoc.getPageCount();
-  if (totalPages === 0) throw new Error('PDF reports 0 pages');
-  progressCallback(`PDF has ${totalPages} pages - splitting into chunks of ${PAGES_PER_CHUNK}...`, 0.04);
-
-  const chunks = [];
-  for (let start = 0; start < totalPages; start += PAGES_PER_CHUNK) {
-    const end = Math.min(start + PAGES_PER_CHUNK, totalPages);
-    const indices = Array.from({ length: end - start }, (_, i) => start + i);
-    const chunkDoc = await PDFLib.PDFDocument.create();
-    const pages = await chunkDoc.copyPages(srcDoc, indices);
-    pages.forEach(p => chunkDoc.addPage(p));
-    const bytes = await chunkDoc.save();
-    chunks.push({ bytes, startPage: start + 1, endPage: end, totalPages });
-    progressCallback(`Chunking pages ${start + 1}-${end} of ${totalPages}...`, 0.04 + (end / totalPages) * 0.04);
-  }
-
-  progressCallback(`Split into ${chunks.length} chunk(s).`, 0.08);
-  return chunks;
-}
-
-// Convert Uint8Array to base64
-function uint8ToBase64(uint8) {
-  let binary = '';
-  const len = uint8.byteLength;
-  for (let i = 0; i < len; i++) binary += String.fromCharCode(uint8[i]);
-  return btoa(binary);
-}
-
-
-
-// ---------------------------------------------
-// TOC-guided extraction
-// ---------------------------------------------
-
-// Holds page ranges discovered from the TOC, keyed by element type
 let discoveredPageRanges = {};
 
-const TOC_PROMPT = `Read the table of contents or index of this PDF.
-Return a JSON object mapping content sections to their page ranges.
-Use these exact keys where the content exists: spell, archetype, item, feat, magic, race, background, class.
-For each key, provide the page range as a string like "24-38" or "45" for a single page.
-If a section does not exist in this PDF, omit its key.
-Example: {"spell":"45-62","archetype":"10-44","race":"65-120","class":"121-200"}
-Return ONLY the JSON object. If the PDF has no table of contents, return {}.`;
-
-async function discoverPageRanges(base64, isUri, progressCallback) {
-  if (!LEGACY_AI_EXTRACTION_ENABLED) return {};
-  progressCallback('Reading table of contents...', 0.05);
-  try {
-    let text;
-    if (useOllama) {
-      const extracted = await extractTextFromChunk(Uint8Array.from(atob(base64), c => c.charCodeAt(0)));
-      if (!extracted) return {};
-      const result = await ollamaRaw(extracted, TOC_PROMPT);
-      text = result.text;
-    } else {
-      const body = {
-        contents: [{ parts: [
-          { inline_data: { mime_type: 'application/pdf', data: base64 } },
-          { text: TOC_PROMPT }
-        ]}],
-        generationConfig: { temperature: 0.1, maxOutputTokens: 1024, response_mime_type: 'application/json' }
-      };
-      const resp = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
-      );
-      if (!resp.ok) { console.warn('TOC HTTP error', resp.status); return {}; }
-      const data = await resp.json();
-      text = data.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
-    }
-    const parsed = safeParseJson(text);
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      console.log('TOC discovered:', parsed);
-      return parsed;
-    }
-    console.warn('TOC returned unexpected shape:', parsed);
-  } catch(e) {
-    console.warn('TOC read failed, will use full PDF:', e.message);
-  }
-  return {};
-}
-
-
-
-async function detectSourceMeta(base64, isUri) {
-  if (!LEGACY_AI_EXTRACTION_ENABLED) return;
-  const metaPrompt = 'What is the title and author of this supplement? Reply with only this exact JSON structure and nothing else: {"title":"TITLE_HERE","author":"AUTHOR_HERE"}';
-  try {
-    let text;
-    if (useOllama) {
-      const extracted = await extractTextFromChunk(Uint8Array.from(atob(base64), c => c.charCodeAt(0)));
-      if (!extracted) return;
-      const result = await ollamaRaw(extracted, metaPrompt);
-      text = result.text.trim();
-    } else {
-      const resp = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-        { method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ contents: [{ parts: [
-            { inline_data: { mime_type: 'application/pdf', data: base64 } },
-            { text: metaPrompt }
-          ]}], generationConfig: { maxOutputTokens: 300, response_mime_type: 'application/json' } }) }
-      );
-      if (!resp.ok) return;
-      const data = await resp.json();
-      text = (data.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();
-    }
-    const meta = safeParseJson(text);
-    if (!meta || typeof meta !== 'object' || Array.isArray(meta)) return;
-    if (meta.title && meta.title.trim()) {
-      document.getElementById('sourceName').value = meta.title.trim();
-      const abbrEl = document.getElementById('sourceAbbr');
-      if (!abbrEl.dataset.userEdited) autoFillAbbr(meta.title.trim());
-    }
-    if (meta.author && meta.author.trim() && meta.author !== 'Unknown') {
-      document.getElementById('sourceAuthor').value = meta.author.trim();
-    }
-    console.log('Source meta detected:', meta);
-  } catch(e) {
-    console.warn('Source meta detection failed:', e.message);
-  }
-}
-
-// ---------------------------------------------
-// Deterministic PDF parsing
-// ---------------------------------------------
 const DETERMINISTIC_PARSERS = {
   spell: parseSpellsFromText,
   archetype: parseArchetypesFromText,
@@ -727,9 +443,12 @@ const DETERMINISTIC_PARSERS = {
   class: parseClassesFromText,
 };
 
-async function deterministicExtract(file, types, progressCallback) {
+async function deterministicExtract(file, types, progressCallback, options = {}) {
+  const assertCurrent = () => { if (options.isCurrent && !options.isCurrent()) throw new Error('Parsing cancelled.'); };
+  assertCurrent();
   progressCallback(5, 'Reading PDF text locally...');
-  const pages = await extractPdfPages(file);
+  const pages = await extractPdfPages(file, options);
+  assertCurrent();
   const selectedPages = selectPages(pages, document.getElementById('pageRange')?.value?.trim() || '');
   const continuationPages = selectContinuationPages(pages, selectedPages);
   const text = selectedPages.map(p => p.text).join('\n\n');
@@ -739,6 +458,7 @@ async function deterministicExtract(file, types, progressCallback) {
 
   const out = {};
   for (let i = 0; i < types.length; i++) {
+    assertCurrent();
     const type = types[i];
     const parser = DETERMINISTIC_PARSERS[type];
     progressCallback(10 + Math.round((i / Math.max(types.length, 1)) * 80), `Parsing ${TYPE_LABELS[type] || type}...`);
@@ -752,24 +472,43 @@ async function deterministicExtract(file, types, progressCallback) {
   return out;
 }
 
-async function extractPdfPages(file) {
+async function extractPdfPages(file, options = {}) {
+  const current = () => !options.isCurrent || options.isCurrent();
+  const assertCurrent = () => { if (!current()) throw new Error('Parsing cancelled.'); };
   const pdfjsLib = await ensurePdfJsLoaded();
+  assertCurrent();
   pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_SRC;
   const data = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data, disableWorker: true }).promise;
-  const pages = [];
+  assertCurrent();
+  const loading = pdfjsLib.getDocument({ data, disableWorker: true });
+  if (options.isCurrent) activePdfDocument = loading;
+  let pdf;
   try {
+    pdf = await loading.promise;
+    assertCurrent();
+    if (options.isCurrent) activePdfDocument = pdf;
+    const pages = [];
     for (let p = 1; p <= pdf.numPages; p++) {
+      assertCurrent();
       const page = await pdf.getPage(p);
+      assertCurrent();
       const layout = window.AuroraPdfTextLayout;
       if (!layout?.extractPageLayout) throw new Error('PDF text layout support is not loaded.');
       const pageLayout = await layout.extractPageLayout(page);
+      assertCurrent();
       pages.push({ page: p, text: pageLayout.lines.join('\n'), layout: pageLayout });
+      if (options.isCurrent) {
+        document.getElementById('progressMsg').textContent = 'Reading PDF page ' + p + ' of ' + pdf.numPages + ' locally...';
+        await new Promise(resolve => setTimeout(resolve, 0));
+      }
     }
     return pages;
-  } finally { await pdf.destroy(); }
+  } finally {
+    if (activePdfDocument === pdf || activePdfDocument === loading) activePdfDocument = null;
+    const resource = pdf || loading;
+    if (typeof resource.destroy === 'function') await resource.destroy();
+  }
 }
-
 function selectPages(pages, rangeText) {
   const pageRange = globalThis.AuroraPageRange || window.AuroraPageRange;
   if (!pageRange?.selectPageObjects) throw new Error('PDF page range support is not loaded.');
@@ -934,6 +673,10 @@ function isSpellTableMetadataNoiseLine(line) {
     || /^\*The artificer class appears\b/i.test(text);
 }
 
+function spellClassMetadataMatch(line) {
+  return String(line || '').match(/^(?:Spell Lists?|Class(?:es)?)\s*[.:]\s*(.*)$/i);
+}
+
 function cleanSpellBodyLines(lines) {
   const cleaned = [];
   let skippingSidebar = false;
@@ -948,7 +691,7 @@ function cleanSpellBodyLines(lines) {
       skippingSidebar = true;
       continue;
     }
-    if (isPdfPageChromeLine(line) || isSpellTableMetadataNoiseLine(line)) continue;
+    if (isPdfPageChromeLine(line) || isSpellTableMetadataNoiseLine(line) || spellClassMetadataMatch(line)) continue;
     const normalized = line.replace(/^[,;:]\s+(?=[A-Z][A-Za-z' -]+\.)/, '');
     if (/^[-–]?(?:fizban|nzban)$/i.test(normalized)) continue;
     cleaned.push(normalized);
@@ -1073,7 +816,7 @@ function parseSpellsFromText(text, options = {}) {
             .findIndex(line => /^(Casting Time|Range|Components|Duration)\s*:/i.test(line));
           const nextField = nextOffset < 0 ? -1 : j + 1 + nextOffset;
           if (nextField > j + 1) {
-            fields[field] += ' ' + lines.slice(j + 1, nextField).join(' ');
+            fields[field] += ' ' + lines.slice(j + 1, nextField).filter(line => !spellClassMetadataMatch(line)).join(' ');
             j = nextField - 1;
           }
         }
@@ -1094,6 +837,7 @@ function parseSpellsFromText(text, options = {}) {
     while (descEnd < lines.length && !isElementStart(lines, descEnd) && !isSectionHeading(lines[descEnd])) descEnd++;
     const stoppedAtPageChrome = (descEnd < lines.length && isPdfPageChromeLine(lines[descEnd]))
       || (descEnd === lines.length && lines.slice(descStart, descEnd).some(isPdfPageChromeLine));
+    const definitionClasses = inferClasses(lines.slice(i + 2, descEnd).join('\n'));
     let bodyLines = cleanSpellBodyLines(lines.slice(descStart, descEnd));
     let body = bodyLines.join('\n');
     if (!body.trim()) body = spellContinuationText(lines[i], options.pages, options.continuationPages);
@@ -1125,7 +869,7 @@ function parseSpellsFromText(text, options = {}) {
       isConcentration: tableEntry?.isConcentration ?? /^concentration/i.test(fields.duration),
       isRitual: tableEntry?.isRitual ?? /\britual\b/i.test(lines[i + 1]),
       isTechnomagic: false,
-      classes: tableEntry?.classes?.length ? tableEntry.classes : (kind.classes?.length ? kind.classes : inferClasses(body)),
+      classes: tableEntry?.classes?.length ? tableEntry.classes : (kind.classes?.length ? kind.classes : definitionClasses),
       tableMetadata: tableEntry || null,
       description,
       ...(statBlockName ? { statBlockName, statBlock } : {}),
@@ -1184,8 +928,10 @@ function parseComponents(text) {
 }
 
 function inferClasses(text) {
-  const match = String(text || '').match(/^(?:Spell Lists?|Classes)\s*[.:]\s*([^\n]+)/im);
-  return match ? window.AuroraSpellAvailability.classNames(match[1]) : [];
+  return uniqueStrings(String(text || '').split(/\r?\n/).flatMap(line => {
+    const match = spellClassMetadataMatch(line);
+    return match ? window.AuroraSpellAvailability.classNames(match[1]) : [];
+  }));
 }
 
 function parseFeatsFromText(text) {
@@ -1636,6 +1382,8 @@ function parseBackgroundBlock(name, block) {
       const languageInfo = parseLanguageInfo(afterColon(line));
       background.languages = languageInfo.languages;
       background.languageChoices = languageInfo.choices;
+      background.languageChoiceFrom = languageInfo.choiceFrom || [];
+      background.languageChoiceRestriction = languageInfo.choiceRestriction || '';
       firstField = Math.min(firstField, i);
     } else if (/^(Equipment|Starting Equipment):/i.test(line)) {
       background.equipment = afterColon(line);
@@ -1700,6 +1448,8 @@ function parseRaceBlock(name, block) {
       const languageInfo = parseLanguageInfo(afterColon(line));
       race.languages = languageInfo.languages;
       race.languageChoices = languageInfo.choices;
+      race.languageChoiceFrom = languageInfo.choiceFrom || [];
+      race.languageChoiceRestriction = languageInfo.choiceRestriction || '';
       firstField = Math.min(firstField, i);
     }
   }
@@ -2104,22 +1854,31 @@ const NUMBER_WORDS = {
 };
 
 function parseLanguageInfo(text) {
-  const src = String(text || '').trim();
+  const src = String(text || '').trim().replace(/^you can (?:speak|read|write|understand)(?:,?\s*(?:and\s+)?(?:speak|read|write|understand))*\s*/i, '');
   if (!src || /^none$/i.test(src)) return { languages: [], choices: 0 };
-  const lower = src.toLowerCase();
-  const languages = KNOWN_LANGUAGE_NAMES.filter(lang => {
-    const escaped = lang.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/'/g, "['\\u2019]");
-    return new RegExp(`\\b${escaped}\\b`, 'i').test(src);
-  });
-  let choices = 0;
-  if (/\b(choice|choose|your choice|any|other language)\b/i.test(src)) {
-    const countMatch = lower.match(/\b(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\b(?=.{0,40}\b(?:language|languages|of your choice|other)\b)/i);
-    choices = countMatch ? parseCountWord(countMatch[1]) : 1;
+  const marker = src.match(/\b(?:choose|any|your choice|choice of|(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:(?:other|additional|extra)\s+)?(?:languages?|of\b))/i);
+  let boundary = marker?.index ?? -1;
+  if (boundary < 0 && /\bor\b/i.test(src)) {
+    const or = src.search(/\bor\b/i);
+    const and = src.toLowerCase().lastIndexOf(' and ', or);
+    boundary = and < 0 ? 0 : and + 5;
   }
-  if (!languages.length && !choices && !/\bchoice|choose|any\b/i.test(src)) {
-    languages.push(...splitListValue(src).filter(v => !/^(and|or)$/i.test(v)));
-  }
-  return { languages: uniqueStrings(languages), choices };
+  const normalizeLanguage = value => {
+    const name = String(value || '').replace(/^[,\s]+|[,.\s]+$/g, '').replace(/\s+languages?$/i, '').trim();
+    return KNOWN_LANGUAGE_NAMES.find(known => legacyFeatureKey(known) === legacyFeatureKey(name))
+      || (/^[A-Z][A-Za-z'’ -]{1,40}$/.test(name) && !/^(?:and|or|none|you|other|language)/i.test(name) ? name : '');
+  };
+  const fixed = boundary < 0 ? src : src.slice(0, boundary).replace(/\b(?:and|plus|your)\s*$/i, '');
+  const languages = uniqueStrings(splitListValue(fixed).map(normalizeLanguage).filter(Boolean));
+  if (boundary < 0) return { languages, choices: 0 };
+  const choiceText = src.slice(boundary);
+  const count = choiceText.match(/\b(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\b/i);
+  const choices = count ? parseCountWord(count[1]) : 1;
+  const restricted = choiceText.match(/\b(?:from|between|choice of|one of|two of)\s+(.+)/i);
+  const list = restricted?.[1] || (/\bor\b/i.test(choiceText) && !/\bchoice\b/i.test(choiceText) ? choiceText : '');
+  const choiceFrom = uniqueStrings(splitListValue(list.replace(/\.$/, '')).map(normalizeLanguage).filter(Boolean));
+  const choiceRestriction = !choiceFrom.length && /\b(?:except|other than|standard|exotic|spoken|secret)\b/i.test(choiceText) ? choiceText : '';
+  return { languages, choices, ...(choiceFrom.length ? { choiceFrom } : {}), ...(choiceRestriction ? { choiceRestriction } : {}) };
 }
 
 function parseCountWord(value) {
@@ -2527,8 +2286,8 @@ function titleCase(text) {
 }
 
 function parseCharges(text) {
-  const m = String(text || '').match(/\b(\d+)\s+charges?\b/i);
-  return m ? parseInt(m[1], 10) : 0;
+  const m = String(text || '').match(/\b(?:has|have|holds|contains|stores)\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+charges?\b/i);
+  return m ? parseCountWord(m[1]) : 0;
 }
 
 function parseRecharge(text) {
@@ -2567,9 +2326,18 @@ function sameGeneratedShape(a, b) {
   return JSON.stringify(normalizeForCompare(a)) === JSON.stringify(normalizeForCompare(b));
 }
 
+function validCorrectionFields(fields) {
+  return fields === undefined || (Array.isArray(fields) && fields.every(field => typeof field === 'string'
+    && /^[A-Za-z][A-Za-z0-9]*$/.test(field) && !['constructor', 'prototype'].includes(field)));
+}
+
 function loadRememberedOverrides() {
   try {
-    return JSON.parse(localStorage.getItem(OVERRIDE_STORAGE_KEY) || '{}') || {};
+    const registry = JSON.parse(localStorage.getItem(OVERRIDE_STORAGE_KEY) || '{}');
+    if (!registry || typeof registry !== 'object' || Array.isArray(registry)) return {};
+    return Object.fromEntries(Object.entries(registry).filter(([key, entry]) => !['__proto__', 'constructor', 'prototype'].includes(key)
+      && entry && typeof entry === 'object' && ELEMENT_TYPES.includes(entry.type) && validCorrectionFields(entry.fields)
+      && (window.AuroraDraftStorage || globalThis.AuroraDraftStorage).validElementRecord(entry.type, entry.item)));
   } catch {
     return {};
   }
@@ -2578,8 +2346,10 @@ function loadRememberedOverrides() {
 function saveRememberedOverrides() {
   try {
     localStorage.setItem(OVERRIDE_STORAGE_KEY, JSON.stringify(rememberedOverrides));
+    return true;
   } catch (err) {
-    console.warn('Could not save remembered overrides:', err.message);
+    setManualAuthorStatus('This browser could not save the correction. Your edits are kept for this export; export a draft to keep a backup.', 'warning');
+    return false;
   }
 }
 
@@ -2615,8 +2385,21 @@ function overrideKeyForIndex(type, index) {
 function applyRememberedOverrideAt(type, index) {
   const key = overrideKeyForIndex(type, index);
   const override = key ? rememberedOverrides[key] : null;
-  if (!override?.item || !extractedData[type]?.[index]) return false;
-  extractedData[type][index] = window.AuroraSourceReview.applyContentCorrection(extractedData[type][index], override.item);
+  if (!override?.item || override.type !== type || !extractedData[type]?.[index] || !validCorrectionFields(override.fields)) return false;
+  if (!(window.AuroraDraftStorage || globalThis.AuroraDraftStorage).validElementRecord(type, override.item)) return false;
+  const current = extractedData[type][index];
+  const content = Array.isArray(override.fields)
+    ? { ...window.AuroraSourceReview.withoutReferences(current),
+      ...Object.fromEntries(override.fields.filter(field => !field.startsWith('_') && Object.hasOwn(override.item, field)).map(field => [field, override.item[field]])) }
+    : override.item;
+  const corrected = window.AuroraSourceReview.applyContentCorrection(current, content);
+  if (!Array.isArray(override.fields)) corrected._legacyRememberedCorrection = true;
+  else {
+    const collections = override.fields.filter(field => ['features', 'choices', 'traits', 'actions', 'reactions', 'subraces', 'benefits', 'progression'].includes(field));
+    if (collections.length) corrected._rememberedCollectionFields = collections;
+  }
+  if (!(window.AuroraDraftStorage || globalThis.AuroraDraftStorage).validElementRecord(type, corrected)) return false;
+  extractedData[type][index] = corrected;
   return true;
 }
 
@@ -2649,7 +2432,6 @@ function startManualAuthoring() {
   if (!Object.values(generatedBaselineData).some(items => Array.isArray(items) && items.length)) {
     captureGeneratedBaseline();
   }
-  skippedItems = [];
   document.getElementById('stepReview').classList.remove('hidden');
   document.getElementById('extractProgress').classList.add('hidden');
   document.getElementById('extractErrors').classList.add('hidden');
@@ -2660,239 +2442,76 @@ function startManualAuthoring() {
 
 async function startExtraction() {
   const types = getSelectedTypes();
-  if (!types.length || !pdfFile) return;
-
+  if (extractionBusy || !types.length || !pdfFile) return false;
+  const generation = ++extractionGeneration;
+  const file = pdfFile;
+  setExtractionBusy(true);
+  const current = () => generation === extractionGeneration;
+  if (hasParseWork() && !await confirmAction('Parsing will replace the current extracted entries and their edits. A failed or cancelled parse will keep your existing work.', { title: 'Replace extracted entries?', acceptLabel: 'Parse and replace' })) {
+    if (current()) setExtractionBusy(false);
+    return false;
+  }
+  if (!current()) return false;
+  extractionSnapshot = { data: extractedData, baseline: generatedBaselineData, skipped: skippedItems,
+    context: sourceReviewContext, ranges: discoveredPageRanges, fields: sourceFieldSnapshot() };
   document.getElementById('stepReview').classList.remove('hidden');
   document.getElementById('extractProgress').classList.remove('hidden');
   document.getElementById('reviewArea').classList.add('hidden');
-  document.getElementById('extractBtn').disabled = true;
-  document.getElementById('extractSpinner').classList.remove('hidden');
-
-  extractedData = {};
-  sourceReviewContext = null;
-  discoveredPageRanges = {};
-  skippedItems = [];
-  const errors = [];
-  document.getElementById('extractErrors').classList.add('hidden');
-  document.getElementById('extractErrors').innerHTML = '';
-  document.getElementById('progressBar').style.width = '0%';
-
+  const notes = document.getElementById('extractErrors');
+  notes.classList.add('hidden');
+  notes.innerHTML = '';
+  setProgress(0, 'Reading PDF text locally...');
   try {
-    extractedData = await deterministicExtract(pdfFile, types, (pct, msg) => setProgress(pct, msg));
-  } catch (err) {
-    extractedData = {};
-    errors.push(err.message);
-    console.error('Deterministic extraction failed:', err);
-  }
-  ensureExtractedDataBuckets();
-
-  skippedItems = filterIncomplete();
-  captureGeneratedBaseline();
-  const appliedOverrides = applyRememberedOverridesToExtractedData();
-
-  setProgress(100, 'Parsing complete.');
-  document.getElementById('extractSpinner').classList.add('hidden');
-  document.getElementById('extractBtn').disabled = false;
-
-  const deterministicBannerParts = [];
-  if (errors.length) deterministicBannerParts.push(...errors.map(e => '- ' + escHtml(String(e))));
-  if (skippedItems.length) {
-    deterministicBannerParts.push(`- ${skippedItems.length} element(s) skipped - restore and complete them in Unresolved items below.`);
-  }
-  const unsupportedTypes = types.filter(t => !DETERMINISTIC_PARSERS[t]);
-  if (unsupportedTypes.length) {
-    deterministicBannerParts.push(`- Rule parsers are not implemented yet for: ${unsupportedTypes.map(t => TYPE_LABELS[t] || t).join(', ')}`);
-  }
-  if (appliedOverrides) {
-    deterministicBannerParts.push(`- Applied ${appliedOverrides} remembered correction${appliedOverrides === 1 ? '' : 's'}.`);
-  }
-  if (deterministicBannerParts.length) {
-    const errEl = document.getElementById('extractErrors');
-    errEl.className = errors.length ? 'alert alert-warning' : 'alert alert-info';
-    errEl.innerHTML = '<strong>Notes:</strong><br>' + deterministicBannerParts.join('<br>');
-    errEl.classList.remove('hidden');
-  }
-
-  setTimeout(() => {
-    document.getElementById('extractProgress').classList.add('hidden');
-    buildReviewUI();
-    document.getElementById('reviewArea').classList.remove('hidden');
+    applyPendingFileDetails(file);
+    const result = await deterministicExtract(file, types, (pct, message) => { if (current()) setProgress(pct, message); },
+      { isCurrent: current });
+    if (!current()) return false;
+    const count = Object.values(result).reduce((sum, items) => sum + items.length, 0);
+    if (!count && (Object.values(extractionSnapshot.data).some(items => items.length) || extractionSnapshot.skipped.length)) {
+      throw new Error('No elements were found in the selected section. Check the page range or paste a section. Your previous results were kept.');
+    }
+    extractedData = result;
+    pendingRemoval = null;
+    ensureExtractedDataBuckets();
+    skippedItems = filterIncomplete();
+    captureGeneratedBaseline();
+    const applied = applyRememberedOverridesToExtractedData();
+    discoveredPageRanges = {};
+    pendingFileDetails = null;
+    setProgress(100, 'Parsing complete.');
+    const messages = [];
+    if (skippedItems.length) messages.push(skippedItems.length + ' incomplete entries are available to restore in Unresolved items.');
+    if (applied) messages.push('Applied ' + applied + ' remembered corrections.');
+    if (messages.length) { notes.className = 'alert alert-info'; notes.textContent = messages.join(' '); }
     markChanged();
-  }, 400);
-  return;
-
-  // Split large PDFs into manageable chunks using pdf-lib, inline base64 for all
-  const manualRange = document.getElementById('pageRange')?.value?.trim() || '';
-  const fileSizeMB = pdfFile.size / 1024 / 1024;
-  let pdfChunks = null;   // array of {bytes, startPage, endPage, totalPages} or null for small files
-  let smallBase64 = null; // for files that fit in one chunk
-
-  if (fileSizeMB > INLINE_LIMIT_MB) {
-    try {
-      pdfChunks = await splitPdfIntoChunks(pdfFile, setProgress);
-      setProgress(8, `Split into ${pdfChunks.length} chunk(s) of ${PAGES_PER_CHUNK} pages.`);
-      await new Promise(r => setTimeout(r, 400));
-    } catch(e) {
-      // pdf-lib couldn't parse this PDF - fall back to sending it inline as one piece.
-      // This may hit token limits on very large files but is better than hard-failing.
-      console.warn('PDF splitting failed, falling back to single inline chunk:', e.message);
-      setProgress(8, `PDF splitting unavailable (${e.message.slice(0,60)}) - sending as single file.`);
-      await new Promise(r => setTimeout(r, 600));
-      pdfChunks = null;
-      try {
-        smallBase64 = await fileToBase64(pdfFile);
-      } catch(e2) {
-        errors.push(`Could not read PDF: ${e2.message}`);
-        setProgress(100, 'Failed to read PDF.');
-        document.getElementById('extractSpinner').classList.add('hidden');
-        document.getElementById('extractBtn').disabled = false;
-        const errEl = document.getElementById('extractErrors');
-        errEl.className = 'alert alert-error';
-        errEl.innerHTML = '<strong>Error:</strong><br>' + errors.map(e => '- ' + e).join('<br>');
-        errEl.classList.remove('hidden');
-        return;
-      }
-    }
-  } else {
-    smallBase64 = await fileToBase64(pdfFile);
-  }
-
-  // Helper: get base64 for a specific chunk (or the whole small file)
-  const getChunkBase64 = (chunkIdx) => {
-    if (!pdfChunks) return smallBase64;
-    return uint8ToBase64(pdfChunks[chunkIdx].bytes);
-  };
-  const firstChunkBase64 = getChunkBase64(0);
-
-  // TOC pass - use first chunk (always contains cover/TOC) if no manual range and file > 5MB
-  if (!manualRange && fileSizeMB > 5) {
-    setProgress(9, 'Reading table of contents...');
-    discoveredPageRanges = await discoverPageRanges(firstChunkBase64, false, setProgress);
-    await detectSourceMeta(firstChunkBase64, false);
-    const found = Object.keys(discoveredPageRanges);
-    if (found.length > 0) {
-      const rangeList = found.map(k => `${TYPE_LABELS[k] || k}: p.${discoveredPageRanges[k]}`).join(', ');
-      setProgress(13, `TOC read - found: ${rangeList}`);
-      await new Promise(r => setTimeout(r, 800));
-    } else {
-      setProgress(13, 'No TOC found - will search all chunks');
-      await new Promise(r => setTimeout(r, 400));
+    return true;
+  } catch (error) {
+    if (!current()) return false;
+    const snapshot = extractionSnapshot;
+    extractedData = snapshot.data;
+    generatedBaselineData = snapshot.baseline;
+    skippedItems = snapshot.skipped;
+    sourceReviewContext = snapshot.context;
+    discoveredPageRanges = snapshot.ranges;
+    restoreSourceFields(snapshot.fields);
+    notes.className = 'alert alert-warning';
+    notes.textContent = 'Parsing did not replace your work. ' + (error?.message || String(error));
+    setProgress(0, 'Parsing failed. Your previous work has been kept.');
+    return false;
+  } finally {
+    if (current()) {
+      extractionSnapshot = null;
+      setExtractionBusy(false);
+      document.getElementById('extractProgress').classList.add('hidden');
+      document.getElementById('reviewArea').classList.remove('hidden');
+      buildReviewUI();
+      window.AuroraDraftRecovery?.changed();
     }
   }
-
-  // For small PDFs that skipped the TOC pass: detect title + author from cover page
-  if (fileSizeMB <= 5) {
-    await detectSourceMeta(firstChunkBase64, false);
-  }
-
-  const typeCount = types.length;
-  for (let ti = 0; ti < typeCount; ti++) {
-    const type = types[ti];
-    const baseProgress = 10 + (ti / typeCount) * 85;
-    try {
-      const result = await callModel(pdfChunks, smallBase64, type, (msg, pct) => {
-        setProgress(baseProgress + pct * (85 / typeCount), msg);
-      });
-      extractedData[type] = type === 'feat' ? result.map(parseFeatFullText) : result;
-      const failed = result.filter(r => r._error);
-      if (failed.length) errors.push(`${TYPE_LABELS[type]}: ${failed.length} item(s) need review`);
-    } catch (err) {
-      extractedData[type] = [];
-      errors.push(`${TYPE_LABELS[type]}: ${err.message}`);
-      console.error(`Error extracting ${type}:`, err);
-    }
-    // Small pause between types to reduce rate limit risk
-    if (ti < typeCount - 1) await new Promise(r => setTimeout(r, 1500));
-  }
-
-  // Filter incomplete elements and collect skipped report
-  skippedItems = filterIncomplete();
-
-  setProgress(100, 'All done!');
-  document.getElementById('extractSpinner').classList.add('hidden');
-  document.getElementById('extractBtn').disabled = false;
-
-  const bannerParts = [];
-  if (errors.length) bannerParts.push(...errors.map(e => '- ' + e));
-  if (skippedItems.length) {
-    bannerParts.push(`- ${skippedItems.length} element(s) skipped - below 80% complete (see skipped-elements.txt in ZIP)`);
-  }
-  if (bannerParts.length) {
-    const errEl = document.getElementById('extractErrors');
-    errEl.className = skippedItems.length && !errors.length ? 'alert alert-info' : 'alert alert-warning';
-    errEl.innerHTML = '<strong>Notes:</strong><br>' + bannerParts.join('<br>');
-    errEl.classList.remove('hidden');
-  }
-
-  setTimeout(() => {
-    document.getElementById('extractProgress').classList.add('hidden');
-    buildReviewUI();
-    document.getElementById('reviewArea').classList.remove('hidden');
-    markChanged();
-  }, 800);
 }
-
-
-async function geminiRaw(base64, isUri, promptText) {
-  if (!LEGACY_AI_EXTRACTION_ENABLED) {
-    throw new Error(legacyAiDisabledMessage());
-  }
-  const body = {
-    contents: [{ parts: [
-      { inline_data: { mime_type: 'application/pdf', data: base64 } },
-      { text: promptText }
-    ]}],
-    generationConfig: {
-      temperature: 0.1,
-      maxOutputTokens: 65536,
-      response_mime_type: 'application/json'
-    }
-  };
-
-  // Retry with backoff on rate limit (429) or transient server errors (500/503)
-  let lastErr;
-  for (let attempt = 0; attempt < 4; attempt++) {
-    if (attempt > 0) {
-      const waitSec = [15, 30, 60][attempt - 1];
-      setProgress(null, `Rate limit hit - waiting ${waitSec}s before retry ${attempt}/3...`);
-      await new Promise(r => setTimeout(r, waitSec * 1000));
-    }
-    const resp = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
-    );
-    if (resp.ok) {
-      const data = await resp.json();
-      if (data.promptFeedback?.blockReason) throw new Error(`Blocked: ${data.promptFeedback.blockReason}`);
-      if (!data.candidates?.length) throw new Error('No candidates returned - PDF may be too large or response was filtered.');
-      const candidate = data.candidates[0];
-      const text = candidate?.content?.parts?.[0]?.text || '';
-      if (!text) throw new Error('Empty response from Gemini.');
-      const truncated = candidate.finishReason === 'MAX_TOKENS';
-      return { text, truncated };
-    }
-    const errBody = await resp.json().catch(() => ({}));
-    lastErr = new Error(errBody.error?.message || `HTTP ${resp.status}`);
-    if (resp.status !== 429 && resp.status < 500) break; // don't retry client errors
-  }
-  throw lastErr;
-}
-
-function safeParseJson(text) {
-  // JSON mode should give us clean JSON, but guard anyway
-  text = text.replace(/^```(?:json)?\s*/im, '').replace(/\s*```\s*$/im, '').trim();
-  try { return JSON.parse(text); } catch(e) {}
-  const aS = text.indexOf('['), aE = text.lastIndexOf(']');
-  if (aS !== -1 && aE > aS) { try { return JSON.parse(text.slice(aS, aE+1)); } catch(e) {} }
-  const oS = text.indexOf('{'), oE = text.lastIndexOf('}');
-  if (oS !== -1 && oE > oS) {
-    try {
-      const o = JSON.parse(text.slice(oS, oE+1));
-      return Array.isArray(o) ? o : (Object.values(o).find(v => Array.isArray(v)) || o);
-    } catch(e) {}
-  }
-  throw new Error('JSON parse failed. Response: ' + text.slice(0, 150).replace(/\n/g,' '));
-}
+async function geminiRaw() { throw new Error(legacyAiDisabledMessage()); }
+async function discoverPageRanges() { return {}; }
+async function detectSourceMeta() {}
 
 function archetypeSupport(cls) {
   const m = { Barbarian:'Primal Path', Bard:'Bard College', Cleric:'Divine Domain', Druid:'Druid Circle',
@@ -2902,106 +2521,8 @@ function archetypeSupport(cls) {
   return m[cls] || cls;
 }
 
-// Extraction with TOC-guided page ranges + automatic alphabetic-split retry on truncation
-async function callModel(pdfChunks, smallBase64, type, progressCallback) {
-  if (!LEGACY_AI_EXTRACTION_ENABLED) {
-    throw new Error(legacyAiDisabledMessage());
-  }
-  const manualRange = document.getElementById('pageRange')?.value?.trim() || '';
-  const tocRange = discoveredPageRanges[type] || '';
-  const pageRange = manualRange || tocRange;
-  const pageHint = pageRange ? `\nOnly look at pages ${pageRange} of the PDF.` : '';
-
-  // Determine which chunks to process
-  // If TOC gave us a page range and we have chunks, filter to relevant chunks only
-  let chunksToProcess = pdfChunks ? pdfChunks.map((c, i) => i) : [0];
-  if (pdfChunks && pageRange) {
-    const [rangeStart, rangeEnd] = pageRange.split('-').map(Number);
-    const end = rangeEnd || rangeStart;
-    chunksToProcess = pdfChunks
-      .map((c, i) => ({ i, c }))
-      .filter(({ c }) => c.startPage <= end && c.endPage >= rangeStart)
-      .map(({ i }) => i);
-    if (chunksToProcess.length === 0) chunksToProcess = [0]; // fallback
-  }
-
-  const label = TYPE_LABELS[type] || type;
-  const allResults = [];
-
-  for (let ci = 0; ci < chunksToProcess.length; ci++) {
-    const chunkIdx = chunksToProcess[ci];
-    const base64 = pdfChunks ? uint8ToBase64(pdfChunks[chunkIdx].bytes) : smallBase64;
-    const chunkInfo = pdfChunks
-      ? ` (pages ${pdfChunks[chunkIdx].startPage}-${pdfChunks[chunkIdx].endPage} of ${pdfChunks[chunkIdx].totalPages})`
-      : '';
-    const pct = 0.1 + (ci / chunksToProcess.length) * 0.7;
-
-    progressCallback(`Extracting ${label}${chunkInfo}...`, pct);
-
-    const prompt = PROMPTS[type] + pageHint;
-    let text, truncated;
-    if (useOllama) {
-      const chunkBytes = pdfChunks ? pdfChunks[chunkIdx].bytes : null;
-      const extracted = chunkBytes
-        ? await extractTextFromChunk(chunkBytes)
-        : await extractTextFromChunk(Uint8Array.from(atob(base64), c => c.charCodeAt(0)));
-      if (!extracted) { text = '[]'; truncated = false; }
-      else { ({ text, truncated } = await ollamaRaw(extracted, prompt)); }
-    } else {
-      ({ text, truncated } = await geminiRaw(base64, false, prompt));
-    }
-
-    if (truncated) {
-      console.warn(`Chunk ${chunkIdx} truncated for ${type} - splitting alphabetically`);
-      progressCallback(`${label} chunk too large - retrying in halves...`, pct + 0.05);
-      const halves = [
-        prompt + '\nOnly include elements whose name starts with A through M.',
-        prompt + '\nOnly include elements whose name starts with N through Z.'
-      ];
-      for (let hi = 0; hi < halves.length; hi++) {
-        let ht;
-        if (useOllama) {
-          const chunkBytes = pdfChunks ? pdfChunks[chunkIdx].bytes : null;
-          const extracted = chunkBytes
-            ? await extractTextFromChunk(chunkBytes)
-            : await extractTextFromChunk(Uint8Array.from(atob(base64), c => c.charCodeAt(0)));
-          ({ text: ht } = extracted ? await ollamaRaw(extracted, halves[hi]) : { text: '[]' });
-        } else {
-          ({ text: ht } = await geminiRaw(base64, false, halves[hi]));
-        }
-        try {
-          const p = safeParseJson(ht);
-          const a = Array.isArray(p) ? p : (Object.values(p).find(v => Array.isArray(v)) || []);
-          allResults.push(...a);
-        } catch(e) { console.warn(`Half ${hi+1} parse failed:`, e.message); }
-        if (hi === 0) await new Promise(r => setTimeout(r, 600));
-      }
-    } else {
-      try {
-        const parsed = safeParseJson(text);
-        const arr = Array.isArray(parsed) ? parsed : (Object.values(parsed).find(v => Array.isArray(v)) || []);
-        allResults.push(...arr);
-      } catch(e) {
-        console.warn(`Chunk ${chunkIdx} parse failed:`, e.message);
-      }
-    }
-
-    // Pause between chunks to avoid rate limits
-    if (ci < chunksToProcess.length - 1) await new Promise(r => setTimeout(r, 1500));
-  }
-
-  progressCallback(`Parsing ${label}...`, 0.9);
-  return allResults;
-}
-
-function fileToBase64(file) {
-  return new Promise((res, rej) => {
-    const reader = new FileReader();
-    reader.onload = () => res(reader.result.split(',')[1]);
-    reader.onerror = rej;
-    reader.readAsDataURL(file);
-  });
-}
+// Disabled compatibility entry point for older integrations.
+async function callModel() { throw new Error(legacyAiDisabledMessage()); }
 
 function setProgress(pct, msg) {
   if (pct !== null) document.getElementById('progressBar').style.width = pct + '%';
@@ -3018,6 +2539,7 @@ function buildReviewUI(preferredType = '') {
   const total = Object.values(extractedData)
     .filter(Array.isArray)
     .reduce((s, a) => s + a.length, 0);
+  document.querySelectorAll('[data-parse-export]').forEach(button => { button.disabled = total === 0 || extractionBusy; });
   const summaryEl = document.getElementById('reviewSummary');
   if (total === 0) {
     summaryEl.className = 'alert alert-warning';
@@ -3057,11 +2579,13 @@ function buildReviewUI(preferredType = '') {
     const panel = document.createElement('div');
     panel.className = 'tab-panel' + (active ? ' active' : '');
     panel.id = panelId;
-    const searchBar = `<input type="text" class="panel-search" placeholder="Search ${TYPE_LABELS[type] || type}..." oninput="filterPanel('${type}', this.value)" />`;
+    const searchBar = `<input type="text" class="panel-search" aria-label="Search ${TYPE_LABELS[type] || type}" placeholder="Search ${TYPE_LABELS[type] || type}..." oninput="filterPanel('${type}', this.value)" />`;
     panel.innerHTML = searchBar + buildPanelHTML(type, items);
     panelsEl.appendChild(panel);
   }
   refreshReviewIssues();
+  labelEditorControls(panelsEl);
+  document.getElementById('undoRemoval')?.classList.toggle('hidden', !pendingRemoval);
 }
 
 function sourceReferenceHTML(reference) {
@@ -3164,6 +2688,7 @@ function focusReviewField(type, index, field = '') {
   const body = document.getElementById(`body-${type}-${index}`);
   card?.classList.remove('card-hidden-by-search');
   body?.classList.add('open');
+  document.querySelector('#card-' + type + '-' + index + ' .element-card-header')?.setAttribute('aria-expanded', 'true');
   let target = field && /^[a-zA-Z0-9_.]+$/.test(field) ? body?.querySelector(`[data-field="${field}"]`) : null;
   if (!target && field && /^[a-zA-Z]+$/.test(field)) target = document.getElementById(`${field}-${type}-${index}`)?.previousElementSibling?.querySelector('button');
   target ||= body?.querySelector('input, textarea, select');
@@ -3235,17 +2760,10 @@ function switchTab(type) {
 function buildPanelHTML(type, items) {
   return items.map((item, i) => {
     const header = item.name || `Unnamed ${type} #${i+1}`;
-    const badge = type === 'spell' ? `Level ${item.level} ${item.school}` :
-                  type === 'archetype' ? item.class :
-                  type === 'feat' ? 'Feat' :
-                  type === 'magic' ? item.rarity :
-                  type === 'race' ? (item.size || 'Race') :
-                  type === 'background' ? 'Background' :
-                  type === 'class' ? `d${item.hitDie || '?'}` :
-                  item.category || 'Item';
+    const badge = cardBadgeText(type, item);
     return `
     <div class="element-card" id="card-${type}-${i}">
-      <div class="element-card-header" onclick="toggleCard('${type}',${i})">
+      <div class="element-card-header" role="button" tabindex="0" aria-expanded="false" aria-controls="body-${type}-${i}" onclick="toggleCard('${type}',${i})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleCard('${type}',${i})}">
         <h3>${escHtml(header)}</h3>
         <span class="review-count" id="review-count-${type}-${i}"></span>
         <span class="element-type-badge">${escHtml(badge)}</span>
@@ -3261,6 +2779,17 @@ function buildPanelHTML(type, items) {
       </div>
     </div>`;
   }).join('');
+}
+
+function cardBadgeText(type, item) {
+  if (type === 'spell') return 'Level ' + (item.level ?? '?') + ' ' + (item.school || '');
+  if (type === 'archetype') return item.class || 'Subclass';
+  if (type === 'feat') return 'Feat';
+  if (type === 'magic') return item.rarity || 'Magic item';
+  if (type === 'race') return item.size || 'Race';
+  if (type === 'background') return 'Background';
+  if (type === 'class') return 'd' + (item.hitDie || '?');
+  return item.category || 'Item';
 }
 
 function overrideStatusText(type, index) {
@@ -3313,6 +2842,7 @@ function filterPanel(type, query) {
 function toggleCard(type, i) {
   const body = document.getElementById(`body-${type}-${i}`);
   body.classList.toggle('open');
+  document.querySelector('#card-' + type + '-' + i + ' .element-card-header')?.setAttribute('aria-expanded', body.classList.contains('open') ? 'true' : 'false');
 }
 
 // ---------------------------------------------
@@ -3385,29 +2915,15 @@ function buildArchetypeFields(a, id) {
     </div>
     <div>
       <label>Supports (Aurora archetype category)</label>
-      <select data-field="supports" data-id="${id}" oninput="updateField(this)">
-        <option value="" ${!a.supports?'selected':''}>Select support</option>
-        ${supports.map(s => `<option ${a.supports===s?'selected':''}>${s}</option>`).join('')}
-      </select>
+      <input type="text" list="supports-${id}" data-field="supports" data-id="${id}" value="${escAttr(a.supports || '')}" oninput="updateField(this)" />
+      <datalist id="supports-${id}">${supports.map(s => `<option value="${escAttr(s)}"></option>`).join('')}</datalist>
     </div>
     <div><label>Subclass Description</label><textarea rows="3" data-field="description" data-id="${id}" oninput="updateField(this)">${escHtml(a.description||'')}</textarea></div>
     <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:0.5rem;">
       <span class="section-label" style="margin:0; border:none; padding:0;">Features</span>
       <button class="btn btn-secondary" style="font-size:0.7rem; padding:0.3rem 0.75rem;" onclick="addFeature('${id}')">+ Add Feature</button>
     </div>
-    <div id="features-${id}">${(a.features||[]).map((f,fi) => `
-      <div style="border:1px solid var(--border-light); border-radius:3px; padding:0.75rem; margin-bottom:0.75rem; background:var(--parchment);">
-        ${f._source ? buildSourceReference(f) : ''}
-        <div class="field-row">
-          <div><label>Feature Name</label><input type="text" value="${escAttr(f.name)}" data-field="features.${fi}.name" data-id="${id}" oninput="updateNestedField(this)" /></div>
-          <div><label>Level</label><input type="text" value="${escAttr(f.level)}" data-field="features.${fi}.level" data-id="${id}" oninput="updateNestedField(this)" /></div>
-        </div>
-        <div class="field-row">
-          <div><label>Action (e.g. Bonus Action)</label><input type="text" value="${escAttr(f.action||'')}" data-field="features.${fi}.action" data-id="${id}" oninput="updateNestedField(this)" /></div>
-          <div><label>Usage (e.g. 1/Short Rest)</label><input type="text" value="${escAttr(f.usage||'')}" data-field="features.${fi}.usage" data-id="${id}" oninput="updateNestedField(this)" /></div>
-        </div>
-        <div><label>Description</label><textarea rows="3" data-field="features.${fi}.description" data-id="${id}" oninput="updateNestedField(this)">${escHtml(f.description||'')}</textarea></div>
-      </div>`).join('')}</div>`;
+    <div id="features-${id}">${(a.features||[]).map((feature, index) => buildFeatureBlock(id, feature, index)).join('')}</div>`;
 }
 
 function buildItemFields(item, id) {
@@ -3439,6 +2955,7 @@ function buildFeatFields(feat, id) {
         <div style="display:flex; gap:8px; align-items:flex-start; margin-bottom:6px;">
           <span style="color:var(--gold); font-size:1.1rem; line-height:1.5; flex-shrink:0;">&bull;</span>
           <textarea rows="2" style="flex:1; margin-bottom:0;" data-field="benefits.${bi}" data-id="${id}" oninput="updateBenefit(this)">${escHtml(b)}</textarea>
+          <button class="btn btn-secondary" type="button" onclick="removeNestedEntry('${id}','benefits',${bi})">Remove benefit</button>
         </div>`).join('')
     : '<p class="text-muted" style="font-size:0.85rem;">No benefits extracted - check the PDF and add manually if needed.</p>';
   return `
@@ -3488,6 +3005,7 @@ function buildRaceFields(race, id) {
       <div><label>Languages (comma-separated)</label><input type="text" value="${escAttr((race.languages||[]).join(', '))}" data-field="languages" data-id="${id}" oninput="updateFieldArr(this)" /></div>
       <div><label>Language Choices</label><input type="text" value="${escAttr(race.languageChoices||'')}" data-field="languageChoices" data-id="${id}" oninput="updateField(this)" /></div>
     </div>
+    ${buildLanguageChoiceFields(race, id)}
     <div><label>Ability Scores (e.g. strength:2, dexterity:1)</label><input type="text" value="${escAttr(formatAbilityScores(race.abilityScores))}" data-id="${id}" oninput="updateAbilityScores(this)" /></div>
     <div><label>Description</label><textarea rows="3" data-field="description" data-id="${id}" oninput="updateField(this)">${escHtml(race.description||'')}</textarea></div>
     <div style="display:flex; align-items:center; justify-content:space-between; margin-top:0.75rem; margin-bottom:0.5rem;">
@@ -3512,6 +3030,7 @@ function buildBackgroundFields(bg, id) {
       <div><label>Languages</label><input type="text" value="${escAttr((bg.languages||[]).join(', '))}" data-field="languages" data-id="${id}" oninput="updateFieldArr(this)" /></div>
       <div><label>Language Choices</label><input type="text" value="${escAttr(bg.languageChoices||'')}" data-field="languageChoices" data-id="${id}" oninput="updateField(this)" /></div>
     </div>
+    ${buildLanguageChoiceFields(bg, id)}
     <div><label>Equipment</label><textarea rows="2" data-field="equipment" data-id="${id}" oninput="updateField(this)">${escHtml(bg.equipment||'')}</textarea></div>
     <div><label>Description</label><textarea rows="3" data-field="description" data-id="${id}" oninput="updateField(this)">${escHtml(bg.description||'')}</textarea></div>
     <div style="display:flex; align-items:center; justify-content:space-between; margin-top:0.75rem; margin-bottom:0.5rem;">
@@ -3519,6 +3038,13 @@ function buildBackgroundFields(bg, id) {
       <button class="btn btn-secondary" style="font-size:0.7rem; padding:0.3rem 0.75rem;" onclick="addSimpleFeature('${id}')">+ Add Feature</button>
     </div>
     <div id="features-${id}">${buildNestedTextBlocks(id, 'features', bg.features || [], 'Feature Name')}</div>`;
+}
+
+function buildLanguageChoiceFields(item, id) {
+  return '<div><label>Allowed language choices (comma-separated; blank allows Standard or Exotic)</label>'
+    + '<input aria-label="Allowed language choices" type="text" data-id="' + id + '" data-field="languageChoiceFrom" value="' + escAttr((item.languageChoiceFrom || []).join(', ')) + '" oninput="updateFieldArr(this)" /></div>'
+    + (item.languageChoiceRestriction ? '<div><label>Unresolved language restriction (replace with allowed choices, then clear this field)</label>'
+      + '<input aria-label="Unresolved language restriction" type="text" data-id="' + id + '" data-field="languageChoiceRestriction" value="' + escAttr(item.languageChoiceRestriction) + '" oninput="updateField(this)" /></div>' : '');
 }
 
 function buildClassFields(cls, id) {
@@ -3692,11 +3218,7 @@ function addClassChoice(id, ci) {
 }
 
 function removeClassChoice(id, ci, oi) {
-  const cls = extractedData.class[parseId(id).index];
-  if (oi === undefined) cls.choices.splice(ci, 1);
-  else cls.choices[ci].options.splice(oi, 1);
-  buildReviewUI('class'); markChanged();
-  focusReviewField('class', parseId(id).index, oi === undefined ? 'choices' : 'choices.' + ci + '.name');
+  return removeNestedEntry(id, oi === undefined ? 'choices' : 'choices.' + ci + '.options', oi === undefined ? ci : oi);
 }
 
 function buildOtherFields(item, id) {
@@ -3719,6 +3241,7 @@ function buildNestedTextBlocks(id, field, items, label) {
       ${item._source ? buildSourceReference(item) : ''}
       <div><label>${label}</label><input type="text" value="${escAttr(item.name||'')}" data-field="${field}.${i}.name" data-id="${id}" oninput="updateNestedField(this)" /></div>
       <div><label>Description</label><textarea rows="3" data-field="${field}.${i}.description" data-id="${id}" oninput="updateNestedField(this)">${escHtml(item.description||'')}</textarea></div>
+      <button class="btn btn-secondary" type="button" onclick="removeNestedEntry('${id}','${field}',${i})">Remove ${field === 'traits' ? 'trait' : 'feature'}</button>
     </div>`).join('');
 }
 
@@ -3735,6 +3258,7 @@ function buildFeatureBlock(id, f, fi) {
         <div><label>Usage</label><input type="text" value="${escAttr(f.usage||'')}" data-field="features.${fi}.usage" data-id="${id}" oninput="updateNestedField(this)" /></div>
       </div>
       <div><label>Description</label><textarea rows="3" data-field="features.${fi}.description" data-id="${id}" oninput="updateNestedField(this)">${escHtml(f.description||'')}</textarea></div>
+      <button class="btn btn-secondary" type="button" onclick="removeNestedEntry('${id}','features',${fi})">Remove feature</button>
     </div>`;
 }
 
@@ -3755,6 +3279,12 @@ function parseId(id) {
 function updateField(el) {
   const { type, index } = parseId(el.dataset.id);
   extractedData[type][index][el.dataset.field] = el.value;
+  if (el.dataset.field === 'name') {
+    const title = document.querySelector('#card-' + type + '-' + index + ' .element-card-header h3');
+    if (title) title.textContent = el.value || 'Unnamed ' + type;
+  }
+  const badge = document.querySelector('#card-' + type + '-' + index + ' .element-type-badge');
+  if (badge) badge.textContent = cardBadgeText(type, extractedData[type][index]);
   flashField(el);
 }
 
@@ -3919,15 +3449,22 @@ function rememberOverride(id, event) {
     return;
   }
   const meta = getSourceMeta();
+  const previous = rememberedOverrides[key];
+  const fields = Object.keys(current).filter(field => !field.startsWith('_') && !sameGeneratedShape(current[field], baseline[field]));
   rememberedOverrides[key] = {
     type,
     sourceName: meta.name,
     sourceAbbr: meta.abbr,
     originalName: baseline.name || '',
     savedAt: new Date().toISOString(),
+    fields,
     item: window.AuroraSourceReview.withoutReferences(current)
   };
-  saveRememberedOverrides();
+  if (!saveRememberedOverrides()) {
+    if (previous) rememberedOverrides[key] = previous; else delete rememberedOverrides[key];
+    updateOverrideStatusForId(id);
+    return false;
+  }
   updateOverrideStatusForId(id);
   setManualAuthorStatus(`Remembered correction for ${current.name || baseline.name || TYPE_LABELS[type] || type}.`, 'success');
 }
@@ -3937,8 +3474,9 @@ function forgetOverride(id, event) {
   const { type, index } = parseId(id);
   const key = overrideKeyForIndex(type, index);
   if (key && rememberedOverrides[key]) {
+    const previous = rememberedOverrides[key];
     delete rememberedOverrides[key];
-    saveRememberedOverrides();
+    if (!saveRememberedOverrides()) { rememberedOverrides[key] = previous; updateOverrideStatusForId(id); return false; }
   }
   updateOverrideStatusForId(id);
   setManualAuthorStatus('Forgot saved correction. Current edits remain one-off for this export.', 'info');
@@ -3963,6 +3501,7 @@ function revertToGenerated(id, event) {
 let hasUnsavedChanges = false;
 
 function markChanged() {
+  editRevision++;
   hasUnsavedChanges = true;
   window.AuroraDraftRecovery?.changed();
   clearTimeout(reviewRefreshTimer);
@@ -4053,7 +3592,9 @@ function createBlankElement(type) {
         spellcastingAbility: '',
         spellcastingList: '',
         description: '',
-        features: []
+        features: [],
+        choices: [],
+        progression: []
       };
     case 'other':
     default:
@@ -4135,12 +3676,21 @@ function removeElement(id, event) {
   const { type, index } = parseId(id);
   if (!extractedData[type] || !extractedData[type][index]) return;
   const item = extractedData[type][index];
-  if (!confirm(`Remove ${item.name || TYPE_LABELS[type] || type}?`)) return;
-  extractedData[type].splice(index, 1);
-  if (Array.isArray(generatedBaselineData[type])) generatedBaselineData[type].splice(index, 1);
-  buildReviewUI(type);
-  setManualAuthorStatus('Element removed.', 'info');
-  markChanged();
+  return performConfirmed('Remove ' + (item.name || TYPE_LABELS[type] || type) + '? You can undo this removal while this workspace stays open.', () => {
+    const data = extractedData;
+    const baseline = generatedBaselineData[type]?.[index];
+    extractedData[type].splice(index, 1);
+    if (Array.isArray(generatedBaselineData[type])) generatedBaselineData[type].splice(index, 1);
+    offerRemovalUndo(() => {
+      extractedData[type].splice(Math.min(index, extractedData[type].length), 0, item);
+      if (baseline) (generatedBaselineData[type] ||= []).splice(Math.min(index, generatedBaselineData[type].length), 0, baseline);
+      buildReviewUI(type); focusReviewField(type, extractedData[type].indexOf(item), 'name');
+    }, () => extractedData === data);
+    buildReviewUI(type);
+    setManualAuthorStatus('Element removed. Undo removal is available below.', 'info');
+    markChanged();
+    return true;
+  }, { title: 'Remove entry?', acceptLabel: 'Remove entry' });
 }
 
 function openElementCard(type, index) {
@@ -4148,6 +3698,7 @@ function openElementCard(type, index) {
   const body = document.getElementById(`body-${type}-${index}`);
   if (body) {
     body.classList.add('open');
+    document.querySelector('#card-' + type + '-' + index + ' .element-card-header')?.setAttribute('aria-expanded', 'true');
     body.querySelector('input, textarea, select')?.focus?.();
   }
   document.getElementById(`card-${type}-${index}`)?.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' });
@@ -4191,17 +3742,26 @@ const repairState = {
   inputSnapshot: null,
   undoDocs: null
 };
+let repairUploadSequence = 0;
 
 function repairAnalysisOptions(options = {}) {
   const reference = globalThis.AuroraReferenceIndex || window.AuroraReferenceIndex;
-  return { top: 6, ...(reference ? { reference } : {}), ...options };
+  const DOMParser = globalThis.DOMParser || window.DOMParser;
+  return { top: 6, ...(reference ? { reference } : {}), ...(DOMParser ? { DOMParser } : {}), ...options };
 }
 
 function normalizeRepairDocs(docs) {
   const normalized = (docs || [])
-    .map(doc => ({ fileName: doc.fileName || 'pasted.xml', xml: String(doc.xml || '') }))
-    .filter(doc => doc.xml.trim());
-  if (!normalized.length) throw new Error('Paste or upload Aurora XML before inspecting.');
+    .map(doc => ({ fileName: doc.fileName || 'pasted.xml', xml: String(doc.xml || '') }));
+  if (!normalized.length || normalized.every(doc => !doc.xml.trim())) throw new Error('Paste or upload Aurora XML before inspecting.');
+  const empty = normalized.find(doc => !doc.xml.trim());
+  if (empty) throw new Error('The XML file "' + empty.fileName + '" is empty. No files were loaded.');
+  const names = new Set();
+  for (const doc of normalized) {
+    const name = doc.fileName.toLowerCase();
+    if (names.has(name)) throw new Error('More than one XML file is named "' + doc.fileName + '". Rename the files so each name is unique; no files were loaded.');
+    names.add(name);
+  }
   return normalized;
 }
 
@@ -4550,14 +4110,23 @@ function undoLastRepair() {
 async function handleRepairXmlFileSelect(event) {
   const files = Array.from(event?.target?.files || []);
   if (!files.length) return;
-  const docs = await Promise.all(files.map(async file => ({ fileName: file.name, xml: await file.text() })));
-  loadRepairDocs(docs);
-  setRepairPreviewStatus(`Loaded ${docs.length === 1 ? docs[0].fileName : `${docs.length} files`}. Click Inspect XML to analyze.`, 'success');
+  const sequence = ++repairUploadSequence;
+  try {
+    const docs = await Promise.all(files.map(async file => ({ fileName: file.name, xml: await file.text() })));
+    if (sequence !== repairUploadSequence) return;
+    loadRepairDocs(docs);
+    setRepairPreviewStatus(`Loaded ${docs.length === 1 ? docs[0].fileName : `${docs.length} files`}. Click Inspect XML to analyze.`, 'success');
+  } catch (error) {
+    if (sequence === repairUploadSequence) setRepairPreviewStatus((error.message || 'Could not read these XML files.') + ' Your previous workspace is unchanged.', 'error');
+  } finally {
+    if (event?.target) event.target.value = '';
+  }
 }
 
 function loadRepairDocs(docs) {
+  const normalized = normalizeRepairDocs(docs);
   clearRepairXmlPreview();
-  setRepairInputDocs(docs);
+  setRepairInputDocs(normalized);
 }
 
 function setRepairInputDocs(docs) {
@@ -4706,7 +4275,7 @@ function downloadBlobFile(fileName, blob) {
   a.href = url;
   a.download = fileName;
   a.click();
-  URL.revokeObjectURL(url);
+  setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
 async function downloadRepairedXml() {
@@ -4727,9 +4296,11 @@ async function downloadRepairedXml() {
 async function copyRepairedXml() {
   const changed = changedRepairDocs();
   if (!changed.length) return;
-  const text = changed.length === 1
-    ? changed[0].xml
-    : changed.map(doc => `<!-- ${doc.fileName} -->\n${doc.xml}`).join('\n\n');
+  if (changed.length > 1) {
+    setRepairPreviewStatus('Several XML files need separate documents. Download Fixed XML to keep them as separate files in a ZIP.', 'info');
+    return false;
+  }
+  const text = changed[0].xml;
   try {
     await navigator.clipboard.writeText(text);
     setRepairPreviewStatus(`Copied ${changed.length === 1 ? changed[0].fileName : `${changed.length} files`} to the clipboard.`, 'success');
@@ -4747,6 +4318,7 @@ function resetRepairedXml() {
 }
 
 function clearRepairXmlPreview() {
+  repairUploadSequence++;
   const input = document.getElementById('repairXmlInput');
   const fileInput = document.getElementById('repairXmlFile');
   const status = document.getElementById('repairPreviewStatus');
@@ -4858,10 +4430,10 @@ function authoringArmorClassBase(value) {
 function getSelectedAuthoringElementPropertySnippet() {
   const property = getSelectedAuthoringElementProperty();
   const value = document.getElementById('authoringElementPropertyValue')?.value.trim() || '';
-  if (!property || !value) return '';
+  if (!property || (!value && !property.allowEmpty)) return '';
   if (property.acRuleName && authoringArmorClassBase(value) === null) return '';
 
-  if (property.node) return `<${property.node}>${escXml(value)}</${property.node}>`;
+  if (property.node) return value ? `<${property.node}>${escXml(value)}</${property.node}>` : `<${property.node} />`;
 
   let content = value;
   let qualifier = '';
@@ -4918,13 +4490,8 @@ function updateAuthoringElementPropertyPreview(resetValue = false) {
 }
 
 function findAuthoringElementTarget(xml, cursor) {
-  const elementRanges = [];
-  const elementPattern = /<element\b[^>]*?(?:\/>|>[\s\S]*?<\/element\s*>)/gi;
-  let match;
-  while ((match = elementPattern.exec(xml))) {
-    elementRanges.push({ start: match.index, end: match.index + match[0].length, xml: match[0] });
-  }
-  const target = elementRanges.find(element => cursor >= element.start && cursor <= element.end)
+  const elementRanges = getAuroraXmlPatterns().elementRanges(xml);
+  const target = elementRanges.find(element => cursor >= element.start && cursor < element.end)
     || (elementRanges.length === 1 ? elementRanges[0] : null);
   if (target && /\/>$/.test(target.xml)) {
     return { target: null, message: 'Expand the selected self-closing <element /> into an <element>...</element> block before adding content.' };
@@ -4937,8 +4504,15 @@ function findAuthoringElementTarget(xml, cursor) {
   };
 }
 
+function findAuthoringXmlNode(xml, tagName) {
+  const node = getAuroraXmlPatterns().childXmlRanges(xml).find(node => node.name === tagName.toLowerCase());
+  if (!node) return null;
+  const attributes = node.openingTag.match(/^<[\w:-]+\b([\s\S]*?)(?:\/?>)$/)?.[1] || '';
+  return Object.assign([node.xml, attributes], { index: node.start, selfClosing: node.selfClosing, openingTag: node.openingTag });
+}
+
 function insertAuthoringElementChild(xml, target, renderBlock, marker) {
-  const closingTag = /<\/element\s*>/i.exec(target.xml);
+  const closingTag = /<\/element\s*>/i.exec(getAuroraXmlPatterns().xmlMarkupText(target.xml));
   if (!closingTag) return null;
   const closeStart = target.start + closingTag.index;
   const closeLineStart = xml.lastIndexOf('\n', closeStart - 1) + 1;
@@ -4961,40 +4535,25 @@ function insertAuthoringElementChild(xml, target, renderBlock, marker) {
 }
 
 function applyAuthoringElementNode(xml, target, tagName, snippet) {
-  const fullPattern = new RegExp(`<${tagName}\\b[^>]*>[\\s\\S]*?<\\/${tagName}\\s*>`, 'i');
-  const selfPattern = new RegExp(`<${tagName}\\b([^>]*)\\/>`, 'i');
-  const fullMatch = fullPattern.exec(target.xml);
-  if (fullMatch) {
-    const start = target.start + fullMatch.index;
-    return { xml: xml.slice(0, start) + snippet + xml.slice(start + fullMatch[0].length), cursor: start + snippet.length, action: 'updated' };
-  }
-  const selfMatch = selfPattern.exec(target.xml);
-  if (selfMatch) {
-    const start = target.start + selfMatch.index;
-    return { xml: xml.slice(0, start) + snippet + xml.slice(start + selfMatch[0].length), cursor: start + snippet.length, action: 'updated' };
+  const existing = findAuthoringXmlNode(target.xml, tagName);
+  if (existing) {
+    const start = target.start + existing.index;
+    return { xml: xml.slice(0, start) + snippet + xml.slice(start + existing[0].length), cursor: start + snippet.length, action: 'updated' };
   }
   return insertAuthoringElementChild(xml, target, childIndent => `${childIndent}${snippet}`, snippet);
 }
 
 function findAuthoringSetter(settersXml, propertyName) {
-  const openingPattern = /<set\b[^>]*>/gi;
-  let opening;
-  while ((opening = openingPattern.exec(settersXml))) {
-    const nameMatch = opening[0].match(/\bname\s*=\s*(["'])(.*?)\1/i);
-    if (!nameMatch || nameMatch[2] !== propertyName) continue;
-    if (/\/\s*>$/.test(opening[0])) return { index: opening.index, length: opening[0].length };
-    const closePattern = /<\/set\s*>/ig;
-    closePattern.lastIndex = openingPattern.lastIndex;
-    const closing = closePattern.exec(settersXml);
-    if (closing) return { index: opening.index, length: closing.index + closing[0].length - opening.index };
+  const patterns = getAuroraXmlPatterns();
+  for (const node of patterns.childXmlRanges(settersXml)) {
+    if (node.name === 'set' && patterns.attrMap(node.openingTag).name === propertyName) return { index: node.start, length: node.end - node.start };
   }
   return null;
 }
 
 function applyAuthoringSetter(xml, target, propertyName, snippet) {
-  const settersPattern = /<setters\b[^>]*>[\s\S]*?<\/setters\s*>/i;
-  const settersMatch = settersPattern.exec(target.xml);
-  if (settersMatch) {
+  const settersMatch = findAuthoringXmlNode(target.xml, 'setters');
+  if (settersMatch && !settersMatch.selfClosing) {
     const existing = findAuthoringSetter(settersMatch[0], propertyName);
     if (existing) {
       const start = target.start + settersMatch.index + existing.index;
@@ -5002,14 +4561,14 @@ function applyAuthoringSetter(xml, target, propertyName, snippet) {
     }
 
     const settersStart = target.start + settersMatch.index;
-    const localCloseStart = settersMatch.index + settersMatch[0].lastIndexOf('</setters');
+    const localCloseStart = settersMatch.index + settersMatch[0].toLowerCase().lastIndexOf('</setters');
     const closeStart = target.start + localCloseStart;
     const closeLineStart = xml.lastIndexOf('\n', closeStart - 1) + 1;
     const closePrefix = xml.slice(closeLineStart, closeStart);
     const settersLineStart = xml.lastIndexOf('\n', settersStart - 1) + 1;
     const settersPrefix = xml.slice(settersLineStart, settersStart);
     const settersIndent = /^[\t ]*$/.test(settersPrefix) ? settersPrefix : '';
-    const firstSetter = settersMatch[0].match(/\n([\t ]*)<set\b/i);
+    const firstSetter = getAuroraXmlPatterns().xmlMarkupText(settersMatch[0]).match(/\n([\t ]*)<set\b/i);
     const setterIndent = firstSetter ? firstSetter[1] : settersIndent + '\t';
     const insertionStart = /^[\t ]*$/.test(closePrefix) ? closeLineStart : closeStart;
     const insertionText = /^[\t ]*$/.test(closePrefix)
@@ -5022,7 +4581,7 @@ function applyAuthoringSetter(xml, target, propertyName, snippet) {
     };
   }
 
-  const emptySetters = /<setters\b([^>]*)\/>/i.exec(target.xml);
+  const emptySetters = settersMatch?.selfClosing ? settersMatch : null;
   if (emptySetters) {
     const start = target.start + emptySetters.index;
     const lineStart = xml.lastIndexOf('\n', start - 1) + 1;
@@ -5041,21 +4600,19 @@ function applyAuthoringSetter(xml, target, propertyName, snippet) {
 
 function updateAuthoringACRule(xml, target, ruleName, armorClass, cursor) {
   const armorClassBase = authoringArmorClassBase(armorClass);
-  const rules = /<rules\b[^>]*>[\s\S]*?<\/rules\s*>/i.exec(target.xml);
+  const patterns = getAuroraXmlPatterns();
+  const rules = findAuthoringXmlNode(target.xml, 'rules');
   if (armorClassBase === null || !rules) return { xml, synced: false, cursorDelta: 0 };
 
-  const safeRuleName = ruleName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const stat = new RegExp(`<stat\\b[^>]*\\bname\\s*=\\s*["']${safeRuleName}["'][^>]*>`, 'i').exec(rules[0]);
-  const valueAttribute = stat && /(\bvalue\s*=\s*)(["'])[^"']*\2/i.exec(stat[0]);
-  if (!stat || !valueAttribute) return { xml, synced: false, cursorDelta: 0 };
-
-  const replacement = `${valueAttribute[1]}${valueAttribute[2]}${armorClassBase}${valueAttribute[2]}`;
-  const start = target.start + rules.index + stat.index + valueAttribute.index;
-  const end = start + valueAttribute[0].length;
+  const stat = patterns.childXmlRanges(rules[0]).find(node => node.name === 'stat' && patterns.attrMap(node.openingTag).name === ruleName);
+  if (!stat || !Object.prototype.hasOwnProperty.call(patterns.attrMap(stat.openingTag), 'value')) return { xml, synced: false, cursorDelta: 0 };
+  const replacement = patterns.setTagAttribute(stat.openingTag, 'value', armorClassBase);
+  const start = target.start + rules.index + stat.start;
+  const end = start + stat.openingTag.length;
   return {
     xml: xml.slice(0, start) + replacement + xml.slice(end),
     synced: true,
-    cursorDelta: start < cursor ? replacement.length - valueAttribute[0].length : 0
+    cursorDelta: start < cursor ? replacement.length - stat.openingTag.length : 0
   };
 }
 
@@ -5253,19 +4810,20 @@ function insertAuthoringRuleSnippet() {
   const elementLineStart = xml.lastIndexOf('\n', target.start - 1) + 1;
   const elementPrefix = xml.slice(elementLineStart, target.start);
   const elementIndent = /^[\t ]*$/.test(elementPrefix) ? elementPrefix : '';
-  const rulesMatch = /<rules\b[^>]*>[\s\S]*?<\/rules\s*>/i.exec(target.xml);
-  const emptyRulesMatch = rulesMatch ? null : /<rules\b([^>]*)\/>/i.exec(target.xml);
+  const rulesNode = findAuthoringXmlNode(target.xml, 'rules');
+  const rulesMatch = rulesNode && !rulesNode.selfClosing ? rulesNode : null;
+  const emptyRulesMatch = rulesNode?.selfClosing ? rulesNode : null;
   let insertionStart;
   let insertionText;
 
   if (rulesMatch) {
-    const localCloseStart = rulesMatch.index + rulesMatch[0].lastIndexOf('</rules');
+    const localCloseStart = rulesMatch.index + rulesMatch[0].toLowerCase().lastIndexOf('</rules');
     const closeStart = target.start + localCloseStart;
     const closeLineStart = xml.lastIndexOf('\n', closeStart - 1) + 1;
     const closePrefix = xml.slice(closeLineStart, closeStart);
 
     if (/^[\t ]*$/.test(closePrefix)) {
-      const firstRule = rulesMatch[0].match(/\n([\t ]*)<(?:grant|select|stat|append)\b/i);
+      const firstRule = getAuroraXmlPatterns().xmlMarkupText(rulesMatch[0]).match(/\n([\t ]*)<(?:grant|select|stat|append)\b/i);
       const ruleIndent = firstRule ? firstRule[1] : closePrefix + '\t';
       insertionStart = closeLineStart;
       insertionText = `${ruleIndent}${snippet}\n`;
@@ -5296,7 +4854,7 @@ function insertAuthoringRuleSnippet() {
     setAuthoringTemplateStatus('Rule snippet inserted into the existing empty <rules> block. Check that the description matches, then check the XML shape.', 'success');
     return;
   } else {
-    const closingTag = /<\/element\s*>/i.exec(target.xml);
+    const closingTag = /<\/element\s*>/i.exec(getAuroraXmlPatterns().xmlMarkupText(target.xml));
     if (!closingTag) {
       setAuthoringTemplateStatus('Could not find the closing element tag to add a rules block.', 'warning');
       return;
@@ -5331,8 +4889,9 @@ function insertAuthoringSheetDescription(input, target, description) {
   const elementLineStart = xml.lastIndexOf('\n', target.start - 1) + 1;
   const elementPrefix = xml.slice(elementLineStart, target.start);
   const elementIndent = /^[\t ]*$/.test(elementPrefix) ? elementPrefix : '';
-  const fullSheet = /<sheet\b[^>]*>[\s\S]*?<\/sheet\s*>/i.exec(target.xml);
-  const emptySheet = /<sheet\b([^>]*)\/>/i.exec(target.xml);
+  const sheetNode = findAuthoringXmlNode(target.xml, 'sheet');
+  const fullSheet = sheetNode && !sheetNode.selfClosing ? sheetNode : null;
+  const emptySheet = sheetNode?.selfClosing ? sheetNode : null;
   let insertionStart;
   let insertionText;
   let snippetCursor;
@@ -5342,9 +4901,9 @@ function insertAuthoringSheetDescription(input, target, description) {
     const sheetLineStart = xml.lastIndexOf('\n', sheetStart - 1) + 1;
     const sheetPrefix = xml.slice(sheetLineStart, sheetStart);
     const sheetIndent = /^[\t ]*$/.test(sheetPrefix) ? sheetPrefix : elementIndent + '\t';
-    const firstDescription = fullSheet[0].match(/\n([\t ]*)<description\b/i);
+    const firstDescription = getAuroraXmlPatterns().xmlMarkupText(fullSheet[0]).match(/\n([\t ]*)<description\b/i);
     const descriptionIndent = firstDescription ? firstDescription[1] : sheetIndent + '\t';
-    const localCloseStart = fullSheet.index + fullSheet[0].lastIndexOf('</sheet');
+    const localCloseStart = fullSheet.index + fullSheet[0].toLowerCase().lastIndexOf('</sheet');
     const closeStart = target.start + localCloseStart;
     const closeLineStart = xml.lastIndexOf('\n', closeStart - 1) + 1;
     const closePrefix = xml.slice(closeLineStart, closeStart);
@@ -5360,14 +4919,15 @@ function insertAuthoringSheetDescription(input, target, description) {
     let nextXml = xml.slice(0, insertionStart) + insertionText + xml.slice(insertionStart);
     const updatedEnd = target.end + insertionText.length;
     let updatedElement = nextXml.slice(target.start, updatedEnd);
-    const visibleElement = updatedElement.replace(
-      /<sheet\b[^>]*>/i,
-      openTag => openTag.replace(/\sdisplay\s*=\s*(["'])false\1/i, ' display="true"')
-    );
+    const updatedSheet = findAuthoringXmlNode(updatedElement, 'sheet');
+    const patterns = getAuroraXmlPatterns();
+    const oldOpening = updatedSheet.openingTag;
+    const newOpening = patterns.attrMap(oldOpening).display === 'false' ? patterns.setTagAttribute(oldOpening, 'display', 'true') : oldOpening;
+    const visibleElement = updatedElement.slice(0, updatedSheet.index) + newOpening + updatedElement.slice(updatedSheet.index + oldOpening.length);
     const sheetMadeVisible = visibleElement !== updatedElement;
     updatedElement = visibleElement;
     nextXml = nextXml.slice(0, target.start) + updatedElement + nextXml.slice(updatedEnd);
-    snippetCursor = insertionStart + insertionText.indexOf(description) + description.length - (sheetMadeVisible ? 1 : 0);
+    snippetCursor = insertionStart + insertionText.indexOf(description) + description.length + newOpening.length - oldOpening.length;
     setAuthoringSheetSnippetXml(input, nextXml, snippetCursor, sheetMadeVisible);
     return;
   }
@@ -5378,17 +4938,19 @@ function insertAuthoringSheetDescription(input, target, description) {
     const sheetPrefix = xml.slice(sheetLineStart, sheetStart);
     const sheetIndent = /^[\t ]*$/.test(sheetPrefix) ? sheetPrefix : elementIndent + '\t';
     const descriptionIndent = sheetIndent + '\t';
-    const attributes = emptySheet[1].replace(/\sdisplay\s*=\s*(["'])false\1/i, ' display="true"');
-    const wasHidden = /\sdisplay\s*=\s*(["'])false\1/i.test(emptySheet[1]);
+    const patterns = getAuroraXmlPatterns();
+    const wasHidden = patterns.attrMap(emptySheet.openingTag).display === 'false';
+    const opening = emptySheet.openingTag.replace(/\/\s*>$/, '>');
+    const visibleOpening = wasHidden ? patterns.setTagAttribute(opening, 'display', 'true') : opening;
     insertionStart = sheetStart;
-    insertionText = `<sheet${attributes}>\n${descriptionIndent}${description}\n${sheetIndent}</sheet>`;
+    insertionText = `${visibleOpening}\n${descriptionIndent}${description}\n${sheetIndent}</sheet>`;
     snippetCursor = insertionStart + insertionText.indexOf(description) + description.length;
     const nextXml = xml.slice(0, insertionStart) + insertionText + xml.slice(insertionStart + emptySheet[0].length);
     setAuthoringSheetSnippetXml(input, nextXml, snippetCursor, wasHidden);
     return;
   }
 
-  const closingTag = /<\/element\s*>/i.exec(target.xml);
+  const closingTag = /<\/element\s*>/i.exec(getAuroraXmlPatterns().xmlMarkupText(target.xml));
   if (!closingTag) {
     setAuthoringTemplateStatus('Could not find the closing element tag to add a sheet action.', 'warning');
     return;
@@ -5431,8 +4993,8 @@ function loadAuthoringTemplate(id, options = {}) {
   if (template.id === selectedAuthoringTemplateId && !options.reset) return;
   const hasUnsavedEdits = selectedAuthoringTemplateId
     && input.value !== selectedAuthoringTemplateOriginalXml;
-  if (hasUnsavedEdits && !options.reset
-    && !window.confirm('Switching templates will discard your current XML edits. Continue?')) return;
+  if (hasUnsavedEdits && !options.reset) return performConfirmed('Switching templates will replace your current XML edits. Export a draft first if you want to keep a separate copy.',
+    () => loadAuthoringTemplate(id, { ...options, reset: true }), { title: 'Replace authoring XML?', acceptLabel: 'Switch template' });
 
   selectedAuthoringTemplateId = template.id;
   selectedAuthoringTemplateFileName = template.fileName || 'aurora-authoring-starter.xml';
@@ -5461,7 +5023,8 @@ function loadAuthoringTemplate(id, options = {}) {
 
 function resetAuthoringTemplateXml() {
   if (!selectedAuthoringTemplateId) return;
-  loadAuthoringTemplate(selectedAuthoringTemplateId, { reset: true });
+  return performConfirmed('Resetting will replace your current XML edits with the selected starter.',
+    () => loadAuthoringTemplate(selectedAuthoringTemplateId, { reset: true }), { title: 'Reset authoring XML?', acceptLabel: 'Reset XML' });
 }
 
 function setAuthoringTemplateStatus(message, tone = 'info') {
@@ -5538,92 +5101,57 @@ function downloadAuthoringTemplateXml() {
 }
 
 
-function addBenefit(id) {
+function addNestedEntry(id, field, value, focusField) {
   const { type, index } = parseId(id);
-  if (!Array.isArray(extractedData[type][index].benefits)) extractedData[type][index].benefits = [];
-  const benefits = extractedData[type][index].benefits;
-  const bi = benefits.length;
-  benefits.push('');
-  // Append a new textarea to the benefits div
-  const container = document.getElementById(`benefits-${id}`);
-  if (container) {
-    const div = document.createElement('div');
-    div.style.cssText = 'display:flex; gap:8px; align-items:flex-start; margin-bottom:6px;';
-    div.innerHTML = `<span style="color:var(--gold); font-size:1.1rem; line-height:1.5; flex-shrink:0;">&bull;</span>
-      <textarea rows="2" style="flex:1; margin-bottom:0;" data-field="benefits.${bi}" data-id="${id}" oninput="updateBenefit(this)"></textarea>`;
-    container.appendChild(div);
-    div.querySelector('textarea').focus();
-  }
+  const item = extractedData[type]?.[index];
+  if (!item) return;
+  const entries = item[field] ||= [];
+  entries.push(value);
+  buildReviewUI(type);
+  focusReviewField(type, index, field + '.' + (entries.length - 1) + (focusField ? '.' + focusField : ''));
   markChanged();
   updateOverrideStatusForId(id);
 }
+function addBenefit(id) { addNestedEntry(id, 'benefits', '', ''); }
+function addFeature(id) { addNestedEntry(id, 'features', { name: '', level: 1, action: '', usage: '', description: '' }, 'name'); }
+function addSimpleFeature(id) { addNestedEntry(id, 'features', { name: '', description: '' }, 'name'); }
+function addTrait(id) { addNestedEntry(id, 'traits', { name: '', description: '' }, 'name'); }
 
-function addFeature(id) {
-  const { type, index } = parseId(id);
-  if (!Array.isArray(extractedData[type][index].features)) extractedData[type][index].features = [];
-  const features = extractedData[type][index].features;
-  const fi = features.length;
-  features.push({ name: '', level: 1, action: '', usage: '', description: '' });
-  // Append a new feature block
-  const container = document.getElementById(`features-${id}`);
-  if (container) {
-    const div = document.createElement('div');
-    div.style.cssText = 'border:1px solid var(--border-light); border-radius:3px; padding:0.75rem; margin-bottom:0.75rem; background:var(--parchment);';
-    div.innerHTML = `
-      <div class="field-row">
-        <div><label>Feature Name</label><input type="text" value="" data-field="features.${fi}.name" data-id="${id}" oninput="updateNestedField(this)" /></div>
-        <div><label>Level</label><input type="text" value="1" data-field="features.${fi}.level" data-id="${id}" oninput="updateNestedField(this)" /></div>
-      </div>
-      <div class="field-row">
-        <div><label>Action (e.g. Bonus Action)</label><input type="text" value="" data-field="features.${fi}.action" data-id="${id}" oninput="updateNestedField(this)" /></div>
-        <div><label>Usage (e.g. 1/Short Rest)</label><input type="text" value="" data-field="features.${fi}.usage" data-id="${id}" oninput="updateNestedField(this)" /></div>
-      </div>
-      <div><label>Description</label><textarea rows="3" data-field="features.${fi}.description" data-id="${id}" oninput="updateNestedField(this)"></textarea></div>`;
-    container.appendChild(div);
-    div.querySelector('input').focus();
-  }
-  markChanged();
-  updateOverrideStatusForId(id);
+let pendingRemoval = null;
+function offerRemovalUndo(action, isCurrent) {
+  pendingRemoval = { action, isCurrent };
+  document.getElementById('undoRemoval')?.classList.remove('hidden');
 }
-
-function addSimpleFeature(id) {
-  const { type, index } = parseId(id);
-  if (!Array.isArray(extractedData[type][index].features)) extractedData[type][index].features = [];
-  const features = extractedData[type][index].features;
-  const fi = features.length;
-  features.push({ name: '', description: '' });
-  const container = document.getElementById(`features-${id}`);
-  if (container) {
-    const div = document.createElement('div');
-    div.style.cssText = 'border:1px solid var(--border-light); border-radius:3px; padding:0.75rem; margin-bottom:0.75rem; background:var(--parchment);';
-    div.innerHTML = `
-      <div><label>Feature Name</label><input type="text" value="" data-field="features.${fi}.name" data-id="${id}" oninput="updateNestedField(this)" /></div>
-      <div><label>Description</label><textarea rows="3" data-field="features.${fi}.description" data-id="${id}" oninput="updateNestedField(this)"></textarea></div>`;
-    container.appendChild(div);
-    div.querySelector('input').focus();
+function undoLastRemoval() {
+  const removal = pendingRemoval;
+  pendingRemoval = null;
+  document.getElementById('undoRemoval')?.classList.add('hidden');
+  if (!removal || !removal.isCurrent()) {
+    setManualAuthorStatus('That removal belongs to an earlier workspace and cannot be undone here.', 'info'); return false;
   }
+  removal.action();
+  setManualAuthorStatus('Removed entry restored.', 'success');
   markChanged();
-  updateOverrideStatusForId(id);
+  return true;
 }
-
-function addTrait(id) {
+function removeNestedEntry(id, field, entryIndex) {
+  if (!/^(features|traits|benefits|actions|reactions|choices(?:\.\d+\.options)?)$/.test(field)) return false;
   const { type, index } = parseId(id);
-  if (!Array.isArray(extractedData[type][index].traits)) extractedData[type][index].traits = [];
-  const traits = extractedData[type][index].traits;
-  const ti = traits.length;
-  traits.push({ name: '', description: '' });
-  const container = document.getElementById(`traits-${id}`);
-  if (container) {
-    const div = document.createElement('div');
-    div.style.cssText = 'border:1px solid var(--border-light); border-radius:3px; padding:0.75rem; margin-bottom:0.75rem; background:var(--parchment);';
-    div.innerHTML = `
-      <div><label>Trait Name</label><input type="text" value="" data-field="traits.${ti}.name" data-id="${id}" oninput="updateNestedField(this)" /></div>
-      <div><label>Description</label><textarea rows="3" data-field="traits.${ti}.description" data-id="${id}" oninput="updateNestedField(this)"></textarea></div>`;
-    container.appendChild(div);
-    div.querySelector('input').focus();
-  }
+  const item = extractedData[type]?.[index];
+  let entries = item;
+  for (const key of field.split('.')) entries = entries?.[key];
+  if (!Array.isArray(entries) || !Number.isInteger(entryIndex) || entryIndex < 0 || entryIndex >= entries.length) return false;
+  const removed = entries.splice(entryIndex, 1)[0];
+  const data = extractedData;
+  offerRemovalUndo(() => {
+    entries.splice(Math.min(entryIndex, entries.length), 0, removed);
+    buildReviewUI(type); focusReviewField(type, extractedData[type].indexOf(item), 'name');
+  }, () => extractedData === data && extractedData[type].includes(item));
+  buildReviewUI(type);
+  focusReviewField(type, index, 'name');
+  setManualAuthorStatus('Entry removed. Undo removal restores the last entry removed in this open workspace.', 'info');
   markChanged();
-  updateOverrideStatusForId(id);
+  return true;
 }
 
 // ---------------------------------------------
@@ -5826,6 +5354,10 @@ function validateAll(options = {}) {
         if (!item.benefits || item.benefits.length === 0)
           issues.push({ type, i, field: 'benefits', msg: `${label} (${name}): has no benefits` });
       }
+      for (const field of (Array.isArray(item._rememberedCollectionFields) ? item._rememberedCollectionFields : [])) issues.push({ type, i, field, category: 'source-review',
+        msg: name + ': a remembered correction replaced the ' + field + ' collection. Compare every entry with the fresh source; new or improved content may have been replaced. Use Revert to Generated and reapply the intended edits if needed.' });
+      if (item._legacyRememberedCorrection) issues.push({ type, i, field: 'name', category: 'source-review',
+        msg: name + ': an older remembered correction replaced the full entry. Check the source, use Revert to Generated, reapply the intended edits, then Remember Correction to reuse only those edits.' });
 
       if (type === 'race') {
         if (!item.traits || item.traits.length === 0)
@@ -5835,6 +5367,17 @@ function validateAll(options = {}) {
       if (type === 'background') {
         if (!item.skillProficiencies || item.skillProficiencies.length === 0)
           issues.push({ type, i, field: 'skillProficiencies', msg: `${label} (${name}): has no skill proficiencies` });
+      }
+
+      if (type === 'race' || type === 'background') {
+        for (const finding of languageReviewFindings(item)) issues.push({ ...finding, type, i, msg: name + ': ' + finding.msg });
+      }
+      if (type === 'archetype' || type === 'class') {
+        (item.features || []).forEach((feature, fi) => {
+          const access = featureSpellAccess(feature.description || '', type === 'archetype' ? item.class : item.name, getSourceMeta());
+          access.findings.forEach(message => issues.push({ type, i, field: 'features.' + fi + '.description', category: 'source-review',
+            source: feature._source, msg: name + ' / ' + feature.name + ': ' + message }));
+        });
       }
 
       if (type === 'class') {
@@ -6229,38 +5772,50 @@ function appendSharedTypeElements(lines, type, items, source, meta) {
 // ---------------------------------------------
 // ZIP download
 // ---------------------------------------------
-async function downloadZip() {
-  const meta = getSourceMeta();
-  const issues = validateAll();
-  if (!showValidationResult(issues)) {
-    if (!confirm(`There are ${issues.length} validation issue(s). Download anyway?`)) return;
-  }
-  const zip = new JSZip();
-  const folder = zip.folder(meta.slug);
-  buildZipXmlDocuments(meta).forEach(doc => folder.file(doc.fileName, doc.xml));
-
-  // Include skipped elements report if any were filtered
-  const skippedReport = generateSkippedReport(skippedItems, meta.name);
-  if (skippedReport) {
-    folder.file('skipped-elements.txt', skippedReport);
-  }
-
-  const blob = await zip.generateAsync({ type: 'blob' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `${meta.slug}.zip`;
-  a.click();
-  URL.revokeObjectURL(url);
-  clearChanged();
-
-  // Refresh preview if open
-  const wrap = document.getElementById('xmlPreviewWrap');
-  if (!wrap.classList.contains('hidden')) {
-    document.getElementById('xmlPreview').textContent = generateXml();
-  }
+function exportReviewText(issues) {
+  return ['Unresolved items in this export', 'Check these items against the source before using the XML in Aurora.', '',
+    ...issues.map((issue, index) => {
+      const reference = referenceForIssue(issue);
+      const location = reference ? [reference.fileName, reference.page ? 'PDF page ' + reference.page : '', reference.line ? 'line ' + reference.line : ''].filter(Boolean).join(', ') : '';
+      return (index + 1) + '. ' + issue.msg + (location ? '\n   Source: ' + location : '');
+    })].join('\n');
 }
 
+let zipDownloadBusy = false;
+async function downloadZip() {
+  if (zipDownloadBusy) return false;
+  const meta = getSourceMeta();
+  const issues = validateAll();
+  if (!Object.values(extractedData).some(items => items.length)) {
+    setManualAuthorStatus('Add or restore an entry before downloading XML.', 'warning'); return false;
+  }
+  if (!showValidationResult(issues) && !await confirmAction('This export has ' + issues.length + ' unresolved items. The ZIP will include their review report. Download it for review?',
+    { title: 'Export with unresolved items?', acceptLabel: 'Download for review' })) return false;
+  const revision = editRevision;
+  const button = document.querySelector('[onclick="downloadZip()"]');
+  zipDownloadBusy = true;
+  if (button) button.disabled = true;
+  try {
+    if (typeof JSZip === 'undefined') throw new Error('ZIP support did not load. Refresh the app or download Single XML.');
+    const zip = new JSZip();
+    const folder = zip.folder(meta.slug);
+    buildZipXmlDocuments(meta).forEach(doc => folder.file(doc.fileName, doc.xml));
+    const skippedReport = generateSkippedReport(skippedItems, meta.name);
+    if (skippedReport) folder.file('skipped-elements.txt', skippedReport);
+    if (issues.length) folder.file('unresolved-items.txt', exportReviewText(issues));
+    const blob = await zip.generateAsync({ type: 'blob' });
+    downloadBlobFile(meta.slug + '.zip', blob);
+    if (revision === editRevision) clearChanged();
+    setManualAuthorStatus('ZIP prepared for download.' + (revision !== editRevision ? ' Edits made during export are still pending.' : ''), 'success');
+    return true;
+  } catch (error) {
+    setManualAuthorStatus('ZIP could not be created. Your work is kept. ' + (error?.message || String(error)), 'warning');
+    return false;
+  } finally {
+    zipDownloadBusy = false;
+    if (button) button.disabled = extractionBusy || !Object.values(extractedData).some(items => items.length);
+  }
+}
 
 function generateXml() {
   // Single-file mode: all types combined in one XML
@@ -6511,6 +6066,7 @@ function genArchetypeXml(a, source, prefix, meta) {
   (a.features||[]).forEach(f => {
     const fid = `${prefix}_ARCHETYPE_FEATURE_${archSegment}_${archetypeFeatureSegment(a, f)}`;
     const featureRules = inferArchetypeFeatureRules(a, f, meta);
+    const spellAccess = featureSpellAccess(f.description || '', a.class || '', meta);
     lines.push(`\t<element name="${escAttrXml(archetypeFeatureDisplayName(a, f))}" type="Archetype Feature" source="${escAttrXml(source)}" id="${fid}">`);
     lines.push(`\t\t<compendium display="false" />`);
     lines.push(`\t\t<description>`);
@@ -6524,6 +6080,11 @@ function genArchetypeXml(a, source, prefix, meta) {
     lines.push(`\t\t<sheet${sheetAttrs ? ' '+sheetAttrs : ''}>`);
     lines.push(`\t\t\t<description>${escXml(f.description||'')}</description>`);
     lines.push(`\t\t</sheet>`);
+    if (spellAccess.expanded.length && a.class) {
+      lines.push('\t\t<spellcasting name="' + escAttrXml(a.class) + '" extend="true">');
+      spellAccess.expanded.forEach(id => lines.push('\t\t\t<extend>' + escXml(id) + '</extend>'));
+      lines.push('\t\t</spellcasting>');
+    }
     lines.push(`\t\t<rules>`);
     renderRuleLines(lines, featureRules);
     lines.push(`\t\t</rules>`);
@@ -6552,13 +6113,14 @@ function archetypeFeatureDisplayName(archetype, feature) {
 function inferArchetypeFeatureRules(archetype, feature, meta) {
   const rules = [];
   const text = String(feature?.description || '');
-  const lower = text.toLowerCase();
+  const permanent = unconditionalBenefitSentences(text);
+  const lower = permanent.toLowerCase();
   const featureName = normalizeExtractedName(feature?.name || '');
   const grantsProficiencies = /^(Tools of the Trade|Battle Ready)$/i.test(featureName);
 
   if (grantsProficiencies) {
     for (const tool of Object.keys(TOOL_PROFICIENCY_IDS)) {
-      if (new RegExp(`\\b${escapeRegExp(tool).replace(/['’]/g, "['’]?")}\\b`, 'i').test(text)) {
+      if (new RegExp(`\\b${escapeRegExp(tool).replace(/['’]/g, "['’]?")}\\b`, 'i').test(permanent)) {
         rules.push(rule(
           `\t\t\t<grant type="Proficiency" id="${TOOL_PROFICIENCY_IDS[tool]}" />`,
           `Gain proficiency with ${tool}.`,
@@ -6587,7 +6149,7 @@ function inferArchetypeFeatureRules(archetype, feature, meta) {
     'acid', 'bludgeoning', 'cold', 'fire', 'force', 'lightning', 'necrotic',
     'piercing', 'poison', 'psychic', 'radiant', 'slashing', 'thunder'
   ].forEach(type => {
-    if (new RegExp(`\\bresistance to [^.]{0,120}\\b${type} damage\\b|\\b${type} damage resistance\\b`, 'i').test(lower)) {
+      if (new RegExp(`\\byou (?:have|gain) resistance to [^.]{0,120}\\b${type} damage\\b|\\byou (?:have|gain) ${type} damage resistance\\b`, 'i').test(lower)) {
       rules.push(rule(
         `\t\t\t<grant type="Condition" id="ID_INTERNAL_CONDITION_DAMAGE_RESISTANCE_${idify(type)}" />`,
         `Gain resistance to ${type} damage.`,
@@ -6596,7 +6158,14 @@ function inferArchetypeFeatureRules(archetype, feature, meta) {
     }
   });
 
-  if (/^Extra Attack$/i.test(feature?.name || '') || /\battack twice, instead of once\b/i.test(text)) {
+  // The ordinary Attack-action timing clause describes the stat's scope, not
+  // an activated transformation. Remove only that complete canonical suffix.
+  const canonicalAttack = /\byou can attack twice,?\s+instead of once\b/i;
+  const attackText = text.replace(/,\s*(?:when|whenever) you take the Attack action(?: on your turn)?(?=\s*[.!?](?:\s|$)|\s*$)/gi, '')
+    .replace(/\byou can attack twice,?\s+instead of once\b/gi, 'You can attack twice');
+  const extraAttack = canonicalAttack.test(text) && unconditionalBenefitSentences(attackText).split(/(?<=[.!?])\s+/)
+    .some(sentence => /^you can attack twice\b/i.test(sentence));
+  if (extraAttack) {
     rules.push(rule(
       `\t\t\t<stat name="extra attack:count" value="2" level="${parseInt(feature.level, 10) || 5}" bonus="extra attack" />`,
       'Increase Extra Attack count to 2.',
@@ -6615,7 +6184,6 @@ function inferArchetypeMechanicRules(archetype, feature, meta) {
   const text = String(feature?.description || '');
   const featureName = normalizeExtractedName(feature?.name || '');
   const archetypeName = normalizeExtractedName(archetype?.name || '');
-  const prefix = meta?.prefix || 'ID_SOURCE';
 
   if (/^Experimental Elixir$/i.test(featureName) && /\btwo elixirs\b/i.test(text)) {
     rules.push(rule(
@@ -6645,13 +6213,8 @@ function inferArchetypeMechanicRules(archetype, feature, meta) {
     }
   }
 
-  if (/^Steel Defender$/i.test(featureName) && /^Battle Smith$/i.test(archetypeName)) {
-    rules.push(rule(
-      `\t\t\t<select type="Companion" name="Steel Defender" supports="${escAttrXml((meta?.abbr || 'SRC').replace(/[^A-Z0-9]/g, '_'))} Steel Defender" default="${prefix}_COMPANION_ARTIFICER_STEEL_DEFENDER" />`,
-      'Select the Steel Defender companion.',
-      text
-    ));
-  }
+  // Companion statistics are not an extracted element type. Keep the feature
+  // description and review finding instead of exporting an empty companion picker.
 
   if (/^Adventurer's Atlas$/i.test(featureName) && /\bmaximum number of creatures equal to 1 plus your Intelligence modifier\b/i.test(text)) {
     rules.push(rule(
@@ -6680,66 +6243,101 @@ function inferArchetypeMechanicRules(archetype, feature, meta) {
   return rules;
 }
 
-function inferPreparedSpellRulesFromText(text, spellcastingClass, meta) {
+function featureSpellAccess(text, spellcastingClass, meta = getSourceMeta()) {
   const rules = [];
-  const lines = String(text || '').split(/\n+/);
-  let inSpellTable = false;
-  lines.forEach(line => {
-    if (/^\|.*\bspells?\b.*\|$/i.test(line)) {
-      inSpellTable = true;
-      return;
-    }
-    if (/^\|\s*:?-{3,}:?\s*\|/.test(line)) return;
-    if (!/^\|/.test(line)) {
-      inSpellTable = false;
-      return;
-    }
-    if (!inSpellTable) return;
-    const row = line.match(/^\|\s*(\d+)\s*\|\s*(.+?)\s*\|$/);
-    if (!row) return;
-    splitListValue(row[2]).forEach(spell => {
-      const spellId = canonicalSpellId(spell, meta);
-      if (!spellId) return;
-      const spellcastingAttr = spellcastingClass ? ` spellcasting="${escAttrXml(spellcastingClass)}"` : '';
-      rules.push(rule(
-        `\t\t\t<grant type="Spell" id="${spellId}" level="${parseInt(row[1], 10)}" prepared="true"${spellcastingAttr} />`,
-        `Always prepare ${spell} at ${spellcastingClass || 'the listed'} level ${row[1]}.`,
-        line
-      ));
+  const expanded = [];
+  const findings = [];
+  const lines = normalizeTextLines(text);
+  const add = (name, level, prepared, evidence) => {
+    const id = canonicalSpellId(name, meta);
+    if (!id) { findings.push('No installed or exported spell definition was found for "' + name + '". Include the spell or add its exact grant manually.'); return; }
+    const classAttr = spellcastingClass ? ' spellcasting="' + escAttrXml(spellcastingClass) + '"' : '';
+    rules.push(rule('<grant type="Spell" id="' + escAttrXml(id) + '"' + (level ? ' level="' + level + '"' : '')
+      + (prepared ? ' prepared="true"' : '') + classAttr + ' />',
+      (prepared ? 'Always prepare ' : 'Grant access to ') + name + '.', evidence));
+  };
+  function spellNames(value) {
+    return String(value).replace(/\*/g, '').split(/[,;]/).flatMap(part => {
+      const name = part.trim().replace(/^and\s+/i, '');
+      if (canonicalSpellId(name, meta)) return [name];
+      const splitKnown = phrase => {
+        if (canonicalSpellId(phrase, meta)) return [phrase];
+        const boundaries = [...phrase.matchAll(/\s+and\s+/gi)].reverse();
+        for (const boundary of boundaries) {
+          const first = phrase.slice(0, boundary.index).trim();
+          if (!canonicalSpellId(first, meta)) continue;
+          const rest = splitKnown(phrase.slice(boundary.index + boundary[0].length).trim());
+          if (rest) return [first, ...rest];
+        }
+        return null;
+      };
+      return splitKnown(name) || (name ? [name] : []);
     });
-  });
-
-  const prepared = String(text || '').matchAll(/\balways have\s+(?:the\s+)?([A-Z][A-Za-z'’ -]+?)\s+spell prepared\b/gi);
-  for (const match of prepared) {
-    const spell = normalizeExtractedName(match[1]);
-    const spellId = canonicalSpellId(spell, meta);
-    if (!spellId) continue;
-    const spellcastingAttr = spellcastingClass ? ` spellcasting="${escAttrXml(spellcastingClass)}"` : '';
-    rules.push(rule(
-      `\t\t\t<grant type="Spell" id="${spellId}" prepared="true"${spellcastingAttr} />`,
-      `Always prepare ${spell}.`,
-      match[0]
-    ));
   }
-  const castWithoutSlot = String(text || '').trim().match(/^\s*You can cast\s+(?:the\s+)?([A-Z][A-Za-z'’ -]+?)\s+without expending\b/i);
-  if (castWithoutSlot) {
-    const match = castWithoutSlot;
-    const spell = normalizeExtractedName(match[1]);
-    const spellId = canonicalSpellId(spell, meta);
-    if (spellId) {
-      const spellcastingAttr = spellcastingClass ? ` spellcasting="${escAttrXml(spellcastingClass)}"` : '';
-      rules.push(rule(
-        `\t\t\t<grant type="Spell" id="${spellId}" prepared="true"${spellcastingAttr} />`,
-        `Always prepare ${spell}.`,
-        match[0]
-      ));
+  const safeAccess = sentence => !/\b(?:not|never|cannot|can't|don't|doesn't|do not|while|unless|if|until)\b/i.test(String(sentence).replace(/[’‘]/g, "'"))
+    && (!/\bwhen\b/i.test(sentence) || /^\s*when you reach\b/i.test(sentence) && /\blevel\b/i.test(sentence));
+  let contextFloor = 0;
+  for (let index = 0; index < lines.length; index++) {
+    const header = markdownTableCells(lines[index]);
+    const spellColumn = header.findIndex(value => /^spells?$/i.test(value));
+    if (spellColumn < 0 || header.length < 2) continue;
+    const levelColumn = header.findIndex(value => /^(?:(?:class|character|spell|[A-Za-z]+)\s+)?level$/i.test(value));
+    const spellLevel = levelColumn >= 0 && /^spell level$/i.test(header[levelColumn]);
+    const context = lines.slice(Math.max(contextFloor, index - 8), index).join(' ').split(/(?<=[.!?])\s+/).filter(safeAccess).join(' ');
+    const isExpanded = /\b(?:added to|add(?:itional)? spells?.{0,30}to|expand(?:ed|s)?)\b.{0,100}\bspell list\b/i.test(context);
+    const isPrepared = !isExpanded && /\b(?:always have|always prepared|you have (?:these |the following |certain )?spells? prepared|spells?.{0,80}always.{0,30}prepared)\b/i.test(context);
+    let row = index + 1;
+    if (isMarkdownTableSeparator(markdownTableCells(lines[row] || ''))) row++;
+    for (; row < lines.length && lines[row].includes('|'); row++) {
+      const cells = markdownTableCells(lines[row]);
+      if (cells.length !== header.length) { findings.push('A spell table row is incomplete. Repair its level and spell cells before using it.'); continue; }
+      const names = spellNames(cells[spellColumn]);
+      const levelText = cells[levelColumn] || '';
+      const level = /^\d+(?:st|nd|rd|th)?$/i.test(levelText) ? parseInt(levelText, 10) : NaN;
+      if (!Number.isInteger(level) || level < (spellLevel ? 0 : 1) || level > (spellLevel ? 9 : 20)) {
+        findings.push('A spell table level is unreadable or outside its valid range. Correct it before generating grants.'); continue;
+      }
+      if (isExpanded && spellcastingClass) {
+        names.forEach(name => {
+          const id = canonicalSpellId(name, meta);
+          if (id) expanded.push(id);
+          else findings.push('No installed or exported spell definition was found for "' + name + '". Include it before using the expanded list.');
+        });
+      } else if (isPrepared && !spellLevel) names.forEach(name => add(name, level, true, lines[row]));
+      else findings.push('This spell table does not establish automatic preparation at a class level. Its text is retained; add or verify the owning spell-list or grant rules.');
     }
+    contextFloor = row;
+    index = row - 1;
   }
+  const originalProse = String(text || '').split('\n').filter(line => !line.includes('|')).join(' ');
+  for (const sentence of originalProse.split(/(?<=[.!?])\s+/)) {
+    const match = sentence.match(/\byou always have\s+(?:the\s+)?([A-Z][A-Za-z'’ -]+?)\s+spell prepared\b/i);
+    if (!match) continue;
+    if (!safeAccess(sentence)) {
+      findings.push('A conditional or negated spell grant stays in the description. Add its exact conditions manually before using it.'); continue;
+    }
+    const statedLevel = sentence.match(/\b(?:when you reach|at)\s+(?:(?:character|class)\s+)?(?:level\s+(\d+)|(\d+)(?:st|nd|rd|th)\s+level)\b/i);
+    const level = statedLevel ? Number(statedLevel[1] || statedLevel[2]) : 0;
+    if (statedLevel && (!Number.isInteger(level) || level < 1 || level > 20)) {
+      findings.push('A spell acquisition level is invalid. Correct it before generating the grant.'); continue;
+    }
+    add(normalizeExtractedName(match[1]), level, true, sentence);
+  }
+  const prose = unconditionalBenefitSentences(originalProse);
+  const cast = prose.match(/^You can cast\s+(?:the\s+)?([A-Z][A-Za-z'’ -]+?)\s+(?:spell\s+)?without expending\b/i);
+  if (cast) add(normalizeExtractedName(cast[1]), 0, false, cast[0]);
+  return { rules: dedupeRules(rules), expanded: uniqueStrings(expanded), findings: uniqueStrings(findings) };
+}
 
-  return rules;
+function inferPreparedSpellRulesFromText(text, spellcastingClass, meta) {
+  return featureSpellAccess(text, spellcastingClass, meta).rules;
 }
 
 function canonicalSpellId(name, meta) {
+  return resolvedClassSpellId(name, meta || getSourceMeta());
+}
+
+function spellIdCandidate(name, meta) {
   const spell = normalizeExtractedName(name).replace(/\s+spell$/i, '');
   if (!spell) return '';
   const prefix = isModernRuleset(meta) ? 'ID_WOTC_PHB24_SPELL' : 'ID_PHB_SPELL';
@@ -6780,6 +6378,17 @@ function genItemXml(item, source, prefix) {
   return lines;
 }
 
+function unconditionalBenefitSentences(text, allowChoices = false) {
+  const conditional = /\b(?:if|when|whenever|while|until|during|unless|only|temporarily|once|not|never|cannot|can't|don't|doesn't|isn't|aren't)\b|for (?:the next |a |an |one |two |\d+\s*)(?:round|minute|hour|day)/i;
+  const isConditional = value => conditional.test(String(value).replace(/[’‘]/g, "'").replace(/\bas if\b/gi, 'as though'));
+  const choices = /\b(?:choose (?:one|two|three)|either|or)\b/i;
+  const activatedContext = /\b(?:transform|transformed|transformation|activate|activated|rage|raging|trance|stance|following benefits|following effects)\b|as (?:a|an) (?:bonus |magic )?action/i;
+  return String(text || '').split(/\n\s*\n/).filter(paragraph => !(activatedContext.test(paragraph) && (isConditional(paragraph) || /transform|activat|trance|stance|action/i.test(paragraph))))
+    .flatMap(paragraph => paragraph.split(/(?<=[.!?])\s+/))
+    .map(sentence => sentence.trim()).filter(sentence => !isConditional(sentence) && (allowChoices || !choices.test(sentence))
+      && /^(?:you|your|increase)\b/i.test(sentence)).join(' ');
+}
+
 function inferFeatRules(feat, meta) {
   const rules = [];
   const featName = normalizeExtractedName(feat?.name || '');
@@ -6811,7 +6420,7 @@ function inferFeatRules(feat, meta) {
   const ruleTextEntries = [feat?.description || '', ...benefits].filter(Boolean);
   ruleTextEntries.forEach(b => {
     const rawText = typeof b === 'string' ? b : b.text || '';
-    const txt = rawText.toLowerCase();
+    const txt = unconditionalBenefitSentences(rawText).toLowerCase();
 
     // Ability score increase: "increase your strength score by 1"
     const asiMatch = txt.match(/increase your (\w+) (?:score )?by (\d+)/i);
@@ -6824,38 +6433,32 @@ function inferFeatRules(feat, meta) {
           `Increase ${ability} by ${val}.`,
           rawText
         ));
-        return;
       }
     }
 
     const choiceAsi = txt.match(/increase (?:one ability score of your choice|the spellcasting ability score used by your dragonmark feat) by (\d+)/i);
-    if (choiceAsi) {
+    if (choiceAsi && Number(choiceAsi[1]) === 1) {
       const supports = /^Boon of Siberys$/i.test(featName) ? 'Ability Score Increase, 30' : 'Ability Score Increase';
       rules.push(rule(
         `\t\t\t<select type="Ability Score Improvement" name="Ability Score Increase (${escAttrXml(featName)})" supports="${supports}" />`,
         `Choose an ability score increase for ${featName}.`,
         rawText
       ));
-      return;
     }
 
-    // Proficiency with a skill
-    const skillProfMatch = txt.match(/gain proficiency (?:in |with )?(?:the )?(\w+(?:\s\w+)?) skill/i);
-    if (skillProfMatch) {
-      const skill = skillMap[skillProfMatch[1].toLowerCase()];
-      if (skill) {
-        const skillId = 'ID_PROFICIENCY_SKILL_' + skill.toUpperCase().replace(/\s/g, '');
-        rules.push(rule(
-          `\t\t\t<grant type="Proficiency" id="${skillId}" />`,
-          `Gain proficiency in ${skill}.`,
-          rawText
-        ));
-        return;
-      }
+    // Only fixed lists of recognized skill names establish direct proficiencies.
+    for (const match of txt.matchAll(/\byou (?:have|gain) proficiency (?:in|with)\s+(?:the\s+)?([^.!?]+)/gi)) {
+      const list = match[1].replace(/\s+skills?\b.*$/, '').trim();
+      const skills = parseSkillsFromText(list);
+      let remainder = list;
+      for (const skill of skills) remainder = remainder.replace(new RegExp('\\b' + escapeRegExp(skill) + '\\b', 'gi'), '');
+      if (!skills.length || remainder.replace(/\band\b|[,\s]/gi, '')) continue;
+      for (const skill of skills) rules.push(rule('<grant type="Proficiency" id="ID_PROFICIENCY_SKILL_' + skill.toUpperCase().replace(/\s/g, '') + '" />',
+        'Gain proficiency in ' + skill.toLowerCase() + '.', rawText));
     }
 
     // Proficiency with a tool by name (engineering kit, hacking tools, mechanic tools, etc.)
-    const toolMatch = txt.match(/gain proficiency with (?:the )?(.+?)(?:\.|$)/i);
+    const toolMatch = txt.match(/\byou (?:have|gain) proficiency with (?:the )?(.+?)(?:\.|$)/i);
     if (toolMatch) {
       const toolName = toolMatch[1].trim().toLowerCase();
       const toolIds = {
@@ -6882,7 +6485,6 @@ function inferFeatRules(feat, meta) {
           `Gain proficiency with ${toolName}.`,
           rawText
         ));
-        return;
       }
     }
 
@@ -6896,7 +6498,6 @@ function inferFeatRules(feat, meta) {
           `Double proficiency bonus for ${skill}.`,
           rawText
         ));
-        return;
       }
     }
 
@@ -6905,6 +6506,19 @@ function inferFeatRules(feat, meta) {
 
   inferDragonmarkFeatRules(featName, allText, meta).forEach(featRule => rules.push(featRule));
   inferGeneralFeatRules(featName, allText, meta).forEach(featRule => rules.push(featRule));
+
+  const grantedSpells = new Set(rules.flatMap(featRule => [...String(featRule.xml || '').matchAll(/<grant\b[^>]*\btype="Spell"[^>]*\bid="([^"]+)"/g)].map(match => match[1])));
+  for (const entry of ruleTextEntries) {
+    const text = typeof entry === 'string' ? entry : entry.text || '';
+    for (const candidate of window.AuroraSourceReview.namedCantripStatements(text)) {
+      const sentence = candidate.text.replace(/,\s*which (?:does|do) not count[^.!?]*/i, '');
+      if (!unconditionalBenefitSentences(sentence) || /\b(?:at|reach|beginning|starting)\s+(?:level\s+)?\d+(?:st|nd|rd|th)?\b|\blevel\s+\d+\b/i.test(sentence)) continue;
+      const id = canonicalSpellId(candidate.name, meta);
+      if (!id || grantedSpells.has(id)) continue;
+      rules.push(rule('<grant type="Spell" id="' + escAttrXml(id) + '" />', 'Know the ' + candidate.name + ' cantrip. Casting ability and spellcasting features require separate setup.', candidate.text));
+      grantedSpells.add(id);
+    }
+  }
 
   return dedupeRules(rules);
 }
@@ -6985,12 +6599,12 @@ function inferDragonmarkFeatRules(featName, text, meta) {
 function inferGeneralFeatRules(featName, text, meta) {
   const rules = [];
   const src = String(text || '');
-  const lower = src.toLowerCase();
+  const lower = unconditionalBenefitSentences(src).toLowerCase();
   [
     'acid', 'bludgeoning', 'cold', 'fire', 'force', 'lightning', 'necrotic',
     'piercing', 'poison', 'psychic', 'radiant', 'slashing', 'thunder'
   ].forEach(type => {
-    if (new RegExp(`\\bresistance to [^.]{0,120}\\b${type} damage\\b|\\b${type} damage resistance\\b`, 'i').test(lower)) {
+    if (new RegExp(`\\byou (?:have|gain) resistance to [^.]{0,120}\\b${type} damage\\b|\\byou (?:have|gain) ${type} damage resistance\\b`, 'i').test(lower)) {
       rules.push(rule(
         `\t\t\t<grant type="Condition" id="ID_INTERNAL_CONDITION_DAMAGE_RESISTANCE_${idify(type)}" />`,
         `Gain resistance to ${type} damage.`,
@@ -7245,11 +6859,34 @@ function choiceCountFromValues(values) {
   return count;
 }
 
-function languageChoiceSelect(ownerName, count) {
-  const n = parseInt(count, 10) || 0;
-  if (!n) return '';
+function languageElementId(name) {
+  const normalized = legacyFeatureKey(name);
+  const reference = globalThis.AuroraReferenceIndex || window.AuroraReferenceIndex || globalThis.AuroraLookupIndex;
+  const matches = Object.entries(reference?.ids || {}).filter(([, entry]) => reference.types[entry[0]] === 'Language' && legacyFeatureKey(entry[1]) === normalized).map(([id]) => id);
+  const known = KNOWN_LANGUAGE_NAMES.find(language => legacyFeatureKey(language) === normalized);
+  const canonical = known ? /^Thieves['’] Cant$/i.test(known) ? 'ID_WOTC_PHB_LANGUAGE_THIEVES_CANT' : 'ID_LANGUAGE_' + idify(known) : '';
+  return matches.includes(canonical) ? canonical : matches.length === 1 ? matches[0] : canonical;
+}
+
+function languageChoiceSelect(ownerName, count, from = [], restriction = '') {
+  const n = Number(count) || 0;
+  if (!Number.isSafeInteger(n) || n < 1 || restriction) return '';
+  const ids = (from || []).map(languageElementId);
+  if (ids.some(id => !id) || (ids.length && ids.length < n)) return '';
   const numberAttr = n > 1 ? ` number="${n}"` : '';
-  return `\t\t\t<select type="Language" name="Language (${escAttrXml(ownerName)})"${numberAttr} supports="Standard||Exotic" />`;
+  return `\t\t\t<select type="Language" name="Language (${escAttrXml(ownerName)})"${numberAttr} supports="${escAttrXml(ids.length ? ids.join('|') : 'Standard||Exotic')}" />`;
+}
+
+function languageReviewFindings(item) {
+  const issues = [];
+  const count = Number(item.languageChoices || 0);
+  if (!Number.isSafeInteger(count) || count < 0) issues.push({ field: 'languageChoices', msg: 'Language choices must be a nonnegative whole number; invalid choices are withheld.' });
+  if (item.languageChoiceRestriction) issues.push({ field: 'languageChoiceRestriction', msg: 'This language restriction needs an explicit list of allowed choices. The language picker is withheld until it is resolved.' });
+  const missing = uniqueStrings([...(item.languages || []).filter(language => !isChoiceLanguage(language)), ...(item.languageChoiceFrom || [])])
+    .filter(language => !languageElementId(language));
+  if (missing.length) issues.push({ field: 'languageChoiceFrom', msg: 'No bundled language definition was found for: ' + missing.join(', ') + '. Add the correct Aurora language IDs manually; those grants or restricted choices are withheld.' });
+  if (item.languageChoiceFrom?.length && item.languageChoiceFrom.length < count) issues.push({ field: 'languageChoices', msg: 'There are fewer allowed languages than the choice count. Add the missing choices or reduce the count; the picker is withheld.' });
+  return issues;
 }
 
 function readableJoin(values) {
@@ -7445,7 +7082,7 @@ function defaultRaceLanguages(race, meta) {
 }
 
 function defaultRaceLanguageChoices(race, meta) {
-  const explicit = (parseInt(race.languageChoices, 10) || 0) + choiceCountFromValues(race.languages);
+  const explicit = (Number(race.languageChoices) || 0) + choiceCountFromValues(race.languages);
   if (explicit) return explicit;
   const name = normalizeExtractedName(race?.name || '');
   if (isModernRuleset(meta) && /^(Changeling|Kalashtar)$/i.test(name)) return 1;
@@ -7460,10 +7097,14 @@ function racialTraitSelectName(race, trait) {
 }
 
 function skillChoiceRuleFromText(race, trait) {
-  const text = String(trait?.description || '');
+  const text = unconditionalBenefitSentences(trait?.description, true);
   if (!/\bgain proficiency in\b/i.test(text)) return null;
   const skills = parseSkillsFromText(text);
   if (!skills.length) return null;
+  if (!/\b(?:choice|choose|of the following|one of|two of)\b/i.test(text)) {
+    return rule(skills.map(skill => '<grant type="Proficiency" id="ID_PROFICIENCY_SKILL_' + skill.toUpperCase().replace(/\s/g, '') + '" />').join('\n'),
+      'Gain the listed skill proficiencies.', text);
+  }
   const countMatch = text.match(/\b(?:two|2|one|1)\s+of the following skills?\b/i)
     || text.match(/\b(?:one|1)\s+skill\b/i);
   const count = countMatch ? parseCountWord(countMatch[0].match(/\b(two|2|one|1)\b/i)?.[1] || 'one') : 1;
@@ -7478,7 +7119,8 @@ function skillChoiceRuleFromText(race, trait) {
 function inferRacialTraitRules(race, trait, meta) {
   const rules = [];
   const text = String(trait?.description || '');
-  const lower = text.toLowerCase();
+  const permanent = unconditionalBenefitSentences(text);
+  const lower = permanent.toLowerCase();
   const traitName = normalizeExtractedName(trait?.name || '');
   const raceName = normalizeExtractedName(race?.name || '');
   const skillChoice = skillChoiceRuleFromText(race, trait);
@@ -7488,7 +7130,7 @@ function inferRacialTraitRules(race, trait, meta) {
     'acid', 'bludgeoning', 'cold', 'fire', 'force', 'lightning', 'necrotic',
     'piercing', 'poison', 'psychic', 'radiant', 'slashing', 'thunder'
   ].forEach(type => {
-    if (new RegExp(`\\bresistance to [^.]{0,120}\\b${type} damage\\b|\\b${type} damage resistance\\b`, 'i').test(lower)) {
+    if (new RegExp(`\\byou (?:have|gain) resistance to [^.]{0,120}\\b${type} damage\\b|\\byou (?:have|gain) ${type} damage resistance\\b`, 'i').test(lower)) {
       rules.push(rule(
         `\t\t\t<grant type="Condition" id="ID_INTERNAL_CONDITION_DAMAGE_RESISTANCE_${idify(type)}" />`,
         `Gain resistance to ${type} damage.`,
@@ -7497,7 +7139,8 @@ function inferRacialTraitRules(race, trait, meta) {
     }
   });
 
-  if (/\bdarkvision\b/i.test(text)) {
+  if (/\byou (?:have|gain) darkvision\b/i.test(permanent)
+    || /^Darkvision$/i.test(traitName) && /\byou can see in (?:dim light|darkness)\b/i.test(permanent)) {
     rules.push(rule(
       `\t\t\t<grant type="Vision" id="ID_VISION_DARKVISION" />`,
       'Gain Darkvision.',
@@ -7647,14 +7290,16 @@ function genRaceXml(race, source, prefix, meta) {
     ));
   }
   defaultRaceLanguages(race, meta).forEach(lang => {
+    const languageId = languageElementId(lang);
+    if (!languageId) return;
     raceRules.push(rule(
-      `\t\t\t<grant type="Language" id="ID_LANGUAGE_${idify(lang)}" />`,
+      `\t\t\t<grant type="Language" id="${languageId}" />`,
       `Know ${lang}.`,
       `Languages: ${lang}`
     ));
   });
   const raceLanguageChoices = defaultRaceLanguageChoices(race, meta);
-  const raceLanguageSelect = languageChoiceSelect(race.name, raceLanguageChoices);
+  const raceLanguageSelect = languageChoiceSelect(race.name, raceLanguageChoices, race.languageChoiceFrom, race.languageChoiceRestriction);
   if (raceLanguageSelect) {
     raceRules.push(rule(
       raceLanguageSelect,
@@ -7818,14 +7463,16 @@ function genBackgroundXml(bg, source, prefix, meta) {
     ));
   }
   (bg.languages||[]).filter(lang => !isChoiceLanguage(lang)).forEach(lang => {
+    const languageId = languageElementId(lang);
+    if (!languageId) return;
     backgroundRules.push(rule(
-      `\t\t\t<grant type="Language" id="ID_LANGUAGE_${idify(lang)}" />`,
+      `\t\t\t<grant type="Language" id="${languageId}" />`,
       `Know ${lang}.`,
       `Languages: ${(bg.languages || []).join(', ')}`
     ));
   });
-  const backgroundLanguageChoices = (parseInt(bg.languageChoices, 10) || 0) + choiceCountFromValues(bg.languages);
-  const backgroundLanguageSelect = languageChoiceSelect(bg.name, backgroundLanguageChoices);
+  const backgroundLanguageChoices = (Number(bg.languageChoices) || 0) + choiceCountFromValues(bg.languages);
+  const backgroundLanguageSelect = languageChoiceSelect(bg.name, backgroundLanguageChoices, bg.languageChoiceFrom, bg.languageChoiceRestriction);
   if (backgroundLanguageSelect) {
     backgroundRules.push(rule(
       backgroundLanguageSelect,
@@ -7968,7 +7615,7 @@ function classArmorProficiencyId(value) {
     'light armor': 'ID_PROFICIENCY_ARMOR_PROFICIENCY_LIGHT_ARMOR',
     'medium armor': 'ID_PROFICIENCY_ARMOR_PROFICIENCY_MEDIUM_ARMOR',
     'heavy armor': 'ID_PROFICIENCY_ARMOR_PROFICIENCY_HEAVY_ARMOR',
-    shields: 'ID_PROFICIENCY_ARMOR_PROFICIENCY_SHIELDS'
+    shields: 'ID_PROFICIENCY_ARMOR_PROFICIENCY_SHIELD'
   }[key] || '';
 }
 
@@ -8003,7 +7650,7 @@ function renderMulticlassRuleLines(lines, cls) {
     pushGrant('ID_PROFICIENCY_TOOL_PROFICIENCY_TINKERS_TOOLS');
     pushGrant('ID_PROFICIENCY_ARMOR_PROFICIENCY_LIGHT_ARMOR');
     pushGrant('ID_PROFICIENCY_ARMOR_PROFICIENCY_MEDIUM_ARMOR');
-    pushGrant('ID_PROFICIENCY_ARMOR_PROFICIENCY_SHIELDS');
+    pushGrant('ID_PROFICIENCY_ARMOR_PROFICIENCY_SHIELD');
     lines.push(`\t\t\t\t<select type="Proficiency" name="Skill Proficiency (${escAttrXml(cls.name)} Multiclass)" supports="${escAttrXml(classSkillSupports(cls.skillChoices?.from || []))}" />`);
     return;
   }
@@ -8210,12 +7857,13 @@ function classChoiceRules(cls, feature, meta = getSourceMeta()) {
 }
 
 function resolvedClassSpellId(name, meta) {
+  name = normalizeExtractedName(name).replace(/\s+spell$/i, '');
   const local = (extractedData.spell || []).filter(spell => legacyFeatureKey(spell.name) === legacyFeatureKey(name));
   if (local.length === 1) return meta.prefix + '_SPELL_' + idify(local[0].name);
-  const reference = globalThis.AuroraReferenceIndex || window.AuroraReferenceIndex;
+  const reference = globalThis.AuroraReferenceIndex || window.AuroraReferenceIndex || globalThis.AuroraLookupIndex;
   const matches = Object.entries(reference?.ids || {}).filter(([, entry]) => reference.types[entry[0]] === 'Spell'
     && legacyFeatureKey(entry[1]) === legacyFeatureKey(name)).map(([id]) => id);
-  const canonical = canonicalSpellId(name, meta);
+  const canonical = spellIdCandidate(name, meta);
   if (matches.includes(canonical)) return canonical;
   const edition = meta.ruleset === '2024' ? /_PHB2024_|_PHB24_/ : /_PHB_/;
   const preferred = matches.filter(id => edition.test(id));
@@ -8458,39 +8106,39 @@ function genMagicXml(item, source, prefix) {
 function generateAndDownload() {
   const meta = getSourceMeta();
   const issues = validateAll();
-  if (!showValidationResult(issues)) {
-    if (!confirm(`There are ${issues.length} validation issue(s). Download anyway?`)) return;
+  if (!Object.values(extractedData).some(items => items.length)) {
+    setManualAuthorStatus('Add or restore an entry before downloading XML.', 'warning'); return false;
   }
-  const xml = generateXml();
-  const blob = new Blob([xml], { type: 'application/xml' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `${meta.slug}.xml`;
-  a.click();
-  URL.revokeObjectURL(url);
-  clearChanged();
+  const download = () => {
+    let xml = generateXml();
+    if (issues.length) {
+      const note = '<!-- ' + escXmlComment(exportReviewText(issues)) + ' -->\n';
+      xml = xml.replace(/^(<\?xml[^\n]*\n)/, declaration => declaration + note);
+    }
+    downloadBlobFile(meta.slug + '.xml', new Blob([xml], { type: 'application/xml' }));
+    clearChanged();
+    return true;
+  };
+  return showValidationResult(issues) ? download() : performConfirmed(
+    'This XML has ' + issues.length + ' unresolved items. Their review notes will be included as an XML comment. Download it for review?',
+    download, { title: 'Export with unresolved items?', acceptLabel: 'Download for review' });
 }
 
 function showXmlPreview() {
   const wrap = document.getElementById('xmlPreviewWrap');
-  const wasHidden = wrap.classList.contains('hidden');
   wrap.classList.toggle('hidden');
   if (!wrap.classList.contains('hidden')) {
     showValidationResult(validateAll());
     // Always regenerate so preview reflects latest edits
     document.getElementById('xmlPreview').textContent = generateXml();
-    clearChanged();
   }
 }
 
-function generateAndDownloadRefreshPreview() {
-  // If preview is currently open, regenerate it after download
-  generateAndDownload();
+async function generateAndDownloadRefreshPreview() {
+  if (!await generateAndDownload()) return false;
   const wrap = document.getElementById('xmlPreviewWrap');
-  if (!wrap.classList.contains('hidden')) {
-    document.getElementById('xmlPreview').textContent = generateXml();
-  }
+  if (!wrap.classList.contains('hidden')) document.getElementById('xmlPreview').textContent = generateXml();
+  return true;
 }
 
 // ---------------------------------------------
@@ -8499,9 +8147,9 @@ function generateAndDownloadRefreshPreview() {
 function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
-function escAttr(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+function escAttr(s) { return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 function stripInvalidXmlChars(s) {
-  return String(s || '').replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '');
+  return String(s ?? '').replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\uD800-\uDFFF\uFFFE\uFFFF]/gu, '');
 }
 
 function escXml(s) { return stripInvalidXmlChars(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
@@ -8518,6 +8166,9 @@ function ordinal(n) {
 }
 
 function resetAll() {
+  invalidateExtraction();
+  pendingFileDetails = null;
+  pendingRemoval = null;
   sourceReviewContext = null;
   reviewIssues = [];
   extractedData = {};
@@ -8550,6 +8201,12 @@ function resetAll() {
   checkExtractReady();
 }
 
+function requestResetAll() {
+  if (!hasParseWork() && !extractionBusy) { resetAll(); return true; }
+  return performConfirmed('Start over will remove the current extracted entries, skipped entries, pasted source, and source details. Authoring XML and repair work are kept.',
+    () => { resetAll(); return true; }, { title: 'Start a new extraction?', acceptLabel: 'Start over' });
+}
+
 const DRAFT_FIELD_IDS = [
   'sourceName', 'sourceAbbr', 'sourceAuthor', 'sourceYear', 'pageRange',
   'manualAddType', 'manualSourceText', 'authoringRuleType', 'authoringRuleAmount',
@@ -8561,19 +8218,20 @@ const DRAFT_FIELD_IDS = [
 
 function captureWorkspaceDraft() {
   const inputDocs = currentRepairInputDocs();
+  const parsing = extractionBusy ? extractionSnapshot : null;
   return {
     workspace: activeWorkspaceView,
-    fields: Object.fromEntries(DRAFT_FIELD_IDS.map(id => [id, document.getElementById(id)?.value || ''])),
+    fields: Object.fromEntries(DRAFT_FIELD_IDS.map(id => [id, parsing?.fields[id]?.value ?? document.getElementById(id)?.value ?? ''])),
     sourceFlags: {
-      abbrEdited: document.getElementById('sourceAbbr')?.dataset.userEdited || '',
-      rulesetEvidence: document.getElementById('sourceYear')?.dataset.rulesetEvidence || ''
+      abbrEdited: (parsing?.fields.sourceAbbr.dataset || document.getElementById('sourceAbbr')?.dataset).userEdited || '',
+      rulesetEvidence: (parsing?.fields.sourceYear.dataset || document.getElementById('sourceYear')?.dataset).rulesetEvidence || ''
     },
     selectedTypes: getSelectedTypes(),
-    data: cloneData(extractedData),
-    baseline: cloneData(generatedBaselineData),
-    skipped: cloneData(skippedItems),
-    pageRanges: cloneData(discoveredPageRanges),
-    reviewContext: cloneData(sourceReviewContext),
+    data: cloneData(parsing?.data || extractedData),
+    baseline: cloneData(parsing?.baseline || generatedBaselineData),
+    skipped: cloneData(parsing?.skipped || skippedItems),
+    pageRanges: cloneData(parsing?.ranges || discoveredPageRanges),
+    reviewContext: cloneData(parsing ? parsing.context : sourceReviewContext),
     changed: hasUnsavedChanges,
     author: {
       templateId: selectedAuthoringTemplateId,
@@ -8593,6 +8251,9 @@ function captureWorkspaceDraft() {
 
 function restoreWorkspaceDraft(state) {
   (window.AuroraDraftStorage || globalThis.AuroraDraftStorage).validateState(state);
+  invalidateExtraction({ restore: false });
+  pendingFileDetails = null;
+  pendingRemoval = null;
   extractedData = cloneData(state.data);
   generatedBaselineData = cloneData(state.baseline);
   skippedItems = cloneData(state.skipped);
@@ -8655,6 +8316,7 @@ function restoreWorkspaceDraft(state) {
 }
 
 window.AuroraXMLHelper = {
+  confirmAction,
   refreshReviewIssues,
   goToReviewIssue,
   captureWorkspaceDraft,

@@ -221,8 +221,8 @@ async function run() {
         const input = document.querySelector('#repairXmlInput');
         if (!app?.switchWorkspaceView || !input) return null;
         const repairXml = `<elements>
-          <element name="Feat Chooser" type="Class Feature" source="Smoke Fixture" id="ID_SMOKE_FEAT_CHOOSER">
-            <rules><select type="Feat" name="Choose a feat" /></rules>
+          <element name="Spell Chooser" type="Class Feature" source="Smoke Fixture" id="ID_SMOKE_FEAT_CHOOSER">
+            <rules><select type="Spell" name="Known spell" supports="Wizard" /><select type="Spell" name="Choose a spell" /></rules>
           </element>
           <element name="Spell Grant" type="Magic Item" source="Smoke Fixture" id="ID_SMOKE_SPELL_GRANT">
             <rules><grant type="Spell" /></rules>
@@ -239,9 +239,9 @@ async function run() {
         input.value = repairXml;
         input.dispatchEvent(new Event('input', { bubbles: true }));
         document.querySelector('#stepRepair button[onclick="inspectRepairXml()"]')?.click();
-        const suggestionButton = document.querySelector('[data-repair-action][data-repair-value="feat"]');
+        const suggestionButton = document.querySelector('[data-repair-action][data-repair-value="Wizard"]');
         suggestionButton?.click();
-        const safeSuggestedApplied = input.value.includes('<select type="Feat" name="Choose a feat" supports="feat" />');
+        const safeSuggestedApplied = input.value.includes('<select type="Spell" name="Choose a spell" supports="Wizard" />');
         const supportCandidate = document.querySelector('[data-repair-action][data-repair-value="Skill"]');
         supportCandidate?.click();
         const candidateSelected = input.value.includes('<select type="Proficiency" name="Missing support" supports="Skill" />');
@@ -259,7 +259,7 @@ async function run() {
         const undoButton = document.querySelector('#undoRepairBtn');
         const undoAvailable = Boolean(undoButton && !undoButton.disabled);
         undoButton?.click();
-        const undoWorked = input.value.includes('supports="feat"')
+        const undoWorked = input.value.includes('name="Choose a spell" supports="Wizard"')
           && input.value.includes('name="Missing support" supports="Skill"')
           && input.value.includes('<grant type="Spell" />')
           && !input.value.includes('ID_SMOKE_SPELL_TARGET');
@@ -317,8 +317,10 @@ async function run() {
         const xmlInput = document.querySelector('#authoringTemplateXml');
         if (!app?.switchWorkspaceView || !xmlInput) return null;
         app.switchWorkspaceView('author');
-        const originalConfirm = window.confirm;
-        window.confirm = () => true;
+        // Keep this isolated synchronous editor probe deterministic. The real
+        // in-page confirmation is exercised by the draft workflow checks.
+        const originalConfirm = window.confirmAction;
+        window.confirmAction = () => true;
 
         const applyAC = (templateId, value, ruleName, ruleValue) => {
           document.querySelector(`[data-authoring-template="${templateId}"]`)?.click();
@@ -354,7 +356,7 @@ async function run() {
         const beforeInvalidAC = xmlInput.value;
         document.querySelector('#applyAuthoringElementPropertyBtn').click();
         const invalidACUnchanged = xmlInput.value === beforeInvalidAC;
-        window.confirm = originalConfirm;
+        window.confirmAction = originalConfirm;
         app.switchWorkspaceView('parse');
         return { armor, shield, invalidACDisabled, invalidACUnchanged };
       })();
@@ -365,11 +367,11 @@ async function run() {
         if (!app?.switchWorkspaceView || !xmlInput || !buttons.length) return null;
         app.switchWorkspaceView('author');
 
-        const originalConfirm = window.confirm;
+        const originalConfirm = window.confirmAction;
         xmlInput.value += '\n<!-- keep this draft -->';
         xmlInput.dispatchEvent(new Event('input', { bubbles: true }));
         let discardPrompt = '';
-        window.confirm = message => {
+        window.confirmAction = message => {
           discardPrompt = message;
           return false;
         };
@@ -377,10 +379,10 @@ async function run() {
         firstSwitch?.click();
         const cancelledSwitchPreservedDraft = xmlInput.value.includes('<!-- keep this draft -->')
           && Boolean(discardPrompt);
-        window.confirm = () => true;
+        window.confirmAction = () => true;
         firstSwitch?.click();
         const acceptedSwitchDiscardedDraft = !xmlInput.value.includes('<!-- keep this draft -->');
-        window.confirm = originalConfirm;
+        window.confirmAction = originalConfirm;
 
         const templateValidation = [];
         for (const button of buttons) {
@@ -392,7 +394,7 @@ async function run() {
           });
         }
 
-        window.confirm = () => true;
+        window.confirmAction = () => true;
         document.querySelector('[data-authoring-template="item-magic"]')?.click();
         const ruleType = document.querySelector('#authoringRuleType');
         xmlInput.value = `<elements>
@@ -463,7 +465,7 @@ async function run() {
         document.querySelector('#applyAuthoringElementPropertyBtn').click();
         const featPrerequisiteInserted = xmlInput.value.includes('<prerequisite>Strength 13</prerequisite>');
 
-        window.confirm = originalConfirm;
+        window.confirmAction = originalConfirm;
         app.switchWorkspaceView('parse');
         return {
           cancelledSwitchPreservedDraft,

@@ -22,13 +22,15 @@ function releaseFiles(root = repoRoot) {
 }
 
 async function inspectRelease(baseUrl, files, { fetchImpl = fetch, attempt = 1, sha = 'workspace', requestTimeoutMs = 15000 } = {}) {
+  if (!Array.isArray(files) || !files.length) throw new Error('Release verification needs at least one expected file.');
+  if (!Number.isFinite(requestTimeoutMs) || requestTimeoutMs <= 0) throw new Error('Release request timeout must be a positive number.');
   const base = new URL(baseUrl);
   if (!['http:', 'https:'].includes(base.protocol) || !base.pathname.endsWith('/')) throw new Error('Release URL must be an HTTP(S) site URL ending in /.');
   return Promise.all(files.map(async expected => {
     const url = new URL(expected.file, base);
     url.searchParams.set('release-check', `${sha}-${attempt}`);
     try {
-      const response = await fetchImpl(url, { headers: { 'Cache-Control': 'no-cache' }, signal: AbortSignal.timeout(requestTimeoutMs) });
+      const response = await fetchImpl(url, { headers: { 'Cache-Control': 'no-cache' }, signal: AbortSignal.timeout(Math.ceil(requestTimeoutMs)) });
       if (response.status !== 200) return { ...expected, ok: false, reason: `HTTP ${response.status}` };
       const actual = digest(await response.text());
       return { ...expected, actual, ok: actual === expected.sha256, ...(actual !== expected.sha256 ? { reason: 'Content differs from the checked-out release' } : {}) };
@@ -38,11 +40,13 @@ async function inspectRelease(baseUrl, files, { fetchImpl = fetch, attempt = 1, 
 
 async function waitForRelease(baseUrl, files, options = {}) {
   const { timeoutMs = 180000, intervalMs = 5000, onAttempt = () => {} } = options;
+  if (!Number.isFinite(timeoutMs) || timeoutMs < 0 || !Number.isFinite(intervalMs) || intervalMs < 0) throw new Error('Release wait and retry interval must be nonnegative numbers.');
   const deadline = Date.now() + timeoutMs;
   let attempt = 0;
   let results;
   do {
-    results = await inspectRelease(baseUrl, files, { ...options, attempt: ++attempt });
+    results = await inspectRelease(baseUrl, files, { ...options, attempt: ++attempt,
+      requestTimeoutMs: Math.min(options.requestTimeoutMs ?? 15000, Math.max(1, deadline - Date.now())) });
     onAttempt(results, attempt);
     if (results.every(result => result.ok)) return results;
     if (Date.now() >= deadline) break;

@@ -95,7 +95,21 @@
       }
       case 'insert-setter': {
         const setter = `<set name="${repair.setterName}">${escapeText(value)}</set>`;
+        if (repair.anchor.mode === 'replace-setter') {
+          const opening = text.match(/^<set\b(?:"[^"]*"|'[^']*'|[^'">])*>/i)?.[0];
+          if (!opening) return null;
+          return opening.replace(/\s*\/\s*>$/, '>') + escapeText(value) + '</set>';
+        }
         if (repair.anchor.mode === 'after-setters-open') {
+          if (/^<setters\b[^>]*\/>\s*$/i.test(text)) {
+            const opening = text.replace(/\s*\/>\s*$/, '>');
+            return opening + '\n' + context.indent + '  ' + setter + '\n' + context.indent + '</setters>';
+          }
+          // Several repairs may share the originally self-closing setters tag.
+          const closing = text.lastIndexOf('</setters>');
+          if (closing >= 0) {
+            return text.slice(0, closing) + '  ' + setter + '\n' + context.indent + text.slice(closing);
+          }
           if (context.inlineAfter) return `${text}${setter}`;
           return `${text}\n${context.indent}  ${setter}`;
         }
@@ -134,6 +148,7 @@
     const values = options.values || {};
     const outputDocs = (docs || []).map(doc => ({ fileName: doc.fileName || '', xml: String(doc.xml || ''), changed: false }));
     const byFile = new Map(outputDocs.map(doc => [doc.fileName, doc]));
+    const ambiguousFiles = new Set(outputDocs.filter((doc, index) => outputDocs.findIndex(other => other.fileName === doc.fileName) !== index).map(doc => doc.fileName));
     const applied = [];
     const skipped = [];
     const groups = new Map();
@@ -146,6 +161,10 @@
       const doc = byFile.get(repair.anchor.fileName || '');
       if (!doc) {
         skipped.push({ repair, reason: `File '${repair.anchor.fileName}' is not loaded.` });
+        continue;
+      }
+      if (ambiguousFiles.has(doc.fileName)) {
+        skipped.push({ repair, reason: 'More than one loaded file has this name. Give each file a unique name before applying repairs.' });
         continue;
       }
       if (doc.xml.slice(repair.anchor.start, repair.anchor.end) !== repair.anchor.text) {

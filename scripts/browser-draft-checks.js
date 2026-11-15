@@ -3,6 +3,14 @@ const fs = require('node:fs');
 const path = require('node:path');
 const JSZip = require('jszip');
 
+async function acceptWorkspaceConfirmation(page, trigger = () => {}) {
+  await trigger();
+  const accept = page.locator('#workspaceConfirmAccept');
+  await accept.waitFor({ state: 'visible' });
+  await accept.click();
+  await page.locator('#workspaceConfirm').waitFor({ state: 'hidden' });
+}
+
 async function checkDraftRecovery(browser, url, reportDirectory) {
   const context = await browser.newContext({ acceptDownloads: true });
   let page;
@@ -73,7 +81,7 @@ async function checkDraftRecovery(browser, url, reportDirectory) {
     const download = await downloadPromise;
     const backup = fs.readFileSync(await download.path());
     assert.equal(JSON.parse(backup).state.data.feat[0].name, 'Recovered Feat');
-    await page.locator('#draftClear').click();
+    await acceptWorkspaceConfirmation(page, () => page.locator('#draftClear').click());
     assert.equal(await page.evaluate(() => localStorage.getItem(window.AuroraDraftStorage.KEY)), null);
     await page.reload({ waitUntil: 'domcontentloaded' });
     assert.equal(await page.locator('#sourceName').inputValue(), '');
@@ -81,6 +89,7 @@ async function checkDraftRecovery(browser, url, reportDirectory) {
     await page.locator('#draftImportButton').click();
     const chooser = await chooserPromise;
     await chooser.setFiles({ name: 'backup.json', mimeType: 'application/json', buffer: backup });
+    await acceptWorkspaceConfirmation(page);
     await saved(page);
     await page.reload({ waitUntil: 'domcontentloaded' });
     assert.equal(await page.locator('#authoringTemplateXml').inputValue(), authoredXml);
@@ -98,7 +107,7 @@ async function checkDraftRecovery(browser, url, reportDirectory) {
     await second.locator('#authoringTemplateXml').fill(authoredXml + '\n<!-- Second tab -->');
     await second.evaluate(() => window.AuroraDraftRecovery.flush());
     assert.match(await second.evaluate(() => localStorage.getItem(window.AuroraDraftStorage.KEY)), /First tab/);
-    await second.locator('#draftRetry').click();
+    await acceptWorkspaceConfirmation(second, () => second.locator('#draftRetry').click());
     await saved(second);
     assert.match(await second.evaluate(() => localStorage.getItem(window.AuroraDraftStorage.KEY)), /Second tab/);
     checks.push('A stale tab cannot silently overwrite a newer saved draft');
@@ -110,12 +119,12 @@ async function checkDraftRecovery(browser, url, reportDirectory) {
     await page.locator('#sourceName').fill('Keep corrupt backup intact');
     await page.evaluate(() => window.AuroraDraftRecovery.flush());
     assert.equal(await page.evaluate(() => localStorage.getItem(window.AuroraDraftStorage.KEY)), '{broken draft');
-    await page.locator('#draftRetry').click();
+    await acceptWorkspaceConfirmation(page, () => page.locator('#draftRetry').click());
     await saved(page);
     await page.locator('button[onclick="startManualAuthoring()"]').click();
     await page.locator('details.manual-paste summary').click();
     await page.locator('#manualSourceText').fill('Discard this pasted section when starting over');
-    await page.locator('button[onclick="resetAll()"]').click();
+    await acceptWorkspaceConfirmation(page, () => page.getByRole('button', { name: 'Start Over', exact: true }).click());
     await page.reload({ waitUntil: 'domcontentloaded' });
     assert.equal(await page.locator('#manualSourceText').inputValue(), '');
     assert.equal(await page.locator('#sourceName').inputValue(), '');
@@ -182,6 +191,8 @@ async function checkPdfExport(browser, url, reportDirectory) {
     await name.waitFor({ state: 'attached' });
     assert.match(await page.locator('#body-spell-0 .source-reference').first().textContent(), /PDF page 2/);
     assert.equal(await classes.inputValue(), 'Wizard');
+    assert.deepEqual(await page.evaluate(() => window.AuroraXMLHelper.validateAll().map(issue => issue.msg)), [],
+      'The completed PDF fixture must export cleanly without acknowledging an unexpected warning.');
     const downloadPromise = page.waitForEvent('download');
     await page.locator('button[onclick="downloadZip()"]').click();
     const download = await downloadPromise;
@@ -194,11 +205,29 @@ async function checkPdfExport(browser, url, reportDirectory) {
     assert.match(xml, /<set name="level">2<\/set>/);
     assert.match(xml, /<supports>Wizard<\/supports>/);
     assert.match(xml, /Clockwork Initiate/);
-    return 'Look up base and feat access outside the selected PDF pages, review a conditional grant, recover the source and edits, and export without broadening class access';
+
+    // Exercise the explicit review-export path as well as the clean export.
+    await classes.fill('');
+    await page.locator('#reviewIssuesList li').filter({ hasText: 'no spell lists assigned' }).waitFor({ state: 'visible' });
+    const reviewXmlPromise = page.waitForEvent('download');
+    await acceptWorkspaceConfirmation(page, () => page.getByRole('button', { name: '↓ Single XML', exact: true }).click());
+    const reviewXmlDownload = await reviewXmlPromise;
+    const reviewXml = fs.readFileSync(await reviewXmlDownload.path(), 'utf8');
+    assert.match(reviewXml, /<!-- Unresolved items in this export/);
+    assert.match(reviewXml, /no spell lists assigned/);
+    assert.match(reviewXml, /name="Clockwork Beacon" type="Spell"/);
+    const reviewZipPromise = page.waitForEvent('download');
+    await acceptWorkspaceConfirmation(page, () => page.getByRole('button', { name: '↓ Download ZIP', exact: true }).click());
+    const reviewZipDownload = await reviewZipPromise;
+    const reviewZip = await JSZip.loadAsync(fs.readFileSync(await reviewZipDownload.path()));
+    const reviewFile = Object.keys(reviewZip.files).find(file => file.endsWith('/unresolved-items.txt'));
+    assert.ok(reviewFile, 'A ZIP exported for review must include its unresolved-items report.');
+    assert.match(await reviewZip.file(reviewFile).async('string'), /no spell lists assigned/);
+    return 'Look up base and feat access outside the selected PDF pages, recover reviewed edits, export clean XML without broadening access, and include review reports when exporting acknowledged warnings';
   } catch (error) {
     if (reportDirectory && page) await page.screenshot({ path: path.join(reportDirectory, 'export-failure.png'), fullPage: true }).catch(() => {});
     throw error;
   } finally { await context.close(); }
 }
 
-module.exports = { checkDraftRecovery, checkPdfExport };
+module.exports = { checkDraftRecovery, checkPdfExport, acceptWorkspaceConfirmation };

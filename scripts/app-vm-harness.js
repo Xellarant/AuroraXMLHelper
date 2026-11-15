@@ -48,7 +48,7 @@ function createStubElement(value = '') {
 }
 
 function loadApp(sourceMeta = {}, options = {}) {
-  const storage = {};
+  const storage = options.storage || {};
   const defaults = {
     name: 'Fixture Source',
     abbr: 'FIX',
@@ -86,7 +86,7 @@ function loadApp(sourceMeta = {}, options = {}) {
     documentElement: { dataset: {} }
   };
   const window = {
-    addEventListener() {},
+    addEventListener(type, listener) { options.onWindowEvent?.(type, listener); },
     localStorage: {
       getItem(key) { return Object.prototype.hasOwnProperty.call(storage, key) ? storage[key] : null; },
       setItem(key, value) { storage[key] = String(value); },
@@ -95,6 +95,8 @@ function loadApp(sourceMeta = {}, options = {}) {
     }
   };
   const context = {
+    // Match browser ID resolution without implicitly enabling repair profiles.
+    AuroraLookupIndex: require('../src/aurora-reference-index'),
     console,
     document,
     window,

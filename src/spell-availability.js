@@ -15,7 +15,19 @@
   const kindLine = value => new RegExp(`^(?:${school} cantrip|\\d+(?:st|nd|rd|th)-level ${school}|Level \\d+ ${school})\\b`, 'i').test(clean(value));
   const levelLine = value => /^(?:Cantrips?\b|\d+(?:st|nd|rd|th)?(?:[- ]Level|\s*\())/i.test(clean(value));
   const cells = value => clean(value).replace(/^\|/, '').replace(/\|$/, '').split('|').map(value => value.trim());
-  const containsName = (value, name) => String(value || '').split(/[,;]|\.\s*|\s+and\s+/i).some(part => key(part) === key(name));
+  function containsName(value, name) {
+    const escaped = clean(name).replace(/[.*+?^{}()|[\]\\$]/g, '\\$&').replace(/\s+/g, '\\s+');
+    // A conjunction inside a spell name is part of its identity, not a list separator.
+    return new RegExp('(?:^|[,;]|\\.\\s*|\\band\\s+)\\s*' + escaped + '(?=$|\\s*[,;.]|\\s+and\\b)', 'i').test(clean(value));
+  }
+  function tableLevel(value, field) {
+    const text = clean(value);
+    const number = /^(?:Cantrips?)$/i.test(text) ? 0 : /^\d+(?:st|nd|rd|th)?$/i.test(text) ? parseInt(text, 10) : null;
+    const minimum = field === 'spellLevel' ? 0 : 1;
+    const maximum = field === 'spellLevel' ? 9 : 20;
+    return Number.isInteger(number) && number >= minimum && number <= maximum
+      ? { [field]: number } : { levelUnclear: true, levelField: field };
+  }
   const tableAccess = text => /added to|add.*spell list|expanded spell list/i.test(text) ? 'expanded-list'
     : /always.*prepared|domain spells|oath spells/i.test(text) ? 'prepared'
     : /spells? known|you (?:learn|know)/i.test(text) ? 'known' : 'review';
@@ -76,12 +88,14 @@
       if (/^(?:Chapter\s+\d+.*|Spells?|Spell Lists?|Spell Descriptions)$/i.test(text)) category = 'feature';
       const markdown = raw.match(/^(#{1,6})\s+/);
       const typedMatch = raw.match(/^([^:]{3,20}):\s*(.+)$/);
-      const typed = typedMatch && ['feat', 'background', 'race', 'species', 'subclass', 'class', 'feature'].includes(key(typedMatch[1])) ? typedMatch : null;
+      const classMetadata = inDefinition && typedMatch && key(typedMatch[1]) === 'class'
+        && !/\b(?:Hit Dice|Hit Point Die|Hit Points|Primary Ability)\s*[:|]/i.test(records.slice(index + 1, index + 8).map(row => row.text).join(' '));
+      const typed = !classMetadata && typedMatch && ['feat', 'background', 'race', 'species', 'subclass', 'class', 'feature'].includes(key(typedMatch[1])) ? typedMatch : null;
       const capitals = text === text.toUpperCase() && /[A-Z]/.test(text) && text.split(' ').length < 9;
       const pdfHeading = row.size > 0 && (row.size >= row.bodySize * 1.25 || capitals) && text.length < 75 && /[A-Za-z]/.test(text)
         && !/[.!?:]$/.test(text) && !/https?:|www\.|\d+\/\d+(?:\/\d+)?/.test(text);
       if (kindLine(records[index + 1]?.text)) inDefinition = true;
-      else if ((markdown || typed || pdfHeading) && !kindLine(text) && !bySpellHeading(text)) inDefinition = false;
+      else if (!classMetadata && (markdown || typed || pdfHeading) && !kindLine(text) && !bySpellHeading(text)) inDefinition = false;
       const section = /^(?:.* Feats|Feats|Backgrounds|Races|Species|Witch's Crafts|.* Subclasses)$/i.test(text);
       if (section) category = ownerKind(text);
       const previous = stack[stack.length - 1];
@@ -90,7 +104,7 @@
         result.push(previous);
         continue;
       }
-      if (markdown || typed || pdfHeading) {
+      if (!classMetadata && (markdown || typed || pdfHeading)) {
         let depth = markdown ? markdown[1].length : typed ? key(typed[1]) === 'feature' ? 4 : 3 : section || row.size >= row.bodySize * 1.7 ? 2 : 3;
         if (pdfHeading && !markdown && !typed && stack.some(entry => entry.depth === 3)
           && /^(?:spelllevel|[a-z]+level)spells$/.test(key(records[index + 1]?.text))) depth = 4;
@@ -158,7 +172,7 @@
       let end = i + 2;
       while (end < records.length && !kindLine(records[end + 1]?.text)) end++;
       for (let j = i + 2; j < end; j++) {
-        const match = clean(records[j].text).match(/^(?:Spell Lists?|Classes)\s*[.:]\s*(.+)$/i);
+        const match = clean(records[j].text).match(/^(?:Spell Lists?|Class(?:es)?)\s*[.:]\s*(.+)$/i);
         if (match) for (const name of classNames(match[1])) addBase(spell, name, records[j], 'definition');
       }
     }
@@ -228,11 +242,11 @@
         continue;
       }
       if (columns.length < 2) { table = null; continue; }
-      if (!table || !/^(?:Cantrips?|\d+(?:st|nd|rd|th)?(?:\s*[,/–-]\s*\d+)?)$/i.test(columns[table.levelColumn])) continue;
+      if (!table || /^:?-{3,}:?$/.test(columns[table.levelColumn])) continue;
       const listed = columns[table.spellColumn];
       for (const spell of spells) if (containsName(listed, spell.name)) {
         addConditional(spell, table.owner, table.access, tableCondition(table.condition, row.text, table.access), row,
-          { [table.spellLevel ? 'spellLevel' : 'level']: /^Cantrip/i.test(columns[table.levelColumn]) ? 0 : parseInt(columns[table.levelColumn], 10) });
+          tableLevel(columns[table.levelColumn], table.spellLevel ? 'spellLevel' : 'level'));
       }
     }
 
@@ -265,10 +279,9 @@
           const record = records.find(record => record.page === page.page && record.text === row.text);
           if (!record) continue;
           const levelField = key(header.text).startsWith('spelllevel') ? 'spellLevel' : 'level';
-          const levelValue = /^Cantrip/i.test(match[1]) ? 0 : /^\d+$/.test(match[1]) ? Number(match[1]) : null;
           for (const spell of spells) if (containsName(listed, spell.name))
             addConditional(spell, owner, tableAccess(nearby), tableCondition(nearby, `${row.text}\n${companion?.text || ''}\n${wrapped.join('\n')}`, tableAccess(nearby)), record,
-              levelValue === null ? { levelUnclear: true, levelField } : { [levelField]: levelValue });
+              tableLevel(match[1], levelField));
         }
       }
     }

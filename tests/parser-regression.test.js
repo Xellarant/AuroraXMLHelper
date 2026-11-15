@@ -298,7 +298,7 @@ test('repair preview hides authoring profiles when there are no related diagnost
   assert.doesNotMatch(html, /<h4>Feat<\/h4>/);
 });
 
-test('repair preview surfaces inferred select supports values', () => {
+test('repair preview preserves a valid unfiltered feat selection', () => {
   const context = loadApp();
   const xml = `<elements>
   <element name="Ability Score Improvement" type="Class Feature" source="Pattern Fixture" id="ID_FIXTURE_CLASS_FEATURE_ASI">
@@ -317,9 +317,9 @@ test('repair preview surfaces inferred select supports values', () => {
     `window.AuroraXMLHelper.renderRepairPreviewHtml(${JSON.stringify(analysis)})`
   );
 
-  assert.match(html, /-&gt; feat/);
-  assert.match(html, /Inferred from select type=&quot;Feat&quot;/);
-  assert.match(html, /supports=&quot;feat&quot;/);
+  assert.match(html, /No diagnostics found/);
+  assert.doesNotMatch(html, /Inferred from select type=&quot;Feat&quot;/);
+  assert.doesNotMatch(html, /supports=&quot;feat&quot;/);
 });
 
 test('repair preview surfaces likely select supports candidates', () => {
@@ -797,7 +797,7 @@ test('artificer subclass helper rules infer canonical repeated stats and selects
   assert.ok(xml.includes('<stat name="alchemist:elixirs:max" value="2" level="3" />'));
   assert.ok(xml.includes('<stat name="alchemist:elixirs:max" value="1" level="15" />'));
   assert.equal((xml.match(/<stat name="cannon:hp" value="level:artificer" \/>/g) || []).length, 5);
-  assert.ok(xml.includes('<select type="Companion" name="Steel Defender" supports="VSS Steel Defender" default="ID_VSS_COMPANION_ARTIFICER_STEEL_DEFENDER" />'));
+  assert.ok(!xml.includes('default="ID_VSS_COMPANION_ARTIFICER_STEEL_DEFENDER"'), 'Do not export a companion picker whose definition is never generated.');
   assert.ok(xml.includes('<stat name="atlas:targets" value="intelligence:modifier" />'));
   assert.equal((xml.match(/<stat name="atlas:safe haven:hp" value="level:artificer" \/>/g) || []).length, 2);
 });

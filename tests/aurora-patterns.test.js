@@ -10,6 +10,7 @@ const {
   renderPatternReport,
   summarizePatternCatalog
 } = require('../src/aurora-xml-patterns');
+const { elementRanges, xmlMarkupText, setTagAttribute, attrMap } = require('../src/aurora-xml-patterns');
 const { parseArgs, readDocuments } = require('../scripts/aurora-pattern-report');
 
 const sampleXml = `<?xml version="1.0" encoding="utf-8"?>
@@ -122,23 +123,17 @@ test('Aurora XML diagnostics flag initial repair issues', () => {
   assert.match(finding('select-missing-required-attribute').repairs.find(repair => repair.attribute === 'supports').sample, /supports="SUPPORT TOKEN"/);
 });
 
-test('Aurora XML diagnostics infer Feat select supports from select type', () => {
+test('Aurora XML diagnostics preserve valid unfiltered Feat and Language choices', () => {
   const xml = `<elements>
   <element name="Ability Score Improvement" type="Class Feature" source="Pattern Fixture" id="ID_FIXTURE_CLASS_FEATURE_ASI">
     <rules>
       <select type="Feat" name="Feat (Artificer)" level="4" />
+      <select type="Language" name="Language (Favored Enemy)" level="1" />
     </rules>
   </element>
 </elements>`;
   const analysis = analyzeAuroraXmlDocuments([{ fileName: 'feat-select.xml', xml }]);
-  const finding = analysis.diagnostics.find(item => item.category === 'select-missing-required-attribute');
-  const repair = finding.repairs.find(item => item.attribute === 'supports');
-
-  assert.equal(repair.confidence, 'high');
-  assert.equal(repair.replacementValue, 'feat');
-  assert.equal(repair.inferenceReason, 'select type="Feat"');
-  assert.match(repair.sample, /supports="feat"/);
-  assert.match(repair.completeSample, /supports="feat"/);
+  assert.equal(analysis.diagnostics.some(item => item.category === 'select-missing-required-attribute'), false);
 });
 
 test('Aurora XML diagnostics include observed candidates for ambiguous select supports', () => {
@@ -174,7 +169,7 @@ test('Aurora XML repair applies a selected rule attribute to its exact source no
   const xml = `<elements>
   <element name="Repair Fixture" type="Class Feature" source="Pattern Fixture" id="ID_FIXTURE_CLASS_FEATURE_REPAIR">
     <rules>
-      <select type="Feat" name="Choose a feat" />
+      <select type="Spell" name="Choose a spell" />
       <grant type="Spell" />
     </rules>
   </element>
@@ -182,10 +177,10 @@ test('Aurora XML repair applies a selected rule attribute to its exact source no
   const analysis = analyzeAuroraXmlDocuments([{ fileName: 'repair.xml', xml }]);
   const selectFinding = analysis.diagnostics.find(item => item.category === 'select-missing-required-attribute');
   const selectRepair = selectFinding.repairs.find(item => item.attribute === 'supports');
-  const selected = applyRepairToXml(xml, selectFinding, selectRepair, 'feat');
+  const selected = applyRepairToXml(xml, selectFinding, selectRepair, 'Wizard');
 
   assert.ok(selected);
-  assert.match(selected.xml, /<select type="Feat" name="Choose a feat" supports="feat" \/>/);
+  assert.match(selected.xml, /<select type="Spell" name="Choose a spell" supports="Wizard" \/>/);
 
   const updatedAnalysis = analyzeAuroraXmlDocuments([{ fileName: 'repair.xml', xml: selected.xml }]);
   const grantFinding = updatedAnalysis.diagnostics.find(item => item.category === 'grant-missing-required-attribute');
@@ -201,7 +196,7 @@ test('Aurora XML repair replaces an empty single-quoted attribute without duplic
   const xml = `<elements>
   <element name="Quoted Repair Fixture" type="Class Feature" source="Pattern Fixture" id="ID_FIXTURE_QUOTED_REPAIR">
     <rules>
-      <select type='Feat' name='Choose a feat' supports='' />
+      <select type='Spell' name='Choose a spell' supports='' />
     </rules>
   </element>
 </elements>`;
@@ -210,10 +205,10 @@ test('Aurora XML repair replaces an empty single-quoted attribute without duplic
   const repair = finding?.repairs.find(item => item.attribute === 'supports');
 
   assert.ok(repair);
-  const applied = applyRepairToXml(xml, finding, repair, '$& feat');
+  const applied = applyRepairToXml(xml, finding, repair, '$& Wizard');
 
   assert.ok(applied);
-  assert.match(applied.xml, /<select type='Feat' name='Choose a feat' supports="\$&amp; feat" \/>/);
+  assert.match(applied.xml, /<select type='Spell' name='Choose a spell' supports="\$&amp; Wizard" \/>/);
   assert.equal([...applied.xml.matchAll(/\bsupports\s*=/g)].length, 1);
   assert.equal(analyzeAuroraXmlDocuments([{ fileName: 'quoted-repair.xml', xml: applied.xml }]).diagnostics.length, 0);
 });
@@ -290,14 +285,93 @@ test('Aurora XML pattern report renders summary and diagnostics', () => {
 
 test('Aurora pattern CLI reads XML paths and validates arguments', () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'aurora-pattern-report-'));
-  const xmlPath = path.join(tempRoot, 'fixture.xml');
-  fs.writeFileSync(xmlPath, sampleXml, 'utf8');
+  try {
+    const xmlPath = path.join(tempRoot, 'fixture.xml');
+    fs.writeFileSync(xmlPath, sampleXml, 'utf8');
+    const args = parseArgs(['--xml', tempRoot, '--top', '3', '--json']);
+    const docs = readDocuments(args.xml);
+    assert.equal(args.top, 3);
+    assert.equal(args.json, true);
+    assert.deepEqual(docs.map(doc => path.basename(doc.fileName)), ['fixture.xml']);
+    assert.throws(() => parseArgs(['--xml', tempRoot, '--top', '0']), /--top must be a positive integer/);
+  } finally {
+    assert.equal(path.dirname(path.resolve(tempRoot)), path.resolve(os.tmpdir()));
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
 
-  const args = parseArgs(['--xml', tempRoot, '--top', '3', '--json']);
-  const docs = readDocuments(args.xml);
+test('inactive XML examples cannot become repair targets or catalogue definitions', () => {
+  const xml = [
+    '<?xml version="1.0"?>',
+    '<!DOCTYPE elements [<!ENTITY example \'<element name="DTD Example" />\'>]>',
+    '<elements>',
+    '<!-- <element name="Comment" type="Class" source="X" id="ID_COMMENT"><rules><grant /></rules></element> -->',
+    '<element name="Real > Example" type="Class Feature" source="X" id="ID_REAL">',
+    '<description><![CDATA[Literal <element name="CDATA example" /> & details.]]></description>',
+    '<rules><!-- <grant type="Not A Type" /> --><grant type="Spell" id="ID_SPELL" /></rules>',
+    '</element></elements>'
+  ].join('\n');
+  const elements = parseAuroraElements(xml);
+  assert.equal(elements.length, 1);
+  assert.equal(elements[0].name, 'Real > Example');
+  assert.equal(elements[0].description, 'Literal <element name="CDATA example" /> & details.');
+  assert.equal(elements[0].ruleRecords.length, 1);
+  assert.equal(elements[0].ruleRecords[0].attrs.id, 'ID_SPELL');
+  assert.equal(elements[0].openTagRange.text, xml.slice(elements[0].openTagRange.start, elements[0].openTagRange.end));
+  const ranges = elementRanges(xml);
+  assert.equal(ranges.length, 1);
+  assert.equal(ranges[0].start, xml.indexOf('<element name="Real'));
+  assert.equal(ranges[0].xml, xml.slice(ranges[0].start, ranges[0].end));
+  const masked = xmlMarkupText(xml);
+  assert.equal(masked.length, xml.length);
+  assert.equal(masked.split('\n').length, xml.split('\n').length);
+  assert.ok(!masked.includes('CDATA example') && !masked.includes('DTD Example') && !masked.includes('Not A Type'));
+});
 
-  assert.equal(args.top, 3);
-  assert.equal(args.json, true);
-  assert.deepEqual(docs.map(doc => path.basename(doc.fileName)), ['fixture.xml']);
-  assert.throws(() => parseArgs(['--xml', tempRoot, '--top', '0']), /--top must be a positive integer/);
+test('attribute repairs do not alter lookalike attribute text inside quoted values or interpret dollar substitutions', () => {
+  const tag = '<select note=" name=\'Leave this alone\' > quoted" type="Feat" name="Old" />';
+  const changed = setTagAttribute(tag, 'name', '$1 $& "$2"');
+  assert.match(changed, /note=" name='Leave this alone' > quoted"/);
+  assert.equal(attrMap(changed).name, '$1 $& "$2"');
+  const added = setTagAttribute('<select type="Feat" />', 'name', '$1 $& $2');
+  assert.equal(attrMap(added).name, '$1 $& $2');
+  assert.equal(attrMap(setTagAttribute(tag, 'number', 0)).number, '0');
+});
+
+test('repairing a long rule retains the complete source and quote-aware attribute boundary', () => {
+  const detail = 'Long text '.repeat(160);
+  const xml = '<elements><element name="Long rule" type="Class Feature" source="X" id="ID_LONG"><rules>'
+    + '<select name="A > B ' + detail + '" type="Spell" /></rules></element></elements>';
+  const analysis = analyzeAuroraXmlDocuments([{ fileName: 'long.xml', xml }]);
+  const finding = analysis.diagnostics.find(finding => finding.category === 'select-missing-required-attribute');
+  const repair = finding.repairs.find(repair => repair.attribute === 'supports');
+  const result = applyRepairToXml(xml, finding, repair, 'Wizard');
+  assert.ok(result);
+  assert.ok(result.xml.includes(detail));
+  assert.ok(result.xml.endsWith('</rules></element></elements>'));
+  assert.doesNotMatch(result.xml, /\n\.\.\./);
+  assert.equal(parseAuroraElements(result.xml)[0].ruleRecords[0].attrs.supports, 'Wizard');
+});
+
+test('repair metadata ignores commented info nodes and accepts a valid index root', () => {
+  const xml = '<index><!-- <info><n>Do not rename</n></info> --><info><name>Collection</name>'
+    + '<update version="1"><file name="x.index" url="x.index" /></update></info><files /></index>';
+  const analysis = analyzeAuroraXmlDocuments([{ fileName: 'x.index', xml }]);
+  assert.ok(!analysis.diagnostics.some(finding => ['root-shape', 'info-uses-n-tag', 'missing-info-update'].includes(finding.category)));
+});
+
+test('fuzzy setter renames are withheld when the correct setter already has a value', () => {
+  const reference = {
+    types: ['Spell'],
+    ids: {},
+    typeCounts: { Spell: 20 }, setterNamesByType: { Spell: { range: 20 } }
+  };
+  const xml = '<elements><element name="Conflict" type="Spell" source="X" id="ID_CONFLICT"><setters>'
+    + '<set name="rang">60 feet</set><set name="range">30 feet</set></setters></element></elements>';
+  const analysis = analyzeAuroraXmlDocuments([{ fileName: 'conflict.xml', xml }], { reference });
+  const conflict = analysis.diagnostics.find(finding => finding.category === 'setter-name-conflict');
+  assert.ok(conflict);
+  assert.equal(conflict.repairs[0].confidence, 'manual');
+  assert.equal(conflict.repairs[0].kind, 'resolve-setter-conflict');
+  assert.ok(!analysis.diagnostics.flatMap(finding => finding.repairs).some(repair => repair.kind === 'rename-setter'));
 });

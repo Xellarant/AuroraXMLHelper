@@ -3,7 +3,7 @@ const { loadApp, runInApp } = require('../scripts/app-vm-harness');
 
 const repairXml = `<elements>
   <element name="Original" type="Class Feature" source="X" id="ID_X_FEATURE">
-    <rules><select type="Feat" name="Choose a feat" /><grant type="Spell" /></rules>
+    <rules><select type="Spell" name="Choose a spell" /><grant type="Spell" /></rules>
   </element>
 </elements>`;
 
@@ -26,11 +26,11 @@ for (const action of ['bulk', 'suggestion']) {
     const api = inspect(context, elements, xml);
     if (action === 'bulk') {
       const finding = api.repairState.analysis.diagnostics.find(item => item.category === 'select-missing-required-attribute');
-      api.applyRepairSelection([finding.repairs[0].id]);
+      api.applyRepairSelection([finding.repairs[0].id], { [finding.repairs[0].id]: 'Wizard' });
     } else {
-      suggestion(context, 'select-missing-required-attribute', 'feat');
+      suggestion(context, 'select-missing-required-attribute', 'Wizard');
     }
-    assert.equal(elements.repairXmlInput.value, xml.replace('name="Choose a feat" />', 'name="Choose a feat" supports="feat" />'));
+    assert.equal(elements.repairXmlInput.value, xml.replace('name="Choose a spell" />', 'name="Choose a spell" supports="Wizard" />'));
     assert.equal(api.repairState.originalDocs[0].xml, xml);
     assert.equal(api.changedRepairDocs()[0].xml, elements.repairXmlInput.value);
   });
@@ -39,20 +39,20 @@ for (const action of ['bulk', 'suggestion']) {
 test('edits after inspection block stale repairs and survive reinspection', () => {
   const { context, elements } = loadApp();
   const api = inspect(context, elements);
-  const ids = api.repairState.analysis.diagnostics.flatMap(finding => finding.repairs).filter(repair => repair.confidence === 'high').map(repair => repair.id);
+  const ids = api.repairState.analysis.diagnostics.flatMap(finding => finding.repairs).filter(repair => repair.attribute === 'supports').map(repair => repair.id);
   const edited = repairXml.replace('Original', 'Manual edit');
   elements.repairXmlInput.value = edited;
   assert.throws(() => api.applyRepairSelection(ids), /changed since inspection/);
   assert.equal(elements.repairXmlInput.value, edited);
   context.inspectRepairXml();
-  suggestion(context, 'select-missing-required-attribute', 'feat');
+  suggestion(context, 'select-missing-required-attribute', 'Wizard');
   assert.match(api.changedRepairDocs()[0].xml, /name="Manual edit"/);
 });
 
 test('reinspection preserves applied repairs, the original diff, and undo', () => {
   const { context, elements } = loadApp();
   const api = inspect(context, elements);
-  suggestion(context, 'select-missing-required-attribute', 'feat');
+  suggestion(context, 'select-missing-required-attribute', 'Wizard');
   const fixed = elements.repairXmlInput.value;
   context.inspectRepairXml();
   assert.equal(api.repairState.docs[0].xml, fixed);
@@ -72,9 +72,9 @@ test('multiple uploaded documents stay in sync after repair and undo', () => {
   const docs = [{ fileName: 'first.xml', xml: repairXml }, { fileName: 'second.xml', xml: '<elements />' }];
   context.loadRepairDocs(docs);
   context.inspectRepairXml();
-  suggestion(context, 'select-missing-required-attribute', 'feat');
+  suggestion(context, 'select-missing-required-attribute', 'Wizard');
   const api = context.window.AuroraXMLHelper;
-  assert.match(api.repairState.uploadedDocs[0].xml, /supports="feat"/);
+  assert.match(api.repairState.uploadedDocs[0].xml, /supports="Wizard"/);
   assert.equal(elements.repairXmlInput.readOnly, true);
   context.inspectRepairXml();
   assert.equal(api.changedRepairDocs().length, 1);

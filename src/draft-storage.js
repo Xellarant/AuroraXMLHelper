@@ -8,11 +8,12 @@
   const FORMAT = 'aurora-xml-helper-draft';
   const MAX_LENGTH = 4 * 1024 * 1024;
   const MAX_FILE_LENGTH = 50 * 1024 * 1024;
+  const ELEMENT_TYPES = ['spell', 'archetype', 'item', 'feat', 'magic', 'race', 'background', 'class', 'other'];
   const object = value => Boolean(value && typeof value === 'object' && !Array.isArray(value));
   const docs = value => Array.isArray(value) && value.every(doc => object(doc) && typeof doc.fileName === 'string' && typeof doc.xml === 'string');
   const buckets = value => object(value) && Object.entries(value).every(([type, items]) =>
-    ['spell', 'archetype', 'item', 'feat', 'magic', 'race', 'background', 'class', 'other'].includes(type)
-    && Array.isArray(items) && items.every(object));
+    ELEMENT_TYPES.includes(type)
+    && Array.isArray(items) && items.every(item => elementRecord(type, item)));
   const availability = value => value == null || object(value)
     && Array.isArray(value.base) && value.base.every(entry => object(entry) && typeof entry.name === 'string')
     && Array.isArray(value.conditional) && value.conditional.every(entry => object(entry)
@@ -29,6 +30,41 @@
     return Object.assign(new Error(message), { code });
   }
 
+  function sourceReference(value) {
+    if (value == null) return true;
+    if (!object(value)) return false;
+    for (const collection of ['related', 'progression']) {
+      if (value[collection] != null && (!Array.isArray(value[collection])
+        || !value[collection].every(entry => object(entry) && sourceReference(entry)))) return false;
+    }
+    return true;
+  }
+
+  function elementRecord(type, value) {
+    if (!object(value)) return false;
+    if (!sourceReference(value._source)) return false;
+    // Incomplete entries remain editable. Reject shapes that would crash the
+    // editors before restoration can safely replace the current workspace.
+    for (const field of ['name', 'description', 'fullText', 'higherLevels', 'prerequisite', 'class', 'supports']) {
+      if (value[field] != null && typeof value[field] !== 'string') return false;
+    }
+    for (const field of ['classes', 'languages', 'savingThrows', 'armorProficiencies', 'weaponProficiencies',
+      'toolProficiencies', 'skillProficiencies', 'benefits']) {
+      if (value[field] != null && (!Array.isArray(value[field]) || !value[field].every(entry => typeof entry === 'string'))) return false;
+    }
+    for (const field of ['features', 'traits', 'actions', 'reactions', 'subraces']) {
+      if (value[field] != null && (!Array.isArray(value[field]) || !value[field].every(entry => object(entry)
+        && sourceReference(entry._source)
+        && ['name', 'description', 'action', 'usage'].every(name => entry[name] == null || typeof entry[name] === 'string')))) return false;
+    }
+    if (type === 'background' && value.abilityScores != null
+      && (!Array.isArray(value.abilityScores) || !value.abilityScores.every(entry => typeof entry === 'string'))) return false;
+    if (type === 'race' && value.abilityScores != null && !object(value.abilityScores)) return false;
+    if (value.skillChoices != null && (!object(value.skillChoices)
+      || value.skillChoices.from != null && (!Array.isArray(value.skillChoices.from) || !value.skillChoices.from.every(entry => typeof entry === 'string')))) return false;
+    return true;
+  }
+
   function classProgression(value) {
     if (value.progression != null && (!Array.isArray(value.progression) || !value.progression.every(row => object(row)
       && typeof row.level === 'number' && Array.isArray(row.features) && row.features.every(name => typeof name === 'string')
@@ -37,16 +73,25 @@
     if (value.choices == null) return true; // Older drafts acquire choices when opened.
     return Array.isArray(value.choices) && value.choices.every(choice => object(choice)
       && ['name', 'feature', 'mode'].every(field => typeof choice[field] === 'string')
+      && sourceReference(choice._source)
+      && (choice.levels == null || Array.isArray(choice.levels) && choice.levels.every(level => typeof level === 'number'))
       && (choice.schedule == null || Array.isArray(choice.schedule) && choice.schedule.every(event => object(event)
         && typeof event.level === 'number' && typeof event.count === 'number'))
       && Array.isArray(choice.options) && choice.options.every(option => object(option)
+        && sourceReference(option._source)
         && typeof option.name === 'string' && typeof option.description === 'string'));
+  }
+
+  function validElementRecord(type, value) {
+    return ELEMENT_TYPES.includes(type) && elementRecord(type, value)
+      && (type !== 'spell' || availability(value.availability))
+      && (type !== 'class' || classProgression(value));
   }
 
   function validateState(state) {
     const review = state?.reviewContext;
     if (review != null && (!object(review) || review.kind !== 'pdf' || typeof review.fileName !== 'string'
-      || !Array.isArray(review.types) || !review.types.every(type => ['spell', 'archetype', 'item', 'feat', 'magic', 'race', 'background', 'class', 'other'].includes(type))
+      || !Array.isArray(review.types) || !review.types.every(type => ELEMENT_TYPES.includes(type))
       || ![review.selectedPages, review.continuationPages, review.availabilityPages || []].every(pages => Array.isArray(pages) && pages.every(page => Number.isInteger(page) && page > 0)))) {
       throw failure('invalid', 'This draft has invalid source review details.');
     }
@@ -54,8 +99,10 @@
       || !object(state.fields) || !Object.values(state.fields).every(value => typeof value === 'string')
       || !object(state.sourceFlags) || !['abbrEdited', 'rulesetEvidence'].every(key => typeof state.sourceFlags[key] === 'string')
       || !Array.isArray(state.selectedTypes)
-      || !state.selectedTypes.every(type => typeof type === 'string')
+      || !state.selectedTypes.every(type => ELEMENT_TYPES.includes(type))
       || !buckets(state.data) || !buckets(state.baseline) || !Array.isArray(state.skipped)
+      || !state.skipped.every(entry => object(entry) && (entry.item == null || elementRecord(entry.elementType || entry.type, entry.item))
+        && (entry.missing == null || Array.isArray(entry.missing) && entry.missing.every(field => typeof field === 'string')))
       || !object(state.pageRanges) || typeof state.changed !== 'boolean'
       || !object(state.author) || !['templateId', 'fileName', 'originalXml', 'xml'].every(key => typeof state.author[key] === 'string')
       || !object(state.repair) || !docs(state.repair.inputDocs) || !docs(state.repair.originalDocs)
@@ -130,5 +177,5 @@
     };
   }
 
-  return { KEY, FORMAT, MAX_LENGTH, MAX_FILE_LENGTH, validateState, encode, decode, createStore };
+  return { KEY, FORMAT, MAX_LENGTH, MAX_FILE_LENGTH, validElementRecord, validateState, encode, decode, createStore };
 });

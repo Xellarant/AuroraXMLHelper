@@ -176,6 +176,9 @@
   }
 
   textarea { resize: vertical; min-height: 80px; }
+  dialog { width: min(34rem, calc(100% - 2rem)); padding: 1.5rem; border: 1px solid var(--border); border-radius: 6px; background: var(--parchment); color: var(--ink); }
+  dialog::backdrop { background: rgba(0, 0, 0, .45); }
+  dialog h2 { margin: 0 0 1rem; font-size: 1.25rem; }
 
   .class-progression, .class-choices {
     margin-top: 1rem;
@@ -959,6 +962,12 @@
   /* key indicator */
   .key-set { color: var(--success); font-size: 0.8rem; }
   .key-unset { color: var(--red-light); font-size: 0.8rem; }
+  @media (max-width: 700px) {
+    .field-row, .field-row-3 { grid-template-columns: minmax(0, 1fr); }
+    .workspace-tabs { flex-wrap: wrap; }
+    .workspace-tab { flex: 1 1 10rem; }
+    main { padding-left: .75rem; padding-right: .75rem; }
+  }
 </style>
 </head>
 <body>
@@ -1009,7 +1018,7 @@
   <div class="card" id="stepUpload">
     <div class="card-title">Upload Supplement PDF</div>
 
-    <div class="upload-zone" id="uploadZone" onclick="document.getElementById('pdfFile').click()" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event)">
+    <div class="upload-zone" id="uploadZone" role="button" tabindex="0" aria-label="Choose a PDF" onclick="document.getElementById('pdfFile').click()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();document.getElementById('pdfFile').click()}" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event)">
       <input type="file" id="pdfFile" accept=".pdf" onchange="handleFileSelect(event)" />
       <span class="upload-icon" aria-hidden="true">PDF</span>
       <p><strong>Click to browse</strong> or drag &amp; drop a PDF here</p>
@@ -1110,6 +1119,7 @@
         <span id="progressMsg">Reading PDF text...</span>
       </div>
       <div class="progress-wrap"><div class="progress-bar" id="progressBar" style="width:0%"></div></div>
+      <button id="cancelExtractBtn" class="btn btn-secondary hidden" type="button" onclick="cancelExtraction()">Cancel parsing</button>
     </div>
 
     <div id="extractErrors" class="hidden" style="margin-bottom:1rem;"></div>
@@ -1142,10 +1152,11 @@
         </div>
         <details class="manual-paste">
           <summary>Parse Pasted Text</summary>
-          <textarea id="manualSourceText" rows="7" placeholder="Paste a missed spell, feat, subclass, race, background, class, item, or magic item section."></textarea>
+          <textarea id="manualSourceText" aria-label="Source text to parse" rows="7" placeholder="Paste a missed spell, feat, subclass, race, background, class, item, or magic item section."></textarea>
           <button class="btn btn-secondary" onclick="parseManualSection()">Parse Text</button>
         </details>
         <div class="alert alert-info manual-status hidden" id="manualAuthorStatus"></div>
+        <button id="undoRemoval" class="btn btn-secondary hidden" type="button" onclick="undoLastRemoval()">Undo removal</button>
       </div>
 
       <div class="tabs" id="reviewTabs"></div>
@@ -1154,15 +1165,15 @@
       <hr class="divider" />
       <div style="display:flex; gap:1rem; flex-wrap:wrap; align-items:center;">
         <div class="btn-pending" id="downloadBtnWrap">
-          <button class="btn btn-success" onclick="downloadZip()">&#8595; Download ZIP</button>
+          <button class="btn btn-success" data-parse-export onclick="downloadZip()">&#8595; Download ZIP</button>
           <span class="pending-badge">&bull; changes pending</span>
         </div>
         <div class="btn-pending" id="downloadSingleWrap">
-          <button class="btn btn-secondary" onclick="generateAndDownloadRefreshPreview()">&#8595; Single XML</button>
+          <button class="btn btn-secondary" data-parse-export onclick="generateAndDownloadRefreshPreview()">&#8595; Single XML</button>
           <span class="pending-badge">&bull; changes pending</span>
         </div>
         <div class="btn-pending" id="previewBtnWrap"><button class="btn btn-secondary" onclick="showXmlPreview()">Preview XML</button><span class="pending-badge">&bull; changes pending</span></div>
-        <button class="btn btn-secondary" onclick="resetAll()">Start Over</button>
+        <button class="btn btn-secondary" onclick="requestResetAll()">Start Over</button>
       </div>
 
       <div id="xmlPreviewWrap" class="hidden">
@@ -1324,6 +1335,17 @@
   </section>
 
 </main>
+
+<dialog id="workspaceConfirm" aria-labelledby="workspaceConfirmTitle" aria-describedby="workspaceConfirmMessage">
+  <form method="dialog">
+    <h2 id="workspaceConfirmTitle">Confirm change</h2>
+    <p id="workspaceConfirmMessage"></p>
+    <div class="repair-preview-actions">
+      <button id="workspaceConfirmCancel" class="btn btn-secondary" value="cancel">Cancel</button>
+      <button id="workspaceConfirmAccept" class="btn btn-primary" value="accept">Continue</button>
+    </div>
+  </form>
+</dialog>
 
 <script src="src/aurora-xml-shape.js" onload="document.documentElement.dataset.auroraShapeLoaded='true'"></script>
 <script src="src/aurora-xml-patterns.js" onload="document.documentElement.dataset.auroraPatternsLoaded='true'"></script>

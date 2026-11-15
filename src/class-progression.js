@@ -37,16 +37,18 @@
 
   function featureLevels(cls, feature) {
     const fromTable = rows(cls.progression).filter(row => (row.features || []).some(name => key(name) === key(feature.name))).map(row => Number(row.level));
-    const repeat = /(?:again at|another at|reach .*level)/i.test(feature.description || '') ? levels(feature.description) : [];
-    return [...new Set([Number(feature.level) || 1, ...fromTable, ...repeat])].sort((a, b) => a - b);
+    const text = String(feature.description || '').replace(/\s+/g, ' ');
+    const repeat = [...text.matchAll(/\b(?:again|another)\s+at\s+((?:\d+(?:st|nd|rd|th)(?:\s*,\s*(?:and\s+)?|\s+and\s+)?)+)/gi)].flatMap(match => levels(match[1]));
+    return [...new Set([fromTable[0] || Number(feature.level ?? 0), ...fromTable, ...repeat])].sort((a, b) => a - b);
   }
 
   function events(cls, choice) {
     if (choice.schedule !== undefined) return choice.schedule;
     if (choice.progressionField) return deltas(cls.progression, row => row[choice.progressionField]);
     const feature = (cls.features || []).find(feature => key(feature.name) === key(choice.feature));
-    return (choice.repeat && feature ? featureLevels(cls, feature) : choice.levels || [feature?.level || 1])
-      .map(level => ({ level: Number(level), count: choice.count || 1 }));
+    const tableLevel = feature && rows(cls.progression).find(row => (row.features || []).some(name => key(name) === key(feature.name)))?.level;
+    return (choice.repeat && feature ? featureLevels(cls, feature) : choice.levels || [tableLevel ?? feature?.level ?? 0])
+      .map(level => ({ level: Number(level), count: choice.count ?? 1 }));
   }
 
   function records(text, options) {
@@ -88,7 +90,7 @@
     if (start < 0) return [];
     let first = start + 1;
     while (first < all.length && !(title(all[first].text)
-      && /^(?:As |You |Your |When |While |Once |If |Prerequisite:)/.test(all[first + 1]?.text || ''))) first++;
+      && /^(?:As |You |Your |When |While |Once |If |Prerequisites?:)/.test(all[first + 1]?.text || ''))) first++;
     if (first >= all.length) return [];
     const optionHeight = all[first].height;
     const options = [];
@@ -99,7 +101,7 @@
       if ((row.height > optionHeight + 2 && optionHeight)
         || /^(?:Grand Hexes|Witch's Crafts|[A-Za-z' -]+ (?:Subclasses|Conclaves)|Chapter\b)/.test(row.text)) { complete = true; break; }
       const isOption = title(row.text) && (optionHeight ? Math.abs(row.height - optionHeight) < 0.5
-        : /^(?:As |You |Your |When |While |Once |If |Prerequisite:)/.test(all[i + 1]?.text || ''));
+        : /^(?:As |You |Your |When |While |Once |If |Prerequisites?:)/.test(all[i + 1]?.text || ''));
       if (isOption) {
         current = { name: row.text, description: '', row };
         options.push(current);
@@ -132,14 +134,14 @@
         const row = all.find(row => key(row.text.split('.')[0]) === key(option.name));
         option._source ||= reference(row || all.find(row => key(row.text) === key(feature.name)), options, option.name + '\n' + option.description);
         const prerequisite = option.description.replace(/\s+/g, ' ').match(/You must have the (.+?) feature to choose this\b/i)
-          || option.description.match(/Prerequisite:\s*([^\n]+)/i);
+          || option.description.match(/Prerequisites?:\s*([^\n]+)/i);
         if (prerequisite) {
           option.prerequisite = prerequisite[0];
           const required = (cls.features || []).find(feature => key(feature.name) === key(prerequisite[1]));
           if (required) option.requiredFeature = required.name;
           else {
-            const minimum = prerequisite[1].match(/^(\d+)(?:st|nd|rd|th)[- ]level(?:\s+[\w'-]+)?$/i);
-            if (minimum) option.minimumLevel = Number(minimum[1]);
+            const minimum = prerequisite[1].match(/^(\d+)(?:st|nd|rd|th)[- ]level(?:\s+([\w'-]+))?$/i);
+            if (minimum && (!minimum[2] || key(minimum[2]) === key(cls.name))) option.minimumLevel = Number(minimum[1]);
             else option.unresolvedPrerequisite = prerequisite[1];
           }
         }
@@ -155,7 +157,8 @@
       if (/^Spellcasting$/i.test(feature.name)) continue;
       if (/^Ability Score Improvement$/i.test(feature.name)) {
         const increases = /\bincrease\b.*\bability\b|\bability\b.*\bincrease\b/i.test(flat);
-        const mode = increases ? (/\bfeat\b/i.test(text) ? 'asiOrFeat' : 'asi') : /\bfeat\b/i.test(text) ? 'feat' : 'unresolved';
+        const standardIncrease = /\b(?:by 2|by two)\b/i.test(flat) && /\b(?:two|2) ability scores\b.*\b(?:by 1|by one)\b/i.test(flat);
+        const mode = increases ? (standardIncrease ? /\bfeat\b/i.test(text) ? 'asiOrFeat' : 'asi' : 'unresolved') : /\bfeat\b/i.test(text) ? 'feat' : 'unresolved';
         add(feature, { mode, repeat: true });
         continue;
       }
@@ -172,7 +175,6 @@
           if (/^\|?\s*Magic Item Plan\s*\|/i.test(row.text)) { table = true; continue; }
           if (/^Magic Item Plan\s+Attunement$/i.test(row.text)) { table = true; continue; }
           if (!table || /^\|?\s*[-:]+\s*\|/.test(row.text)) continue;
-          if (/^Leve[lti]\s+\d+/i.test(row.text)) { table = false; minimumLevel = 0; continue; }
           const raw = row.text.match(/^(.+?)\s+(No|Yes[:;]?|Varies)$/i);
           const cells = row.text.includes('|') ? row.text.replace(/^\||\|$/g, '').split('|').map(cell => cell.trim()) : raw?.slice(1);
           if (!cells || cells.length !== 2 || !/^(?:No|Yes[:;]?|Varies)$/i.test(cells[1])) { table = false; continue; }
@@ -243,6 +245,9 @@
       if (table.length && !table.some(row => (row.features || []).some(name => key(name) === key(feature.name)))) {
         issue('features.' + index + '.level', '"' + feature.name + '" is absent from the table. Its stated level is retained; check the table or feature level.', feature._source);
       }
+      const tableLevel = rows(table).find(row => (row.features || []).some(name => key(name) === key(feature.name)))?.level;
+      if (tableLevel && Number(feature.level) !== Number(tableLevel)) issue('features.' + index + '.level',
+        '"' + feature.name + '" has a stated level that disagrees with the progression table. Its table level (' + tableLevel + ') controls the grant and choices; correct the source mismatch.', feature._source);
       const flat = String(feature.description || '').replace(/\s+/g, ' ');
       if (/\b(?:choose (?:one|two|three|four|a type|the form|the following)|of your choice|learn (?:one|two|three|four))\b/i.test(flat)
         && !/^(?:Spellcasting|Tinker's Magic)$/i.test(feature.name)

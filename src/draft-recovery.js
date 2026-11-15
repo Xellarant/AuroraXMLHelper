@@ -6,6 +6,7 @@
   let dirty = false;
   let blocked = false;
   let lastState = '';
+  let importVersion = 0;
   const status = () => document.getElementById('draftStatus');
 
   function notice(message, warning = false) {
@@ -17,6 +18,11 @@
     blocked = true;
     notice(error.message || 'Draft saving failed. Export a draft file to keep your work.', true);
     document.getElementById('draftRetry').classList.remove('hidden');
+  }
+
+  async function confirmChoice(message, options) {
+    const confirm = window.AuroraXMLHelper.confirmAction;
+    return confirm ? await confirm(message, options) : window.confirm(message);
   }
 
   function flush({ overwrite = false } = {}) {
@@ -103,16 +109,19 @@
     });
     document.getElementById('draftExport').addEventListener('click', download);
     document.getElementById('draftImportButton').addEventListener('click', () => document.getElementById('draftImport').click());
-    document.getElementById('draftRetry').addEventListener('click', () => {
-      if (!window.confirm('Replace the saved draft with this tab’s current work? Export a draft first if you want to keep both copies.')) return;
+    document.getElementById('draftRetry').addEventListener('click', async () => {
       try {
+        if (!await confirmChoice('Replace the saved draft with this tab’s current work? Export a draft first if you want to keep both copies.',
+          { title: 'Replace saved draft?', acceptLabel: 'Save this tab' })) return;
         if (!store) store = api.createStore(window.localStorage);
         flush({ overwrite: true });
       } catch (error) { failed(error); }
     });
-    document.getElementById('draftClear').addEventListener('click', () => {
-      if (!window.confirm('Delete the saved draft from this browser? Your open work stays here and the next edit will save a new draft.')) return;
+    document.getElementById('draftClear').addEventListener('click', async () => {
       try {
+        if (!await confirmChoice('Delete the saved draft from this browser? Your open work stays here and the next edit will save a new draft.',
+          { title: 'Clear saved draft?', acceptLabel: 'Clear saved draft' })) return;
+        importVersion++;
         if (!store) store = api.createStore(window.localStorage);
         store.clear();
         clearTimeout(timer);
@@ -126,17 +135,22 @@
     document.getElementById('draftImport').addEventListener('change', async event => {
       const file = event.target.files[0];
       if (!file) return;
+      const version = ++importVersion;
       try {
         if (file.size > api.MAX_FILE_LENGTH) throw new Error('This draft file is too large to import.');
-        const entry = api.decode(await file.text(), api.MAX_FILE_LENGTH);
-        if (!window.confirm('Replace your open workspace with this draft file? Export your current draft first if you want to keep it.')) return;
+        const raw = await file.text();
+        if (version !== importVersion) return;
+        const entry = api.decode(raw, api.MAX_FILE_LENGTH);
+        if (!await confirmChoice('Replace your open workspace with this draft file? Export your current draft first if you want to keep it.',
+          { title: 'Import workspace draft?', acceptLabel: 'Import draft' }) || version !== importVersion) return;
         ready = false;
         restore(entry.state);
         ready = true;
         changed();
         flush();
+        if (blocked) notice('Draft imported into the open workspace. ' + status().textContent, true);
       } catch (error) { notice(error.message, true); }
-      finally { ready = true; event.target.value = ''; }
+      finally { ready = true; if (version === importVersion) event.target.value = ''; }
     });
   });
 })();

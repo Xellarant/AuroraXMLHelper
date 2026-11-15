@@ -1,10 +1,10 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 const { benchmark, compareMaps, compareSupports, continuationPageNumbers, parseArgs, readSource, summarizeSemanticDiffs } = require('../scripts/benchmark-corpus');
 const { runBenchmark, runEntry } = require('../scripts/run-local-corpus-benchmarks');
 const { generateFromFixtureFile, repoRoot } = require('./fixture-harness');
+const temporaryDirectory = require('./temp-directories').temporaryDirectories();
 
 function escapePdfText(value) {
   return String(value)
@@ -68,7 +68,7 @@ test('support token ordering is reported as low severity only', () => {
 });
 
 test('benchmark extracts selectable text from PDF sources', async () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'aurora-xml-helper-pdf-benchmark-'));
+  const tempRoot = temporaryDirectory('aurora-xml-helper-pdf-benchmark-');
   const sourcePath = path.join(tempRoot, 'memory-spark.pdf');
   fs.writeFileSync(sourcePath, makeTextPdf([
     'Memory Spark',
@@ -105,7 +105,7 @@ test('benchmark treats a material cost spacing variant as source-equivalent', ()
 });
 
 test('benchmark parses and reports only the selected PDF page range', async () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'aurora-xml-helper-page-range-'));
+  const tempRoot = temporaryDirectory('aurora-xml-helper-page-range-');
   const sourcePath = path.join(tempRoot, 'two-spell-pages.pdf');
   fs.writeFileSync(sourcePath, makeTextPdfPages([
     [
@@ -147,7 +147,7 @@ test('benchmark parses and reports only the selected PDF page range', async () =
 });
 
 test('PDF page ranges retain only the immediate next page as continuation context', async () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'aurora-xml-helper-continuation-'));
+  const tempRoot = temporaryDirectory('aurora-xml-helper-continuation-');
   const sourcePath = path.join(tempRoot, 'three-pages.pdf');
   fs.writeFileSync(sourcePath, makeTextPdfPages([
     ['Selected page'],
@@ -178,7 +178,7 @@ test('benchmark classifies missing canonical rules as high severity', async () =
   const fixturePath = path.join(repoRoot, 'tests', 'fixtures', 'golden', 'synthetic-2024.fixture.json');
   const sourcePath = path.join(repoRoot, 'tests', 'fixtures', 'golden', 'synthetic-2024.source.txt');
   const { xml } = generateFromFixtureFile(fixturePath);
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'aurora-xml-helper-benchmark-'));
+  const tempRoot = temporaryDirectory('aurora-xml-helper-benchmark-');
   const canonicalPath = path.join(tempRoot, 'synthetic-canonical.xml');
   const canonicalXml = xml.replace(
     '</rules>',

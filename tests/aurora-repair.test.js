@@ -68,7 +68,7 @@ test('high-confidence repairs apply and resolve their findings', () => {
   const xml = result.docs[0].xml;
   assert.match(xml, /<supports>Wizard<\/supports>/);
   assert.match(xml, /<grant type="Condition" id="ID_INTERNAL_CONDITION_DAMAGE_RESISTANCE_FIRE" \/>/);
-  assert.match(xml, /<select type="Feat" supports="feat" \/>/);
+  assert.match(xml, /<select type="Feat" \/>/);
 
   const verify = verifyRepairedXml(docs, result.docs, { beforeAnalysis: analysis });
   const resolvedCategories = verify.resolved.map(finding => finding.category).sort();
@@ -77,13 +77,14 @@ test('high-confidence repairs apply and resolve their findings', () => {
 });
 
 test('several repairs on the same rule tag compose into one edit', () => {
-  const { docs, analysis } = analyze();
+  const { docs, analysis } = analyze(brokenXml.replace('<select type="Feat" />', '<select type="Spell" />'));
   const repairs = repairsFor(analysis, 'select-missing-required-attribute');
   const nameRepair = repairs.find(item => item.attribute === 'name');
-  const result = applyRepairs(docs, repairs, { values: { [nameRepair.id]: 'Bonus Feat' } });
+  const supportsRepair = repairs.find(item => item.attribute === 'supports');
+  const result = applyRepairs(docs, repairs, { values: { [nameRepair.id]: 'Bonus Spell', [supportsRepair.id]: 'Wizard' } });
 
   assert.equal(result.applied.length, 2);
-  assert.match(result.docs[0].xml, /<select type="Feat" name="Bonus Feat" supports="feat" \/>/);
+  assert.match(result.docs[0].xml, /<select type="Spell" name="Bonus Spell" supports="Wizard" \/>/);
   const verify = verifyRepairedXml(docs, result.docs, { beforeAnalysis: analysis });
   assert.ok(verify.resolved.some(finding => finding.category === 'select-missing-required-attribute'));
 });
@@ -157,4 +158,47 @@ test('diffLines returns compact hunks around changed lines', () => {
   const hunks = diffLines(before, after, { context: 1 });
   assert.equal(hunks.length, 1);
   assert.deepEqual(hunks[0].map(row => `${row.op}${row.line}`), [' c', '-d', '+D', ' e']);
+});
+
+test('a missing setter expands the existing self-closing setters block', () => {
+  const xml = '<elements><element name="Empty" type="Class" source="X" id="ID_EMPTY"><setters /></element></elements>';
+  const { docs, analysis } = analyze(xml);
+  const [repair] = repairsFor(analysis, 'class-missing-hit-die');
+  const result = applyRepairs(docs, [repair], { values: { [repair.id]: 'd8' } });
+  assert.equal(result.skipped.length, 0);
+  assert.equal((result.docs[0].xml.match(/<setters\b/g) || []).length, 1);
+  assert.match(result.docs[0].xml, /<setters>\s*<set name="hd">d8<\/set>\s*<\/setters>/);
+  assert.ok(verifyRepairedXml(docs, result.docs, { beforeAnalysis: analysis }).resolved.some(finding => finding.category === 'class-missing-hit-die'));
+});
+
+test('repairs refuse ambiguous file names instead of editing a different loaded file', () => {
+  const { docs, analysis } = analyze();
+  const repair = repairsFor(analysis, 'spell-supports-level-token')[0];
+  const result = applyRepairs([docs[0], { ...docs[0] }], [repair]);
+  assert.equal(result.applied.length, 0);
+  assert.ok(result.docs.every(doc => !doc.changed));
+  assert.match(result.skipped[0].reason, /unique name/);
+});
+
+test('an existing empty hit-die setter receives its value without being duplicated', () => {
+  for (const empty of ['<set name="hd" />', '<set name="hd">  </set>']) {
+    const xml = '<elements><element name="Empty" type="Class" source="X" id="ID_EMPTY"><setters>' + empty + '</setters></element></elements>';
+    const { docs, analysis } = analyze(xml);
+    const [repair] = repairsFor(analysis, 'class-missing-hit-die');
+    const result = applyRepairs(docs, [repair], { values: { [repair.id]: 'd10' } });
+    assert.equal(result.applied.length, 1);
+    assert.equal((result.docs[0].xml.match(/<set name="hd"/g) || []).length, 1);
+    assert.match(result.docs[0].xml, /<set name="hd"\s*>d10<\/set>/);
+    assert.ok(verifyRepairedXml(docs, result.docs, { beforeAnalysis: analysis }).resolved.some(finding => finding.category === 'class-missing-hit-die'));
+  }
+});
+
+test('removing a numeric spell support preserves boolean choice expressions', () => {
+  const xml = '<elements><element name="Expression" type="Spell" source="X" id="ID_EXPRESSION">'
+    + '<supports>Wizard, (Bard||Cleric), 1</supports></element></elements>';
+  const { docs, analysis } = analyze(xml);
+  const [repair] = repairsFor(analysis, 'spell-supports-level-token');
+  const result = applyRepairs(docs, [repair]);
+  assert.equal(result.applied.length, 1);
+  assert.match(result.docs[0].xml, /<supports>Wizard, \(Bard\|\|Cleric\)<\/supports>/);
 });

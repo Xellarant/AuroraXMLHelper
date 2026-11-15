@@ -1,9 +1,10 @@
 (function attachAuroraXmlPatterns(root, factory) {
-  const api = factory();
+  const shape = (typeof module === 'object' && module.exports) ? require('./aurora-xml-shape') : root?.AuroraXmlShape;
+  const api = factory(shape);
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.AuroraXmlPatterns = api;
   if (root?.window) root.window.AuroraXmlPatterns = api;
-}(typeof globalThis !== 'undefined' ? globalThis : this, function createAuroraXmlPatterns() {
+}(typeof globalThis !== 'undefined' ? globalThis : this, function createAuroraXmlPatterns(shape) {
   const XML_ATTRIBUTE_PATTERN = /(^|\s)([A-Za-z_:][-A-Za-z0-9_:.]*)(\s*=\s*)(["'])([\s\S]*?)\4/g;
 
   function attrMap(tag) {
@@ -24,7 +25,65 @@
   }
 
   function stripTags(value) {
-    return decodeXml(String(value || '').replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
+    const text = String(value || '').replace(/<!--[\s\S]*?-->/g, '')
+      .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, (_, content) => escapeXmlText(content));
+    return decodeXml(text.replace(/<(?:[^"'>]|"[^"]*"|'[^']*')*>/g, ' ')).replace(/\s+/g, ' ').trim();
+  }
+
+  // Keep every source offset intact while hiding quoted examples and inactive
+  // markup from structural searches. Actual edits always use the original XML.
+  function xmlMarkupText(xml) {
+    const blank = text => text.replace(/[^\r\n]/g, ' ');
+    let markup = String(xml || '').replace(/<!--[\s\S]*?(?:-->|$)|<!\[CDATA\[[\s\S]*?(?:\]\]>|$)|<\?[\s\S]*?(?:\?>|$)/g, blank);
+    const declaration = /<!DOCTYPE\b/gi;
+    let match;
+    while ((match = declaration.exec(markup))) {
+      let quote = '';
+      let depth = 0;
+      let end = markup.length;
+      for (let index = declaration.lastIndex; index < markup.length; index++) {
+        const char = markup[index];
+        if (quote) { if (char === quote) quote = ''; continue; }
+        if (char === '"' || char === "'") { quote = char; continue; }
+        if (char === '[') depth++;
+        else if (char === ']') depth = Math.max(0, depth - 1);
+        else if (char === '>' && !depth) { end = index + 1; break; }
+      }
+      markup = markup.slice(0, match.index) + blank(markup.slice(match.index, end)) + markup.slice(end);
+      declaration.lastIndex = end;
+    }
+    return markup;
+  }
+
+  function elementRanges(xml) {
+    const source = String(xml || '');
+    const markup = xmlMarkupText(source);
+    const pattern = /<element\b(?:"[^"]*"|'[^']*'|[^'">])*?(?:\/>|>[\s\S]*?<\/element\s*>)/gi;
+    return [...markup.matchAll(pattern)].map(match => ({
+      start: match.index, end: match.index + match[0].length, xml: source.slice(match.index, match.index + match[0].length)
+    }));
+  }
+
+  function childXmlRanges(xml) {
+    const source = String(xml || '');
+    const stack = [];
+    const children = [];
+    const tags = xmlMarkupText(source).matchAll(/<\/?([A-Za-z_:][-A-Za-z0-9_:.]*)(?:"[^"]*"|'[^']*'|[^'">])*?>/g);
+    for (const tag of tags) {
+      const name = tag[1].toLowerCase();
+      if (tag[0].startsWith('</')) {
+        const opened = stack.pop();
+        if (!opened || opened.name !== name) return [];
+        opened.end = tag.index + tag[0].length;
+        opened.xml = source.slice(opened.start, opened.end);
+      } else {
+        const openingTag = source.slice(tag.index, tag.index + tag[0].length);
+        const node = { name, start: tag.index, end: tag.index + tag[0].length, openingTag, selfClosing: /\/>$/.test(tag[0]), xml: openingTag };
+        if (stack.length === 1) children.push(node);
+        if (!node.selfClosing) stack.push(node);
+      }
+    }
+    return stack.length ? [] : children;
   }
 
   function normalizeSpace(value) {
@@ -36,10 +95,21 @@
   }
 
   function splitSupportTokens(value) {
-    return normalizeSpace(value)
-      .split(/\s*(?:,|\|)\s*/)
-      .map(token => token.trim())
-      .filter(Boolean);
+    const text = normalizeSpace(value);
+    const tokens = [];
+    let depth = 0;
+    let start = 0;
+    for (let index = 0; index < text.length; index++) {
+      const char = text[index];
+      if (char === '(') depth++;
+      else if (char === ')') depth = Math.max(0, depth - 1);
+      else if (!depth && (char === ',' || char === '|' && text[index - 1] !== '|' && text[index + 1] !== '|')) {
+        tokens.push(text.slice(start, index).trim());
+        start = index + 1;
+      }
+    }
+    tokens.push(text.slice(start).trim());
+    return tokens.filter(Boolean);
   }
 
   function ruleSignature(kind, attrs) {
@@ -60,7 +130,7 @@
   }
 
   function encodeAttributeValue(value) {
-    return String(value || '')
+    return String(value ?? '')
       .replace(/&/g, '&amp;')
       .replace(/"/g, '&quot;')
       .replace(/</g, '&lt;')
@@ -72,10 +142,10 @@
   }
 
   function xmlWithAttribute(rawXml, attr, value) {
-    const xml = trimSnippet(rawXml);
+    const xml = String(rawXml || '');
     if (!xml || !attr) return '';
     const escaped = encodeAttributeValue(value);
-    const openingTag = /^<[^!?/][^>]*>/.exec(xml)?.[0];
+    const openingTag = /^<[^!?/](?:"[^"]*"|'[^']*'|[^'">])*>/.exec(xml)?.[0];
     if (!openingTag) return xml;
     const existingAttribute = [...openingTag.matchAll(XML_ATTRIBUTE_PATTERN)]
       .find(match => match[2] === attr);
@@ -95,15 +165,18 @@
     const text = String(tag || '');
     if (!text || !attr) return text;
     const escaped = encodeAttributeValue(value);
-    const attrPattern = new RegExp(`(\\s)${escapeRegExp(attr)}\\s*=\\s*(?:"[^"]*"|'[^']*')`);
-    if (attrPattern.test(text)) return text.replace(attrPattern, (match, space) => `${space}${attr}="${escaped}"`);
-    return text.replace(/(\s*)(\/?>)$/, ` ${attr}="${escaped}"$1$2`);
+    const existing = [...text.matchAll(XML_ATTRIBUTE_PATTERN)].find(match => match[2] === attr);
+    if (existing) {
+      const replacement = existing[1] + attr + existing[3] + '"' + escaped + '"';
+      return text.slice(0, existing.index) + replacement + text.slice(existing.index + existing[0].length);
+    }
+    return text.replace(/(\s*)(\/?>)$/, (_, space, close) => ' ' + attr + '="' + escaped + '"' + space + close);
   }
 
   function xmlWithAttributes(rawXml, attrs) {
     return Object.entries(attrs || {}).reduce(
       (xml, [attr, value]) => xmlWithAttribute(xml, attr, value),
-      trimSnippet(rawXml)
+      String(rawXml || '')
     );
   }
 
@@ -132,19 +205,8 @@
     };
   }
 
-  function inferSelectSupports(rule) {
-    const type = normalizeSpace(rule?.attrs?.type || '');
-    if (/^feat$/i.test(type)) {
-      return {
-        value: 'feat',
-        reason: 'select type="Feat"'
-      };
-    }
-    return null;
-  }
-
   function selectAttributePlaceholder(attr, rule) {
-    if (attr === 'supports') return inferSelectSupports(rule)?.value || 'SUPPORT TOKEN';
+    if (attr === 'supports') return 'SUPPORT TOKEN';
     return attr.toUpperCase();
   }
 
@@ -182,33 +244,39 @@
   }
 
   function parseAuroraElements(xml, fileName = '') {
+    xml = String(xml || '');
+    const markup = xmlMarkupText(xml);
     const elements = [];
-    const elementRegex = /<element\b([^>]*?)(\/>|>([\s\S]*?)<\/element>)/gi;
+    const elementRegex = /<element\b((?:"[^"]*"|'[^']*'|[^'">])*?)(\/>|>([\s\S]*?)<\/element\s*>)/gi;
     let match;
-    while ((match = elementRegex.exec(xml))) {
+    while ((match = elementRegex.exec(markup))) {
       const attrs = attrMap(match[1]);
-      const rawXml = match[0];
-      const openingTag = (rawXml.match(/^<element\b[^>]*>/i) || [])[0] || '';
+      const rawXml = xml.slice(match.index, match.index + match[0].length);
+      const openingTag = (rawXml.match(/^<element\b(?:"[^"]*"|'[^']*'|[^'">])*>/i) || [])[0] || '';
       const selfClosing = match[2] === '/>';
       const bodyStart = match.index + openingTag.length;
       const line = lineForIndex(xml, match.index);
       const body = match[3] || '';
+      const originalBody = xml.slice(bodyStart, bodyStart + body.length);
       const supportsMatch = body.match(/<supports\b[^>]*>([\s\S]*?)<\/supports>/i);
-      const supports = stripTags((supportsMatch || [])[1] || '');
-      const supportsRawXml = supportsMatch?.[0] || '';
+      const supportsRawXml = supportsMatch ? originalBody.slice(supportsMatch.index, supportsMatch.index + supportsMatch[0].length) : '';
+      const supports = stripTags(supportsRawXml);
       const supportsLine = supportsMatch ? lineForIndex(xml, bodyStart + supportsMatch.index) : 0;
-      const description = stripTags((body.match(/<description\b[^>]*>([\s\S]*?)<\/description>/i) || [])[1] || '');
+      const descriptionMatch = body.match(/<description\b[^>]*>([\s\S]*?)<\/description>/i);
+      const description = descriptionMatch ? stripTags(originalBody.slice(descriptionMatch.index, descriptionMatch.index + descriptionMatch[0].length)) : '';
       const setters = {};
       const setterAttrs = {};
       const settersMatch = body.match(/<setters\b[^>]*>([\s\S]*?)<\/setters>/i);
+      const emptySettersMatch = settersMatch ? null : body.match(/<setters\b[^>]*\/>/i);
       const settersBody = (settersMatch || [])[1] || '';
       const settersOpenTag = settersMatch ? settersMatch[0].match(/^<setters\b[^>]*>/i)[0] : '';
       const setterRanges = {};
+      const setterElementRanges = {};
       const settersBodyStart = settersMatch ? bodyStart + settersMatch.index + settersOpenTag.length : -1;
       for (const setter of settersBody.matchAll(/<set\b([^>]*?)(?:\/>|>([\s\S]*?)<\/set>)/gi)) {
         const setAttrs = attrMap(setter[1]);
         if (!setAttrs.name) continue;
-        setters[setAttrs.name] = stripTags(setter[2] || '');
+        setters[setAttrs.name] = stripTags(xml.slice(settersBodyStart + setter.index, settersBodyStart + setter.index + setter[0].length));
         setterAttrs[setAttrs.name] = setAttrs;
         const setOpenTag = (setter[0].match(/^<set\b[^>]*>/i) || [])[0] || setter[0];
         setterRanges[setAttrs.name] = {
@@ -216,26 +284,31 @@
           end: settersBodyStart + setter.index + setOpenTag.length,
           text: setOpenTag
         };
+        setterElementRanges[setAttrs.name] = { start: settersBodyStart + setter.index,
+          end: settersBodyStart + setter.index + setter[0].length,
+          text: xml.slice(settersBodyStart + setter.index, settersBodyStart + setter.index + setter[0].length) };
       }
 
       const rulesMatch = body.match(/<rules\b[^>]*>([\s\S]*?)<\/rules>/i);
       const rulesBody = (rulesMatch || [])[1] || '';
       const rulesBodyOffset = rulesMatch ? rulesMatch.index + rulesMatch[0].indexOf(rulesBody) : -1;
       const ruleRecords = [];
-      for (const rule of rulesBody.matchAll(/<(grant|select|stat|append)\b([^>]*?)(?:\/>|>([\s\S]*?)<\/\1>)/gi)) {
+      for (const rule of rulesBody.matchAll(/<(grant|select|stat|append)\b((?:"[^"]*"|'[^']*'|[^'">])*?)(?:\/>|>([\s\S]*?)<\/\1>)/gi)) {
         const kind = rule[1].toLowerCase();
         const ruleAttrs = attrMap(rule[2]);
         const ruleStart = bodyStart + rulesBodyOffset + rule.index;
         const ruleLine = rulesBodyOffset >= 0
           ? lineForIndex(xml, ruleStart)
           : line;
-        const ruleOpenTag = (rule[0].match(/^<[^>]*>/) || [])[0] || rule[0];
+        const ruleOriginal = xml.slice(ruleStart, ruleStart + rule[0].length);
+        const ruleOpenTag = (ruleOriginal.match(/^<(?:"[^"]*"|'[^']*'|[^'">])*>/) || [])[0] || ruleOriginal;
         ruleRecords.push({
           kind,
           attrs: ruleAttrs,
-          text: stripTags(rule[3] || ''),
+          text: stripTags(ruleOriginal),
           signature: ruleSignature(kind, ruleAttrs),
-          rawXml: trimSnippet(rule[0]),
+          rawXml: trimSnippet(ruleOriginal),
+          sourceXml: ruleOriginal,
           start: ruleStart,
           end: ruleStart + rule[0].length,
           line: ruleLine,
@@ -261,6 +334,7 @@
         setters,
         setterAttrs,
         setterRanges,
+        setterElementRanges,
         ruleRecords,
         rules: ruleRecords.map(rule => rule.signature).sort(),
         key: `${normalizeName(attrs.type)}::${normalizeName(attrs.name)}`,
@@ -272,7 +346,8 @@
           : null,
         settersOpenTagRange: settersMatch
           ? { start: bodyStart + settersMatch.index, end: bodyStart + settersMatch.index + settersOpenTag.length, text: settersOpenTag }
-          : null
+          : emptySettersMatch ? { start: bodyStart + emptySettersMatch.index, end: bodyStart + emptySettersMatch.index + emptySettersMatch[0].length,
+            text: originalBody.slice(emptySettersMatch.index, emptySettersMatch.index + emptySettersMatch[0].length), selfClosing: true } : null
       });
     }
     return elements;
@@ -603,7 +678,7 @@
   }
 
   function hasElementsRoot(xml) {
-    return /^<elements\b/i.test(xmlWithoutLeadingPreamble(xml));
+    return /^<(?:elements|index)\b/i.test(xmlWithoutLeadingPreamble(xml));
   }
 
   function elementTarget(element, extra = {}) {
@@ -640,7 +715,7 @@
     if (rule?.line) node.line = rule.line;
     if (Number.isInteger(rule?.start)) node.start = rule.start;
     if (Number.isInteger(rule?.end)) node.end = rule.end;
-    if (rule?.rawXml) node.xml = trimSnippet(rule.rawXml);
+    if (rule?.sourceXml || rule?.rawXml) node.xml = rule.sourceXml || rule.rawXml;
     return node;
   }
 
@@ -795,14 +870,15 @@
     const reference = normalizeReferenceIndex(referenceInput);
 
     for (const doc of docs || []) {
-      const xml = String(doc.xml || '');
+      const xml = xmlMarkupText(doc.xml);
       const infoMatch = xml.match(/<info\b[^>]*>([\s\S]*?)<\/info>/i);
       if (infoMatch) {
         const infoBodyStart = infoMatch.index + infoMatch[0].indexOf(infoMatch[1]);
         const nameTag = infoMatch[1].match(/<n\b[^>]*>[\s\S]*?<\/n>/i);
         if (nameTag) {
           const start = infoBodyStart + nameTag.index;
-          const node = { kind: 'info', line: lineForIndex(xml, start), xml: nameTag[0] };
+          const originalNameTag = String(doc.xml || '').slice(start, start + nameTag[0].length);
+          const node = { kind: 'info', line: lineForIndex(xml, start), xml: originalNameTag };
           findings.push(diagnostic(
             { fileName: doc.fileName, nodeKind: 'info', nodeXml: nameTag[0], line: node.line },
             'error',
@@ -812,11 +888,11 @@
             [repair('rename-tag', 'Rename <n> to <name> inside <info>.', {
               confidence: 'high',
               target: { fileName: doc.fileName },
-              anchor: { fileName: doc.fileName, start, end: start + nameTag[0].length, text: nameTag[0] },
+              anchor: { fileName: doc.fileName, start, end: start + nameTag[0].length, text: originalNameTag },
               fromTag: 'n',
               toTag: 'name',
               replacementValue: 'name',
-              sample: nameTag[0].replace(/^<n\b/, '<name').replace(/<\/n>$/, '</name>')
+              sample: originalNameTag.replace(/^<n\b/, '<name').replace(/<\/n>$/, '</name>')
             })],
             { node }
           ));
@@ -846,7 +922,7 @@
       if (element.id) localIds.set(element.id, element.type);
     }
     for (const doc of docs || []) {
-      for (const match of String(doc.xml || '').matchAll(/<multiclass\b[^>]*\bid="([^"]+)"/gi)) {
+      for (const match of xmlMarkupText(doc.xml).matchAll(/<multiclass\b[^>]*\bid="([^"]+)"/gi)) {
         if (!localIds.has(match[1])) localIds.set(match[1], 'Multiclass');
       }
     }
@@ -1009,6 +1085,13 @@
           if (setterCounts[setterName]) continue;
           const candidates = closestNames(setterName, knownSetters, { maxDistance: 2 });
           if (!candidates.length) continue;
+          if (candidates.some(candidate => Object.prototype.hasOwnProperty.call(element.setters, candidate.value))) {
+            findings.push(diagnostic(element, 'warning', 'setter-name-conflict',
+              'Setter ' + setterName + ' resembles an existing setter. Renaming it could overwrite a different value.',
+              'Compare the values and manually remove or merge the conflicting setters.',
+              [repair('resolve-setter-conflict', 'Choose which setter value should be retained.', { confidence: 'manual', target: elementTarget(element) })]));
+            continue;
+          }
           renameTargets.add(candidates[0].value);
           const range = element.setterRanges?.[setterName];
           findings.push(diagnostic(
@@ -1080,8 +1163,8 @@
           { fileName: doc.fileName, nodeKind: 'document', nodeXml: preview, line: 1 },
           'error',
           'root-shape',
-          'XML document does not appear to have an <elements> root.',
-          'Wrap Aurora content in an <elements> document with an <info> block.',
+          'XML document does not appear to have an <elements> or <index> root.',
+          'Use an <elements> document for content or an <index> document for a file collection.',
           [repair('wrap-document-root', 'Create an <elements> root with an <info> block, then move element nodes inside it.', {
             confidence: 'manual',
             target: { fileName: doc.fileName },
@@ -1149,7 +1232,9 @@
           [repair('insert-setter', 'Insert a hit die setter under <setters>.', {
             confidence: 'manual',
             target: elementTarget(element),
-            anchor: element.settersOpenTagRange
+            anchor: element.setterElementRanges?.hd
+              ? anchorFor(element, element.setterElementRanges.hd, { mode: 'replace-setter' })
+              : element.settersOpenTagRange
               ? anchorFor(element, element.settersOpenTagRange, { mode: 'after-setters-open' })
               : anchorFor(element, element.openTagRange, { mode: 'after-element-open' }),
             setterName: 'hd',
@@ -1226,10 +1311,12 @@
             ));
           }
         } else if (rule.kind === 'select') {
-          const missing = ['type', 'name', 'supports'].filter(attr => !rule.attrs[attr]);
+          // Aurora permits unfiltered feat and language choices. Inventing a
+          // "feat" supports token changes which options can be selected.
+          const required = /^(Feat|Language)$/i.test(rule.attrs.type || '') ? ['type', 'name'] : ['type', 'name', 'supports'];
+          const missing = required.filter(attr => !rule.attrs[attr]);
           if (missing.length) {
-            const inferredSupports = inferSelectSupports(rule);
-            const supportsCandidates = inferredSupports ? [] : candidateSelectSupports(rule, selectSupportsCandidates);
+            const supportsCandidates = candidateSelectSupports(rule, selectSupportsCandidates);
             const sampleAttrs = Object.fromEntries(missing.map(attr => [
               attr,
               selectAttributePlaceholder(attr, rule)
@@ -1239,21 +1326,14 @@
               'warning',
               'select-missing-required-attribute',
               `Select rule is missing ${missing.join(', ')} attribute(s).`,
-              'Select rules should usually include type, name, and supports.',
+              'Select rules need a type and name; filtered choices also need supports.',
               missing.map(attr => repair('set-rule-attribute', `Set select ${attr} attribute.`, {
-                confidence: attr === 'supports' && inferredSupports ? 'high' : 'manual',
+                confidence: 'manual',
                 target: elementTarget(element, { ruleKind: rule.kind, ruleSignature: rule.signature }),
                 anchor: anchorFor(element, rule.openTagRange),
                 attribute: attr,
-                ...(attr === 'supports' && inferredSupports
-                  ? {
-                    replacementValue: inferredSupports.value,
-                    inferenceReason: inferredSupports.reason
-                  }
-                  : {
-                    valuePlaceholder: selectAttributePlaceholder(attr, rule),
-                    ...(attr === 'supports' && supportsCandidates.length ? { candidateValues: supportsCandidates } : {})
-                  }),
+                valuePlaceholder: selectAttributePlaceholder(attr, rule),
+                ...(attr === 'supports' && supportsCandidates.length ? { candidateValues: supportsCandidates } : {}),
                 sample: xmlWithAttribute(rule.rawXml || '<select />', attr, selectAttributePlaceholder(attr, rule)),
                 completeSample: xmlWithAttributes(rule.rawXml || '<select />', sampleAttrs)
               })),
@@ -1322,10 +1402,31 @@
 
   function analyzeAuroraXmlDocuments(docs, options = {}) {
     const elements = [];
+    const parseFindings = [];
+    const readableDocs = [];
+    const DOMParserCtor = options.DOMParser;
+    const parser = DOMParserCtor ? new DOMParserCtor() : null;
     for (const doc of docs || []) {
+      if (parser) {
+        let error = '';
+        try {
+          const parsed = parser.parseFromString(doc.xml || '', 'application/xml');
+          const node = shape?.xmlParseError ? shape.xmlParseError(parsed) : parsed.querySelector('parsererror');
+          if (node) error = node.textContent.trim() || 'The parser reported invalid XML syntax.';
+        } catch (failure) {
+          error = failure.message || 'The XML parser could not read this document.';
+        }
+        if (error) {
+          parseFindings.push(diagnostic({ fileName: doc.fileName }, 'error', 'xml-parse',
+            'This document is not well-formed XML: ' + error.slice(0, 400),
+            'Correct the XML syntax and inspect again. Automatic repairs are withheld for this file.', []));
+          continue;
+        }
+      }
+      readableDocs.push(doc);
       elements.push(...parseAuroraElements(doc.xml || '', doc.fileName || ''));
     }
-    const diagnostics = diagnoseAuroraElements(elements, docs, { reference: options.reference });
+    const diagnostics = [...parseFindings, ...diagnoseAuroraElements(elements, readableDocs, { reference: options.reference })];
     let repairIndex = 0;
     for (const finding of diagnostics) {
       for (const item of finding.repairs || []) item.id = `r${++repairIndex}`;
@@ -1488,12 +1589,14 @@
     buildAuthoringProfile,
     buildAuthoringProfiles,
     buildReferenceIndex,
+    childXmlRanges,
     closestNames,
     decodeXml,
     diagnoseAuroraElements,
     elementTarget,
     editDistance,
     encodeAttributeValue,
+    elementRanges,
     normalizeName,
     normalizeReferenceIndex,
     normalizeSpace,
@@ -1505,6 +1608,7 @@
     setTagAttribute,
     splitSupportTokens,
     stripTags,
-    summarizePatternCatalog
+    summarizePatternCatalog,
+    xmlMarkupText
   };
 }));

@@ -24,7 +24,6 @@
       "<set name=\"keywords\">upcasting, higher-level spell slot</set>",
       "<stat name=\"alchemist:elixirs:max\" value=\"2\" level=\"3\" />",
       "<stat name=\"alchemist:elixirs:max\" value=\"1\" level=\"15\" />",
-      "<select type=\"Companion\" name=\"Steel Defender\" supports=\"FXT Steel Defender\" default=\"ID_FXT_COMPANION_ARTIFICER_STEEL_DEFENDER\" />",
       "<stat name=\"atlas:targets\" value=\"intelligence:modifier\" />",
       "<supports>Dragonmark</supports>",
       "<grant type=\"Spell\" id=\"ID_WOTC_PHB24_SPELL_THUNDERCLAP\" prepared=\"true\" />",
