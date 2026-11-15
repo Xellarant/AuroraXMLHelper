@@ -210,6 +210,9 @@ async function checkPdfExport(browser, url, reportDirectory) {
     assert.match(xml, /<supports>Wizard<\/supports>/);
     assert.match(xml, /Clockwork Initiate/);
 
+    // Recovered cards start collapsed. Open the editor before testing review exports.
+    if (!await classes.isVisible()) await page.locator('#card-spell-0 .element-card-header').click();
+    await classes.waitFor({ state: 'visible' });
     // Exercise the explicit review-export path as well as the clean export.
     await classes.fill('');
     await page.locator('#reviewIssuesList li').filter({ hasText: 'no spell lists assigned' }).waitFor({ state: 'visible' });
