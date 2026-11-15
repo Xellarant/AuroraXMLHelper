@@ -1,14 +1,19 @@
-# 1.0 release candidate acceptance — November 15, 2026
+# 1.0 release acceptance — November 15, 2026
 
-Candidate: **1.0.0-rc.1**. The candidate tag is separate from the eventual stable
-1.0 tag. Changes are available in [candidate PR #3](https://github.com/Xellarant/AuroraXMLHelper/pull/3).
+Stable release: **[1.0.0](https://github.com/Xellarant/AuroraXMLHelper/releases/tag/v1.0.0)**,
+promoted from **1.0.0-rc.1**. The original candidate tag is retained. Changes were
+merged through [PR #3](https://github.com/Xellarant/AuroraXMLHelper/pull/3).
+The merged application at `5a643cb` passed [post-merge tests](https://github.com/Xellarant/AuroraXMLHelper/actions/runs/43706422748)
+and [automatically triggered live verification](https://github.com/Xellarant/AuroraXMLHelper/actions/runs/43706470600)
+in Chromium and Firefox, with all 20 deployed files matching. Stable promotion
+changes version labels and documentation; the application behavior is unchanged.
 
 | Check | Result |
 | --- | --- |
 | Dependency security | Compatible updates installed; npm audit reports zero known vulnerabilities, including development dependencies. |
 | Automated regression suite | 365 tests pass across 29 files. New coverage checks nested correction merging, the actual Node minimum versions, split spell metadata, shared spell-list evidence and its boundaries, and learned versus whole-list spellcasting. |
 | Remembered corrections | Individual named feature/option edits and level-keyed row edits preserve fresh prose, new siblings, and source references. Renamed, ambiguous, structurally changed, and older broad corrections are held for review. Regression coverage includes persistence, safe display, forgetting, and restoring the fresh baseline. |
-| Chromium and Firefox | Both engines passed the candidate CI workflows. The same matrix is configured for live release verification after deployment. See the [candidate's latest checks](https://github.com/Xellarant/AuroraXMLHelper/pull/3/checks). No local Chrome session was started. |
+| Chromium and Firefox | Both engines passed candidate and post-merge tests, and automated verification of the deployed app. See the linked post-merge runs above and the [candidate checks](https://github.com/Xellarant/AuroraXMLHelper/pull/3/checks). No local Chrome session was started. |
 | Large PDF | The 129,592,597-byte, 161-page local Sword Coast source exposed split metadata that initially yielded zero spells. After the bounded OCR and shared-introduction fixes it yields four spells, all with base class lists, and shape-valid XML. Observed run: 3.71 seconds reading, 8.22 seconds overall, 475 MiB peak process memory. These are local observations, not performance guarantees. |
 | Browser PDF/export workflow | A 250-page synthetic fixture has availability evidence on page 1 and its expected spell on page 250. Both engines passed extraction, recovery, and clean and warning-confirmed exports. On [run 43700048628](https://github.com/Xellarant/AuroraXMLHelper/actions/runs/43700048628), extraction took 1.49 seconds in Chromium and 2.55 seconds in Firefox. The generated files were approximately 294 KB; the separate private PDF supplied the large-byte-size check. |
 | Aurora class acceptance | Passed in Aurora 1.0.3 / assembly 1.0.166.7407. The synthetic Mistkeeper was advanced from level 1 to 20, saved, and reopened after a full app restart. Detailed outcomes follow. |
@@ -95,6 +100,6 @@ game rule. Draft format version 1 is retained. Changes to draft formats require
 compatibility tests or an explicit migration and backup path. Preserve annotated
 release tags and use a new version for subsequent changes.
 
-Before stable 1.0, all acceptance rows above must have an observed outcome and any
-remaining limitation must be stated in the release notes. A stable tag is not a
-substitute for completing those checks.
+All acceptance rows above have observed outcomes. The stable release notes retain
+the remaining limitations. Future releases should complete the relevant acceptance
+checks before publishing a stable tag.

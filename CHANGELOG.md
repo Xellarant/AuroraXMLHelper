@@ -1,9 +1,52 @@
 # Release notes
 
+## 1.0.0 — 2026-11-15
+
+First stable release of the assisted PDF-to-Aurora authoring workflow. This
+promotes the verified 1.0.0-rc.1 functionality, with updated version labels and
+documentation.
+
+### Included
+
+- Local extraction of supported spells, subclasses, equipment, feats, magic
+  items, races, backgrounds, and classes, with editable results and source references.
+- Base spell lists and conditional access, recognized class progression, and
+  source-backed choices. Unresolved items remain visible for review before export.
+- XML authoring, validation, repair, comparison, and undo.
+- Draft recovery and backups, conflicting-tab protection, and remembered
+  corrections that preserve fresh source content or ask for review.
+- OCR metadata and shared cantrip spell-list fixes, plus correct learned-spell
+  behavior and spellcasting prerequisite recognition in Aurora.
+
+### Upgrade and compatibility
+
+- Use **Export draft** to keep a backup before updating or clearing browser data.
+  Draft format version 1 remains supported. Drafts and remembered corrections
+  remain local to each browser profile and site; older broad corrections may need
+  review and resaving.
+- Readable text or prior OCR is required. Review source wording and unresolved
+  mechanics before using generated content in Aurora. XML shape validation checks
+  structure and does not certify every game rule.
+- Classic equipment starters omit 2024 weapon mastery. Companion statistics,
+  activated or situational effects, unfamiliar resources and prerequisites, and
+  damaged numeric tables can require manual work.
+- Acceptance covers Chromium and Firefox, and Aurora 1.0.3 / assembly
+  1.0.166.7407. Safari, mobile browsers, and other Aurora builds have not received
+  this acceptance pass.
+
+### Validation
+
+The promoted candidate passed 365 regression tests, Chromium and Firefox browser
+checks and automated live release verification, a 250-page PDF workflow, and a
+129 MB / 161-page private source check. Aurora class progression and choices were
+checked through level 20, including save/restart/reopen. See the
+[acceptance report](docs/release-checks/2026-11-15/README.md) for evidence, measurements,
+and reproduction steps.
+
 ## 1.0.0-rc.1 — 2026-11-15
 
-Release candidate for the assisted PDF-to-Aurora authoring workflow. The stable
-1.0 tag follows completion of the acceptance checklist and review of the candidate.
+Release candidate for the assisted PDF-to-Aurora authoring workflow, subsequently
+promoted to 1.0.0 after completing acceptance and review.
 
 - Parse supported spell, subclass, equipment, feat, magic-item, race, background,
   and class layouts locally. Review physical PDF page references, editable fields,

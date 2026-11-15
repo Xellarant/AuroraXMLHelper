@@ -262,8 +262,8 @@ optional local/external ID references.
 
 ## Release and compatibility
 
-The current development version is **1.0.0-rc.1**. See the
-[release notes](CHANGELOG.md) and [release acceptance checklist](docs/release-checks/2026-11-15/README.md).
+The current stable version is **[1.0.0](https://github.com/Xellarant/AuroraXMLHelper/releases/tag/v1.0.0)**. See the
+[release notes](CHANGELOG.md) and [release acceptance report](docs/release-checks/2026-11-15/README.md).
 The stable 1.0 scope is an assisted PDF-to-Aurora authoring workflow: review the
 source references and unresolved items before exporting. Readable text/OCR is
 required; the app does not perform OCR. Custom resources, activated or situational
