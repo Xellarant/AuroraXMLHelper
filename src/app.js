@@ -7530,6 +7530,18 @@ function spellcastingPrepareAttribute(cls) {
   return '';
 }
 
+function spellcastingKnownListAttribute(cls, feature) {
+  if (cls.spellcastingPrepare !== true && cls.spellcastingPrepare !== 'true') return '';
+  if ((cls.progression || []).some(row => Number(row.spellsKnown) > 0)) return '';
+  const text = String(feature?.description || '').replace(/\s+/g, ' ');
+  // Preparing from a spellbook does not grant the entire class catalogue.
+  if (/\bspellbook\b/i.test(text)) return '';
+  return text.split(/[.!?]+/).some(statement =>
+    !/\b(?:if|unless|while|only|not|never|cannot|can't|don't)\b/i.test(statement)
+    && /\bprepar(?:e|ing)\b.{0,600}\b(?:from|on) (?:the |your )?(?:[\w'-]+ ){0,3}spell list\b/i.test(statement))
+    ? ' known="true"' : '';
+}
+
 function isArchetypeSelectionFeature(feature, cls) {
   if (!feature || !cls?.archetypeLevel) return false;
   const name = String(feature.name || '').toLowerCase();
@@ -7686,6 +7698,10 @@ function classSpellcastingRules(cls) {
   const rules = [];
   const classKey = String(cls.name || '').toLowerCase();
   const spellcastingName = escAttrXml(cls.name);
+  if (hasClassSpellcasting(cls)) rules.push(rule(
+    '\t\t\t<grant type="Grants" id="ID_INTERNAL_GRANTS_SPELLCASTING_FEATURE" />',
+    'Enable Aurora spellcasting feature prerequisites.', 'Spellcasting feature'
+  ));
   const multiclass = /^Artificer$/i.test(cls.name) ? 'HALF_UP'
     : /^(Ranger|Paladin)$/i.test(cls.name) ? 'HALF'
     : /^(Bard|Cleric|Druid|Sorcerer|Wizard)$/i.test(cls.name) ? 'FULL' : '';
@@ -8073,7 +8089,7 @@ function genClassXml(cls, source, prefix, meta) {
         const prepare = spellcastingPrepareAttribute(cls);
         const replace = /\breplace\b.*\bspell\b|\bspell\b.*\breplace\b/is.test(f.description || '') ? ' allowReplace="true"' : '';
         lines.push(`\t\t<spellcasting name="${escAttrXml(cls.name)}"${ability}${prepare}${replace}>`);
-        lines.push(`\t\t\t<list known="true">${escXml(list)}</list>`);
+        lines.push(`\t\t\t<list${spellcastingKnownListAttribute(cls, f)}>${escXml(list)}</list>`);
         lines.push(`\t\t</spellcasting>`);
       }
       const featureRules = inferClassFeatureRules(cls, f, meta);

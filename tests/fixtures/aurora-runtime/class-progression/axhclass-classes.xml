@@ -67,9 +67,11 @@ You know two spells. When you gain a level, you can replace one spell you know w
 You know two spells. When you gain a level, you can replace one spell you know with another spell.</description>
 		</sheet>
 		<spellcasting name="Mistkeeper" ability="Charisma" prepare="false" allowReplace="true">
-			<list known="true">Mistkeeper</list>
+			<list>Mistkeeper</list>
 		</spellcasting>
 		<rules>
+			<!-- Source rule: Enable Aurora spellcasting feature prerequisites. -->
+			<grant type="Grants" id="ID_INTERNAL_GRANTS_SPELLCASTING_FEATURE" />
 			<!-- Source rule: Increase level 1 spell slots by 2 at Mistkeeper level 1. -->
 			<stat name="mistkeeper:spellcasting:slots:1" value="2" level="1" />
 			<!-- Source rule: Increase level 1 spell slots by 1 at Mistkeeper level 2. -->
