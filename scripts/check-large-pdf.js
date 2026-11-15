@@ -14,6 +14,7 @@ async function checkLargePdf(file) {
   const readMs = Date.now() - started;
   const { context } = loadApp({ name: 'Large PDF Acceptance', abbr: 'LPA', year: '2015' });
   const result = generateBenchmarkXml(context, source.text, ['spell'], source);
+  assert.ok(result.data.spell.length, 'No spells were recovered. Choose a readable PDF with complete spell definitions, or repair its text before retrying.');
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'aurora-large-pdf-'));
   try {
     fs.writeFileSync(path.join(directory, 'spells.xml'), result.xml);
@@ -21,6 +22,7 @@ async function checkLargePdf(file) {
     assert.equal(validation.ok, true, validation.stderr || validation.stdout);
     return { file: path.basename(file), bytes, pages: source.totalPageCount, readMs,
       totalMs: Date.now() - started, spells: result.data.spell.length,
+      spellsWithBaseLists: result.data.spell.filter(spell => spell.classes?.length).length,
       shapeValid: true, peakMemoryMiB: Math.round(process.resourceUsage().maxRSS / 1024) };
   } finally {
     assert.equal(path.dirname(path.resolve(directory)), path.resolve(os.tmpdir()));

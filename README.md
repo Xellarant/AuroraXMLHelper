@@ -306,7 +306,7 @@ Run parser and generator regression tests with:
 npm test
 ```
 
-Tests run with Vitest and require Node 20 or newer. `npm test` uses
+Tests run with Vitest and require Node 20.19+ or 22.12+. `npm test` uses
 `scripts/run-vitest.js`, which prefers `AURORA_NODE`, then a local Node install
 under `%LOCALAPPDATA%\Programs\nodejs-lts`, then `node` on `PATH`.
 
@@ -316,10 +316,13 @@ Run the browser smoke test with:
 npm run smoke:browser
 ```
 
-The smoke test starts the local static server, opens Playwright Chromium, and
+The smoke test starts the local static server, opens Playwright Chromium by default, and
 checks that the app and browser-only dependencies finish loading. It also tests
 refresh recovery, the last field typed before refreshing, repair downloads and
 undo, draft export/import, corrupt drafts, tab conflicts, and PDF-to-ZIP export.
+The PDF case spans 250 pages and checks spell-list context from a distant page.
+Set `AURORA_BROWSER=firefox` and install Firefox with `npx playwright install firefox`
+to run the same checks in Firefox. CI runs both engines.
 It uses isolated browser contexts and does not access your normal browser data
 or start a desktop screen capture session. It prefers
 Playwright's bundled Chromium headless shell when available, then falls back to

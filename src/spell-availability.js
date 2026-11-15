@@ -12,7 +12,7 @@
   const clean = value => String(value || '').replace(/[’‘]/g, "'").replace(/\\f(?=\s+you\s+have\b)/gi, 'If').replace(/[*_]/g, '').replace(/\s+/g, ' ').trim();
   const heading = value => clean(value).replace(/^#{1,6}\s*/, '').replace(/^(?:Feat|Background|Race|Species|Subclass|Class):\s*/i, '');
   const unique = values => [...new Map(values.map(value => [key(value), value])).values()];
-  const kindLine = value => new RegExp(`^(?:${school} cantrip|\\d+(?:st|nd|rd|th)-level ${school}|Level \\d+ ${school})\\b`, 'i').test(clean(value));
+  const kindLine = value => new RegExp(`^(?:${school} cantrip|\\d+(?:st|nd|rd|th)-level ${school}|Level \\d+ ${school})\\b`, 'i').test(clean(value).replace(/\bca\s+ntrip\b/gi, 'cantrip'));
   const levelLine = value => /^(?:Cantrips?\b|\d+(?:st|nd|rd|th)?(?:[- ]Level|\s*\())/i.test(clean(value));
   const cells = value => clean(value).replace(/^\|/, '').replace(/\|$/, '').split('|').map(value => value.trim());
   function containsName(value, name) {
@@ -156,6 +156,45 @@
       if (!entry.conditional.some(previous => key(previous.owner) === key(candidate.owner) && previous.access === access && previous._source.page === record.page
         && previous.level === candidate.level && previous.spellLevel === candidate.spellLevel && previous.levelUnclear === candidate.levelUnclear)) entry.conditional.push(candidate);
     };
+
+    // A shared cantrip introduction needs both a class heading and an explicit
+    // spell-list statement. A class mentioned in surrounding prose is not enough.
+    const coreNames = value => {
+      const names = String(value).split(/[,;]|\band\b/i).map(clean).filter(Boolean)
+        .map(value => classes.find(name => key(value) === key(name) || key(value) === key(name + 's')));
+      return names.length && names.every(Boolean) ? unique(names) : [];
+    };
+    for (let i = 0; i < records.length; i++) {
+      if (!/^Cantrips for\b/i.test(heading(records[i].text))) continue;
+      const first = heading(records[i].text);
+      const label = /,$/.test(first) ? first + ' ' + heading(records[i + 1]?.text) : first;
+      const names = coreNames(label.replace(/^Cantrips for\s+/i, ''));
+      if (!names.length) continue;
+      for (let j = i + 1; j < Math.min(records.length, i + 12); j++) {
+        if (kindLine(records[j].text)) break;
+        const intro = records.slice(j, j + 3).map(row => row.text).join(' ')
+          .replace(/\bca\s+ntrips\b/gi, 'cantrips').replace(/\bwiz-\s*ard\b/gi, 'wizard')
+          .replace(/\bspe\s+ll\s+li\s+sts\b/gi, 'spell lists');
+        const match = clean(intro).match(/^These (?:new )?cantrips are on (?:the )?(.+?) spell lists?\./i);
+        if (!match) continue;
+        const stated = coreNames(match[1]);
+        if (stated.length !== names.length || !stated.every(name => names.includes(name))) continue;
+        for (let k = j + 1; k < records.length; k++) {
+          const row = records[k];
+          if (row.pageIndex > records[i].pageIndex + 1 || Number.isInteger(row.page) && Number.isInteger(records[i].page) && row.page > records[i].page + 1) break;
+          const text = heading(row.text);
+          const definition = kindLine(records[k + 1]?.text);
+          const section = /^(?:#{1,6}\s|(?:Chapter\s+\d+|Class Features|Cantrips for)\b)/i.test(row.text)
+            || row.size >= row.bodySize * 1.25 || text === text.toUpperCase() && /[A-Z]/.test(text) && !/[.!?:]$/.test(text);
+          if (!definition && !kindLine(text) && !bySpellHeading(text) && section) break;
+          if (!definition) continue;
+          const spell = byKey.get(key(text));
+          if (!/cantrip\b/i.test(clean(records[k + 1].text).replace(/\bca\s+ntrip\b/gi, 'cantrip'))) break;
+          if (spell) for (const name of names) addBase(spell, name, records[j], 'definition', clean(intro).match(/^.*?spell lists?\./i)[0]);
+        }
+        break;
+      }
+    }
 
     // Definition metadata belongs to this spell, never to preceding spell prose.
     for (let i = 0; i < records.length - 1; i++) {

@@ -12,6 +12,44 @@ const definition = (name = 'Copper Flash', body = 'A harmless copper light appea
 const page = (number, text) => ({ page: number, text });
 const sorted = values => [...values].sort();
 
+test('an explicit shared cantrip section assigns its lists across adjacent definitions and stops at the next section', () => {
+  const spells = [spell('Copper Flash', { level: 0 }), spell('Silver Spark', { level: 0 }), spell('Outside Spark', { level: 0 })];
+  availability.resolve(spells, { pages: [page(1, 'CANTRIPS FOR SORCERERS,\nWARLOCKS, AND WIZARDS\n'
+    + 'These ca ntrips are on the sorcerer, warlock, and wiz-\nard spe ll li sts.\n'
+    + definition('Copper Flash', 'A light appears.', 'Evocation ca ntrip')),
+  page(2, definition('Silver Spark', 'A light appears.', 'Evocation cantrip') + '\nOTHER MAGIC\n'
+    + definition('Outside Spark', 'A light appears.', 'Evocation cantrip'))] });
+  assert.deepEqual(sorted(spells[0].classes), ['Sorcerer', 'Warlock', 'Wizard']);
+  assert.deepEqual(sorted(spells[1].classes), ['Sorcerer', 'Warlock', 'Wizard']);
+  assert.deepEqual(spells[2].classes, []);
+  assert.ok(spells[1].availability.base.every(entry => entry._source.page === 1));
+});
+
+test('shared cantrip headings need matching explicit evidence and never expand leveled spells or distant pages', () => {
+  for (const intro of ['Wizards enjoy these cantrips.', 'These cantrips are on the bard spell list.',
+    'These cantrips are on the sorcerer, warlock, and wizard spell lists only while holding a talisman.']) {
+    const spells = [spell('Copper Flash', { level: 0 })];
+    availability.resolve(spells, { pages: [page(1, 'CANTRIPS FOR SORCERERS,\nWARLOCKS, AND WIZARDS\n' + intro + '\n' + definition('Copper Flash', '', 'Evocation cantrip'))] });
+    assert.deepEqual(spells[0].classes, []);
+  }
+  const spells = [spell(), spell('Silver Spark', { level: 0 })];
+  availability.resolve(spells, { pages: [page(1, 'CANTRIPS FOR SORCERERS,\nWARLOCKS, AND WIZARDS\n'
+    + 'These cantrips are on the sorcerer, warlock, and wizard spell lists.\n' + definition()),
+  page(4, definition('Silver Spark', '', 'Evocation cantrip'))] });
+  assert.deepEqual(spells[0].classes, []);
+  assert.deepEqual(spells[1].classes, []);
+});
+
+test('single-line shared cantrip evidence remains a definition when catalogue lists disagree', () => {
+  const spells = [spell('Copper Flash', { level: 0 })];
+  availability.resolve(spells, { pages: [page(1, 'CANTRIPS FOR SORCERERS, WARLOCKS, AND WIZARDS\n'
+    + 'These cantrips are on the sorcerer, warlock, and wizard spell lists.\n'
+    + definition('Copper Flash', '', 'Evocation cantrip')
+    + '\n| Spell | Classes |\n| --- | --- |\n| Copper Flash | Bard |')] });
+  assert.deepEqual(sorted(spells[0].classes), ['Bard', 'Sorcerer', 'Warlock', 'Wizard']);
+  assert.equal(spells[0].availability.conflicts.length, 1);
+});
+
 test('separate class lists fill every membership without expanding the selected definitions', () => {
   const { context } = loadApp();
   const selected = [page(5, definition())];

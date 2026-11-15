@@ -19,6 +19,11 @@ Release candidate for the assisted PDF-to-Aurora authoring workflow. The stable
   to browser and live-release verification, including a 250-page PDF export case.
 - Recover OCR-split cantrip headers, duration labels, duration values, and range
   units observed during the large-file acceptance check.
+- Attach explicitly stated shared cantrip class lists to adjacent definitions,
+  retaining their source references and stopping at unrelated sections.
+- Keep learned-spell classes and spellbooks from automatically knowing their
+  entire spell list. Grant Aurora's spellcasting feature marker so prerequisite
+  checks recognize generated spellcasters.
 
 ### Compatibility and limits
 
