@@ -1418,8 +1418,8 @@
         }
         if (error) {
           parseFindings.push(diagnostic({ fileName: doc.fileName }, 'error', 'xml-parse',
-            'This document is not well-formed XML: ' + error.slice(0, 400),
-            'Correct the XML syntax and inspect again. Automatic repairs are withheld for this file.', []));
+            shape.xmlSyntaxMessage(error),
+            'Edit this file to fix the syntax, then choose Inspect XML. No automatic repairs will be applied until the XML can be read.', []));
           continue;
         }
       }

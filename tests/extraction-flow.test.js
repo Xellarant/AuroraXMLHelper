@@ -137,7 +137,7 @@ test('failed extraction rolls back records, baselines, skipped work, source meta
   assert.equal(runInApp(context, 'extractionBusy'), false);
   assert.equal(elements.sourceName.disabled, false);
   assert.equal(elements.sourceYear.disabled, true, 'Previously disabled controls must stay disabled.');
-  assert.match(elements.extractErrors.textContent, /Parsing did not replace your work.*Unreadable PDF/);
+  assert.match(elements.extractErrors.textContent, /Parsing did not replace your work.*could not be read.*save a new copy/);
 });
 
 test('successful extraction replaces the entries and baseline only after parsing resolves', async () => {

@@ -3,6 +3,8 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.AuroraPageRange = api;
 }(typeof globalThis !== 'undefined' ? globalThis : this, function buildAuroraPageRange() {
+  function rangeError(message) { return Object.assign(new Error(message), { userMessage: message }); }
+
   function parsePageRange(value) {
     const text = String(value || '').trim();
     if (!text) return [];
@@ -10,11 +12,11 @@
     for (const rawPart of text.split(',')) {
       const part = rawPart.trim();
       const match = part.match(/^(\d+)(?:\s*-\s*(\d+))?$/);
-      if (!match) throw new Error(`Invalid page range: ${value}`);
+      if (!match) throw rangeError(`Invalid page range: ${value}. Enter pages such as 2-5, 8. Use positive whole numbers and put the smaller page first, or leave the field empty for all pages.`);
       const start = Number(match[1]);
       const end = Number(match[2] || match[1]);
       if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 1 || end < start) {
-        throw new Error(`Invalid page range: ${value}`);
+        throw rangeError(`Invalid page range: ${value}. Enter pages such as 2-5, 8. Use positive whole numbers and put the smaller page first, or leave the field empty for all pages.`);
       }
       ranges.push({ start, end });
     }
@@ -34,7 +36,7 @@
       if (ranges.some(range => page >= range.start && page <= range.end)) selected.push(page);
     }
     if (!selected.length) {
-      throw new Error(`Page range ${formatPageRange(ranges)} selected no pages from a ${totalPageCount}-page source.`);
+      throw rangeError(`Page range ${formatPageRange(ranges)} selected no pages from a ${totalPageCount}-page source. Choose pages between 1 and ${totalPageCount}, or leave the page range empty. Use PDF page numbers, including covers and front matter.`);
     }
     return selected;
   }

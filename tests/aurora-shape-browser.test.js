@@ -18,29 +18,29 @@ const messages = root => validate(root).map(issue => issue.msg).join('\n');
 
 test('browser shape checks require metadata at its actual parent rather than inside content', () => {
   const nested = node('elements', {}, [node('element', { name: 'Nested', type: 'Feat', source: 'X', id: 'ID_NESTED' }, [metadata()])]);
-  assert.match(messages(nested), /ElementsInfo - Missing \/elements\/info/);
+  assert.match(messages(nested), /Missing \/elements\/info/);
   const nestedUpdate = node('elements', {}, [node('info', {}, [node('description', {}, [metadata().children[1]])])]);
-  assert.match(messages(nestedUpdate), /ElementsUpdate - Missing \/elements\/info\/update/);
+  assert.match(messages(nestedUpdate), /Missing \/elements\/info\/update/);
   assert.equal(validate(node('elements', {}, [metadata()])).length, 0);
 });
 
 test('browser class checks do not accept nested feature setters as class hit dice', () => {
   const nested = node('element', { name: 'Class', type: 'Class', source: 'X', id: 'ID_CLASS' },
     [node('description', {}, [node('setters', {}, [node('set', { name: 'hd' }, [], 'd8')])])]);
-  assert.match(messages(node('elements', {}, [metadata(), nested])), /ClassShape.*missing a non-empty hd/);
+  assert.match(messages(node('elements', {}, [metadata(), nested])), /needs a hit die.*Add.*set name="hd"/);
 });
 
 test('browser shape checks support Aurora index files and flag their missing file details', () => {
   const valid = node('index', {}, [metadata(), node('files', {}, [node('file', { name: 'spells.xml', url: 'spells.xml' })])]);
   assert.equal(validate(valid).length, 0);
-  assert.match(messages(node('index', {}, [metadata()])), /IndexFiles - Missing \/index\/files/);
+  assert.match(messages(node('index', {}, [metadata()])), /Missing \/index\/files/);
   const invalid = node('index', {}, [metadata(), node('files', {}, [
     node('file', { name: 'same.xml' }), node('file', { name: 'same.xml', url: 'same.xml' }), node('file', { url: 'unnamed.xml' })
   ])]);
   const found = messages(invalid);
-  assert.match(found, /missing a non-empty url/);
-  assert.match(found, /missing a non-empty name/);
-  assert.match(found, /duplicate file name same.xml/);
+  assert.match(found, /Enter.*url/);
+  assert.match(found, /Enter a name/);
+  assert.match(found, /lists same.xml more than once/);
 });
 
 test('shape validation recognizes both Mozilla and nested Chromium XHTML parser-error documents', () => {
@@ -53,6 +53,7 @@ test('shape validation recognizes both Mozilla and nested Chromium XHTML parser-
     }
     const found = validateAuroraXmlDocuments([{ fileName: 'broken.xml', xml: '<elements><element></elements>' }], 'Browser shape', { DOMParser });
     assert.equal(found.length, 1);
-    assert.match(found[0].msg, /XmlParse - Unexpected closing tag/);
+    assert.equal(found[0].code, 'XmlParse');
+    assert.match(found[0].msg, /syntax error.*Match each closing tag/);
   }
 });

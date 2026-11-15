@@ -108,7 +108,7 @@ test('unreadable or partly empty XML uploads preserve the repair workspace and g
   context.loadRepairDocs([{ fileName: 'original.xml', xml: '<elements />' }]);
   await context.handleRepairXmlFileSelect({ target: { files: [{ name: 'broken.xml', text: async () => { throw new Error('Read failed'); } }] } });
   assert.equal(elements.repairXmlInput.value, '<elements />');
-  assert.match(elements.repairPreviewStatus.textContent, /Read failed.*unchanged/);
+  assert.match(elements.repairPreviewStatus.textContent, /could not read the XML files.*Select them again.*unchanged/);
   await context.handleRepairXmlFileSelect({ target: { files: [
     { name: 'valid.xml', text: async () => '<elements />' }, { name: 'empty.xml', text: async () => ' ' }
   ] } });
@@ -174,8 +174,8 @@ test('repair inspection recognizes Chromium XHTML parser errors nested below a p
   assert.equal(diagnostics.length, 1);
   assert.equal(diagnostics[0].category, 'xml-parse');
   assert.equal(diagnostics[0].repairs.length, 0);
-  assert.match(elements.repairPreviewStatus.textContent, /errors=1/);
-  assert.doesNotMatch(elements.repairPreviewResults.innerHTML, /No diagnostics found/);
+  assert.match(elements.repairPreviewStatus.textContent, /1 error/);
+  assert.doesNotMatch(elements.repairPreviewResults.innerHTML, /No issues were found/);
 });
 
 test('optional feat category and prerequisite editors can clear existing values while required details remain guarded', () => {

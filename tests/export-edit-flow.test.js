@@ -85,7 +85,7 @@ test('ZIP failure keeps edited data and pending state and allows a later success
   assert.equal(runInApp(context, 'hasUnsavedChanges'), true);
   assert.equal(runInApp(context, 'zipDownloadBusy'), false);
   assert.equal(downloads.length, 0);
-  assert.match(elements.manualAuthorStatus.textContent, /Your work is kept.*Compression failed/);
+  assert.match(elements.manualAuthorStatus.textContent, /Your work is kept.*ZIP file could not be created.*Single XML/);
   zipMock(context, async () => new Blob(['Retry ZIP']));
   assert.equal(await context.downloadZip(), true);
   assert.equal(downloads.length, 1);

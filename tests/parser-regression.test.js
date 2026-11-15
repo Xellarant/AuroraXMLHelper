@@ -209,7 +209,7 @@ test('repair preview analyzes pasted Aurora XML without rewriting it', () => {
   assert.match(html, /&lt;supports&gt;Wizard, 1&lt;\/supports&gt;/);
   assert.match(html, /Suggested sample/);
   assert.match(html, /&lt;supports&gt;Wizard&lt;\/supports&gt;/);
-  assert.match(html, /replace-supports-text/);
+  assert.match(html, /Replace supports text/);
   assert.match(html, /Relevant Authoring Context/);
   assert.match(html, /Showing observed patterns only for element types that have diagnostics/);
   assert.match(html, /<h4>Spell<\/h4>/);
@@ -274,7 +274,7 @@ test('repair workflow applies selected repairs, verifies them, and diffs against
   assert.match(html, /Applied Repairs/);
   assert.match(html, /Download Fixed XML/);
   assert.match(html, /repair-diff-line add/);
-  assert.match(html, /No diagnostics found/);
+  assert.match(html, /No issues were found/);
 });
 
 test('repair preview hides authoring profiles when there are no related diagnostics', () => {
@@ -317,7 +317,7 @@ test('repair preview preserves a valid unfiltered feat selection', () => {
     `window.AuroraXMLHelper.renderRepairPreviewHtml(${JSON.stringify(analysis)})`
   );
 
-  assert.match(html, /No diagnostics found/);
+  assert.match(html, /No issues were found/);
   assert.doesNotMatch(html, /Inferred from select type=&quot;Feat&quot;/);
   assert.doesNotMatch(html, /supports=&quot;feat&quot;/);
 });
@@ -1962,5 +1962,5 @@ test('browser Aurora validator catches duplicate element IDs in one document', (
     }], 'Unit Test'))
   `));
 
-  assert.ok(issues.some(issue => issue.msg.includes('DuplicateElementIds') && issue.msg.includes('duplicate.xml')));
+  assert.ok(issues.some(issue => issue.code === 'DuplicateElementIds' && issue.msg.includes('duplicate.xml')));
 });

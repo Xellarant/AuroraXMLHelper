@@ -43,7 +43,7 @@ function recovery({ saved = null, confirm = async () => true, restoreFailure } =
     confirmAction: confirm
   };
   const window = {
-    AuroraXMLHelper: api, AuroraDraftStorage: draft, localStorage: storage,
+    AuroraXMLHelper: api, AuroraDraftStorage: draft, AuroraUserMessages: require('../src/user-messages'), localStorage: storage,
     addEventListener: (name, handler) => { listeners.window[name] = handler; }
   };
   const context = vm.createContext({
@@ -119,7 +119,7 @@ test('a failed import rolls back partial restoration and retains the prior saved
   await runtime.importFile(draft.encode(state('Cannot render')));
   assert.equal(runtime.current().fields.sourceName, 'Original');
   assert.equal(runtime.storage.getItem(draft.KEY), previous);
-  assert.match(runtime.element('draftStatus').textContent, /Could not render imported draft/);
+  assert.match(runtime.element('draftStatus').textContent, /could not be opened.*try another backup.*current workspace has been kept/);
 });
 
 test('an older slow file import cannot replace a newer chosen draft', async () => {

@@ -1,6 +1,7 @@
 // ---------------------------------------------
 // State
 // ---------------------------------------------
+const userMessages = window.AuroraUserMessages;
 let pdfFile = null;
 let extractedData = {}; // { spell: [...], archetype: [...], item: [...], feat: [...], magic: [...] }
 let skippedItems = []; // items filtered out for being < 80% complete
@@ -270,7 +271,7 @@ async function ensurePdfJsLoaded() {
     window.dispatchEvent?.(new CustomEvent('aurora:pdfjs-loaded'));
     return pdfjsLib;
   } catch (error) {
-    throw new Error(`PDF.js is not loaded. ${error?.message || error}`);
+    throw userMessages.error('The PDF reader could not load. Export a draft to keep your work, then refresh the app and try Parse PDF again.');
   }
 }
 
@@ -283,7 +284,7 @@ async function ensurePdfJsLoaded() {
 function toggleOllama() { useOllama = false; showKeyTestResult(false, legacyAiDisabledMessage()); }
 function saveOllamaPrefs() {}
 async function testOllama() { showLegacyAiDisabled('ollamaTestResult'); }
-async function ollamaRaw() { throw new Error(legacyAiDisabledMessage()); }
+async function ollamaRaw() { throw userMessages.error(legacyAiDisabledMessage()); }
 function toggleKeyVisibility() {}
 function saveKey() { apiKey = ''; showKeyTestResult(false, legacyAiDisabledMessage()); }
 function setKeyStatus() {
@@ -444,7 +445,7 @@ const DETERMINISTIC_PARSERS = {
 };
 
 async function deterministicExtract(file, types, progressCallback, options = {}) {
-  const assertCurrent = () => { if (options.isCurrent && !options.isCurrent()) throw new Error('Parsing cancelled.'); };
+  const assertCurrent = () => { if (options.isCurrent && !options.isCurrent()) throw userMessages.error('Parsing cancelled.'); };
   assertCurrent();
   progressCallback(5, 'Reading PDF text locally...');
   const pages = await extractPdfPages(file, options);
@@ -452,7 +453,7 @@ async function deterministicExtract(file, types, progressCallback, options = {})
   const selectedPages = selectPages(pages, document.getElementById('pageRange')?.value?.trim() || '');
   const continuationPages = selectContinuationPages(pages, selectedPages);
   const text = selectedPages.map(p => p.text).join('\n\n');
-  if (!text.trim()) throw new Error('No selectable text was found in this PDF. Scanned/image-only PDFs need OCR before deterministic parsing can work.');
+  if (!text.trim()) throw userMessages.error('No selectable text was found in this PDF. If its pages are scans or images, use a PDF tool to recognize the text (OCR), save the searchable PDF, then try Parse PDF again.');
 
   detectSourceMetaFromText(selectedPages);
 
@@ -474,7 +475,7 @@ async function deterministicExtract(file, types, progressCallback, options = {})
 
 async function extractPdfPages(file, options = {}) {
   const current = () => !options.isCurrent || options.isCurrent();
-  const assertCurrent = () => { if (!current()) throw new Error('Parsing cancelled.'); };
+  const assertCurrent = () => { if (!current()) throw userMessages.error('Parsing cancelled.'); };
   const pdfjsLib = await ensurePdfJsLoaded();
   assertCurrent();
   pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_SRC;
@@ -493,7 +494,7 @@ async function extractPdfPages(file, options = {}) {
       const page = await pdf.getPage(p);
       assertCurrent();
       const layout = window.AuroraPdfTextLayout;
-      if (!layout?.extractPageLayout) throw new Error('PDF text layout support is not loaded.');
+      if (!layout?.extractPageLayout) throw userMessages.error('The PDF text reader did not load. Export a draft to keep your work, then refresh the app and try Parse PDF again.');
       const pageLayout = await layout.extractPageLayout(page);
       assertCurrent();
       pages.push({ page: p, text: pageLayout.lines.join('\n'), layout: pageLayout });
@@ -511,7 +512,7 @@ async function extractPdfPages(file, options = {}) {
 }
 function selectPages(pages, rangeText) {
   const pageRange = globalThis.AuroraPageRange || window.AuroraPageRange;
-  if (!pageRange?.selectPageObjects) throw new Error('PDF page range support is not loaded.');
+  if (!pageRange?.selectPageObjects) throw userMessages.error('The page-selection tool did not load. Export a draft to keep your work, then refresh the app and try Parse PDF again.');
   return pageRange.selectPageObjects(pages, rangeText, pages.length);
 }
 
@@ -2468,7 +2469,7 @@ async function startExtraction() {
     if (!current()) return false;
     const count = Object.values(result).reduce((sum, items) => sum + items.length, 0);
     if (!count && (Object.values(extractionSnapshot.data).some(items => items.length) || extractionSnapshot.skipped.length)) {
-      throw new Error('No elements were found in the selected section. Check the page range or paste a section. Your previous results were kept.');
+      throw userMessages.error('No elements were found in the selected section. Check the page range or paste a section. Your previous results were kept.');
     }
     extractedData = result;
     pendingRemoval = null;
@@ -2495,7 +2496,7 @@ async function startExtraction() {
     discoveredPageRanges = snapshot.ranges;
     restoreSourceFields(snapshot.fields);
     notes.className = 'alert alert-warning';
-    notes.textContent = 'Parsing did not replace your work. ' + (error?.message || String(error));
+    notes.textContent = 'Parsing did not replace your work. ' + userMessages.message(error, 'pdf');
     setProgress(0, 'Parsing failed. Your previous work has been kept.');
     return false;
   } finally {
@@ -2509,7 +2510,7 @@ async function startExtraction() {
     }
   }
 }
-async function geminiRaw() { throw new Error(legacyAiDisabledMessage()); }
+async function geminiRaw() { throw userMessages.error(legacyAiDisabledMessage()); }
 async function discoverPageRanges() { return {}; }
 async function detectSourceMeta() {}
 
@@ -2522,7 +2523,7 @@ function archetypeSupport(cls) {
 }
 
 // Disabled compatibility entry point for older integrations.
-async function callModel() { throw new Error(legacyAiDisabledMessage()); }
+async function callModel() { throw userMessages.error(legacyAiDisabledMessage()); }
 
 function setProgress(pct, msg) {
   if (pct !== null) document.getElementById('progressBar').style.width = pct + '%';
@@ -3719,7 +3720,7 @@ function setManualAuthorStatus(message, tone = 'info') {
 function getAuroraXmlPatterns() {
   const patterns = globalThis.AuroraXmlPatterns || window.AuroraXmlPatterns;
   if (!patterns?.analyzeAuroraXmlDocuments) {
-    throw new Error('Aurora XML pattern support is not loaded.');
+    throw userMessages.error('The XML checker did not load. Export a draft to keep your work, then refresh the app and try Inspect XML again.');
   }
   return patterns;
 }
@@ -3727,7 +3728,7 @@ function getAuroraXmlPatterns() {
 function getAuroraXmlRepair() {
   const repairApi = globalThis.AuroraXmlRepair || window.AuroraXmlRepair;
   if (!repairApi?.applyRepairs) {
-    throw new Error('Aurora XML repair support is not loaded.');
+    throw userMessages.error('The XML repair tool did not load. Export a draft to keep your work, then refresh the app and try Inspect XML again.');
   }
   return repairApi;
 }
@@ -3753,13 +3754,13 @@ function repairAnalysisOptions(options = {}) {
 function normalizeRepairDocs(docs) {
   const normalized = (docs || [])
     .map(doc => ({ fileName: doc.fileName || 'pasted.xml', xml: String(doc.xml || '') }));
-  if (!normalized.length || normalized.every(doc => !doc.xml.trim())) throw new Error('Paste or upload Aurora XML before inspecting.');
+  if (!normalized.length || normalized.every(doc => !doc.xml.trim())) throw userMessages.error('Paste or upload Aurora XML before inspecting.');
   const empty = normalized.find(doc => !doc.xml.trim());
-  if (empty) throw new Error('The XML file "' + empty.fileName + '" is empty. No files were loaded.');
+  if (empty) throw userMessages.error('The XML file "' + empty.fileName + '" is empty. Open it in a text editor to check its contents, or choose a different file. No files were loaded.');
   const names = new Set();
   for (const doc of normalized) {
     const name = doc.fileName.toLowerCase();
-    if (names.has(name)) throw new Error('More than one XML file is named "' + doc.fileName + '". Rename the files so each name is unique; no files were loaded.');
+    if (names.has(name)) throw userMessages.error('More than one XML file is named "' + doc.fileName + '". Rename the files so each name is unique; no files were loaded.');
     names.add(name);
   }
   return normalized;
@@ -3889,7 +3890,7 @@ function renderRepairActionControls(finding, repair, findingIndex, repairIndex) 
 
 function renderRepairDiagnosticCards(diagnostics = []) {
   if (!diagnostics.length) {
-    return '<p class="text-muted">No diagnostics found for the pasted XML.</p>';
+    return '<p class="text-muted">No issues were found by these checks. Review the source and intended rules before using the XML in Aurora.</p>';
   }
   return `<div class="repair-list">${diagnostics.map((finding, findingIndex) => {
     const repairs = (finding.repairs || []).map((repair, repairIndex) => {
@@ -3899,10 +3900,10 @@ function renderRepairDiagnosticCards(diagnostics = []) {
       const inference = repair.inferenceReason
         ? `<br /><span class="text-muted">Inferred from ${escHtml(repair.inferenceReason)}.</span>`
         : '';
-      return `<li><div class="repair-control">${renderRepairControl(repair)}</div>${escHtml(repair.kind || 'manual-review')} (${escHtml(repair.confidence || 'manual')})${detailText}<br />${escHtml(repair.description || '')}${inference}${renderCandidateValues(repair)}${renderRepairSnippet('Suggested sample', sample)}${renderRepairActionControls(finding, repair, findingIndex, repairIndex)}</li>`;
+      return `<li><div class="repair-control">${renderRepairControl(repair)}</div>${escHtml(userMessages.label(repair.kind || 'manual-review'))} (${escHtml(userMessages.label(repair.confidence || 'manual'))})${detailText}<br />${escHtml(repair.description || '')}${inference}${renderCandidateValues(repair)}${renderRepairSnippet('Suggested sample', sample)}${renderRepairActionControls(finding, repair, findingIndex, repairIndex)}</li>`;
     }).join('');
     return `<div class="repair-card ${escAttr(finding.severity || 'review')}">
-      <div class="repair-meta">${escHtml(finding.severity || 'review')} / ${escHtml(finding.category || 'diagnostic')} / ${escHtml(repairElementLabel(finding))}</div>
+      <div class="repair-meta">${escHtml(userMessages.label(finding.severity || 'review'))} · ${escHtml(userMessages.label(finding.category || 'diagnostic'))} / ${escHtml(repairElementLabel(finding))}</div>
       <p>${escHtml(finding.message || '')}</p>
       ${finding.suggestion ? `<p class="text-muted">${escHtml(finding.suggestion)}</p>` : ''}
       ${renderFlaggedNodeSnippet(finding)}
@@ -3921,7 +3922,7 @@ function renderAuthoringProfileCards(profiles = []) {
     : '';
   return `${more}<div class="profile-grid">${limited.map(profile => {
     const hints = (profile.hints || []).slice(0, 3)
-      .map(hint => `<li>${escHtml(hint.category)}: ${escHtml(hint.message)}</li>`)
+      .map(hint => `<li>${escHtml(userMessages.label(hint.category))}: ${escHtml(hint.message)}</li>`)
       .join('');
     return `<div class="profile-card">
       <h4>${escHtml(profile.type || '(missing type)')}</h4>
@@ -3974,7 +3975,7 @@ function renderRepairApplyResultHtml(lastApply, state = repairState) {
   const repairApi = getAuroraXmlRepair();
   const changed = changedRepairDocs(state);
   const originals = new Map((state.originalDocs || []).map(doc => [doc.fileName, doc.xml]));
-  const skippedRows = skipped.map(item => `<li>${escHtml(item.repair?.kind || 'repair')} on ${escHtml(item.repair?.target?.elementName || item.repair?.anchor?.fileName || 'document')}: ${escHtml(item.reason)}</li>`).join('');
+  const skippedRows = skipped.map(item => `<li>${escHtml(userMessages.label(item.repair?.kind || 'repair'))} on ${escHtml(item.repair?.target?.elementName || item.repair?.anchor?.fileName || 'document')}: ${escHtml(item.reason)}</li>`).join('');
   const introduced = verify?.introduced || [];
   const parseErrors = verify?.shape?.parseErrorsAfter || [];
   const diffs = changed.map(doc => `<div class="repair-snippet">
@@ -3983,7 +3984,7 @@ function renderRepairApplyResultHtml(lastApply, state = repairState) {
     </div>`).join('');
   return `<div class="repair-result-section repair-apply-result">
     <h3>Applied Repairs</h3>
-    <p><strong>This pass:</strong> applied=${escHtml(applied.length)}, skipped=${escHtml(skipped.length)}${verify ? `, resolved findings=${escHtml(verify.resolved.length)}, remaining=${escHtml(verify.remaining.length)}, new=${escHtml(introduced.length)}` : ''}</p>
+    <p><strong>This pass:</strong> ${escHtml(applied.length)} applied, ${escHtml(skipped.length)} skipped${verify ? `; ${escHtml(verify.resolved.length)} findings resolved, ${escHtml(verify.remaining.length)} remaining, ${escHtml(introduced.length)} new` : ''}.</p>
     ${introduced.length ? `<div class="alert alert-warning">New finding(s) appeared after this pass: ${introduced.map(finding => escHtml(finding.message)).join(' ')}</div>` : ''}
     ${parseErrors.length ? `<div class="alert alert-error">The repaired XML no longer parses: ${parseErrors.map(issue => escHtml(issue.msg)).join(' ')}</div>` : ''}
     ${skippedRows ? `<p class="text-muted">Skipped:</p><ul>${skippedRows}</ul>` : ''}
@@ -4020,7 +4021,7 @@ function renderRepairPreviewHtml(analysis, options = {}) {
     <h3>Repair Summary</h3>
     <p><strong>Files:</strong> ${escHtml((catalog.files || []).join(', ') || 'pasted.xml')}</p>
     <p><strong>Elements:</strong> ${escHtml(catalog.totalElements || 0)}</p>
-    <p><strong>Diagnostics:</strong> errors=${escHtml(counts.error)}, warnings=${escHtml(counts.warning)}, review=${escHtml(counts.review)}</p>
+    <p><strong>Diagnostics:</strong> ${escHtml(counts.error)} error${counts.error === 1 ? '' : 's'}, ${escHtml(counts.warning)} warning${counts.warning === 1 ? '' : 's'}, ${escHtml(counts.review)} to review</p>
     <p class="text-muted">${referenceIndexSummary()}</p>
     ${typeRows ? `<ul>${typeRows}</ul>` : '<p class="text-muted">No element type patterns were found.</p>'}
   </div>
@@ -4082,7 +4083,7 @@ function applyRepairSuggestion(findingIndex, repairIndex, value) {
     renderRepairResults();
     setRepairPreviewStatus(`Applied ${outcome.applied.length} repair(s). Findings refreshed; undo is available.`, outcome.skipped.length ? 'warning' : 'success');
   } catch (error) {
-    setRepairPreviewStatus(error.message || 'Could not apply this suggestion.', 'error');
+    setRepairPreviewStatus(userMessages.message(error, 'xml-repair'), 'error');
   }
 }
 
@@ -4091,7 +4092,7 @@ function undoLastRepair() {
   try {
     ensureRepairInputUnchanged();
   } catch (error) {
-    setRepairPreviewStatus(error.message, 'warning');
+    setRepairPreviewStatus(userMessages.message(error, 'xml-inspect'), 'warning');
     return;
   }
   const verify = getAuroraXmlRepair().verifyRepairedXml(repairState.docs, repairState.undoDocs, {
@@ -4117,7 +4118,7 @@ async function handleRepairXmlFileSelect(event) {
     loadRepairDocs(docs);
     setRepairPreviewStatus(`Loaded ${docs.length === 1 ? docs[0].fileName : `${docs.length} files`}. Click Inspect XML to analyze.`, 'success');
   } catch (error) {
-    if (sequence === repairUploadSequence) setRepairPreviewStatus((error.message || 'Could not read these XML files.') + ' Your previous workspace is unchanged.', 'error');
+    if (sequence === repairUploadSequence) setRepairPreviewStatus(userMessages.message(error, 'xml-read') + ' Your previous workspace is unchanged.', 'error');
   } finally {
     if (event?.target) event.target.value = '';
   }
@@ -4153,7 +4154,7 @@ function syncRepairInputDocs() {
 
 function ensureRepairInputUnchanged() {
   if (repairState.inputSnapshot !== null && JSON.stringify(currentRepairInputDocs()) !== repairState.inputSnapshot) {
-    throw new Error('XML changed since inspection. Inspect it again before applying repairs.');
+    throw userMessages.error('XML changed since inspection. Inspect it again before applying repairs.');
   }
 }
 
@@ -4196,7 +4197,7 @@ function inspectRepairXml() {
     const counts = repairSeverityCounts(analysis.diagnostics);
     const tone = counts.error || counts.warning ? 'warning' : 'success';
     setRepairPreviewStatus(
-      `Inspected ${analysis.catalog.totalElements} element(s): errors=${counts.error}, warnings=${counts.warning}, review=${counts.review}.`,
+      `Checked ${analysis.catalog.totalElements} XML entr${analysis.catalog.totalElements === 1 ? 'y' : 'ies'}: ${counts.error} error${counts.error === 1 ? '' : 's'}, ${counts.warning} warning${counts.warning === 1 ? '' : 's'}, ${counts.review} to review. ${counts.error ? 'Fix the errors listed below before using this file.' : counts.warning || counts.review ? 'Review the findings below before using this file.' : 'Compare the rules with the source before using this file in Aurora.'}`,
       tone
     );
   } catch (error) {
@@ -4206,7 +4207,7 @@ function inspectRepairXml() {
       results.innerHTML = '';
       results.classList.add('hidden');
     }
-    setRepairPreviewStatus(error.message, 'error');
+    setRepairPreviewStatus(userMessages.message(error, 'xml-inspect'), 'error');
   }
   window.AuroraDraftRecovery?.changed();
 }
@@ -4231,13 +4232,13 @@ function collectRepairSelections() {
 }
 
 function applyRepairSelection(ids = [], values = {}) {
-  if (!repairState.analysis) throw new Error('Inspect XML before applying repairs.');
+  if (!repairState.analysis) throw userMessages.error('Inspect XML before applying repairs.');
   ensureRepairInputUnchanged();
   const wanted = new Set(ids);
   const repairs = repairState.analysis.diagnostics
     .flatMap(finding => finding.repairs || [])
     .filter(repair => wanted.has(repair.id));
-  if (!repairs.length) throw new Error('Select at least one repair to apply.');
+  if (!repairs.length) throw userMessages.error('Select at least one repair to apply.');
   const repairApi = getAuroraXmlRepair();
   const beforeDocs = repairState.docs;
   const result = repairApi.applyRepairs(beforeDocs, repairs, { values });
@@ -4265,7 +4266,7 @@ function applySelectedRepairs() {
       tone
     );
   } catch (error) {
-    setRepairPreviewStatus(error.message, 'error');
+    setRepairPreviewStatus(userMessages.message(error, 'xml-repair'), 'error');
   }
 }
 
@@ -4281,16 +4282,22 @@ function downloadBlobFile(fileName, blob) {
 async function downloadRepairedXml() {
   const changed = changedRepairDocs();
   if (!changed.length) {
-    setRepairPreviewStatus('No repaired files to download.', 'info');
+    setRepairPreviewStatus('There are no repaired files to download yet. Choose Inspect XML, select the repairs you need, then choose Apply Selected Repairs.', 'info');
     return;
   }
-  if (changed.length === 1) {
-    downloadBlobFile(changed[0].fileName, new Blob([changed[0].xml], { type: 'application/xml' }));
-    return;
+  try {
+    if (changed.length === 1) {
+      downloadBlobFile(changed[0].fileName, new Blob([changed[0].xml], { type: 'application/xml' }));
+    } else {
+      const zip = new JSZip();
+      changed.forEach(doc => zip.file(doc.fileName, doc.xml));
+      downloadBlobFile('repaired-xml.zip', await zip.generateAsync({ type: 'blob' }));
+    }
+    return true;
+  } catch (error) {
+    setRepairPreviewStatus(userMessages.message(error, 'repair-download'), 'error');
+    return false;
   }
-  const zip = new JSZip();
-  changed.forEach(doc => zip.file(doc.fileName, doc.xml));
-  downloadBlobFile('repaired-xml.zip', await zip.generateAsync({ type: 'blob' }));
 }
 
 async function copyRepairedXml() {
@@ -4305,7 +4312,7 @@ async function copyRepairedXml() {
     await navigator.clipboard.writeText(text);
     setRepairPreviewStatus(`Copied ${changed.length === 1 ? changed[0].fileName : `${changed.length} files`} to the clipboard.`, 'success');
   } catch (error) {
-    setRepairPreviewStatus(`Copy failed: ${error.message}`, 'error');
+    setRepairPreviewStatus(userMessages.message(error, 'clipboard'), 'error');
   }
 }
 
@@ -4634,7 +4641,7 @@ function applyAuthoringElementProperty() {
     ? applyAuthoringElementNode(input.value, target, property.node, snippet)
     : applyAuthoringSetter(input.value, target, property.key, snippet);
   if (!result) {
-    setAuthoringTemplateStatus('Could not find the closing element tag to add this detail.', 'warning');
+    setAuthoringTemplateStatus('This entry is missing its closing </element> tag. Add the closing tag, choose Check XML shape, then try adding the detail again.', 'warning');
     return;
   }
   let acRuleSynced = false;
@@ -4856,7 +4863,7 @@ function insertAuthoringRuleSnippet() {
   } else {
     const closingTag = /<\/element\s*>/i.exec(getAuroraXmlPatterns().xmlMarkupText(target.xml));
     if (!closingTag) {
-      setAuthoringTemplateStatus('Could not find the closing element tag to add a rules block.', 'warning');
+      setAuthoringTemplateStatus('This entry is missing its closing </element> tag. Add the closing tag, choose Check XML shape, then try inserting the rule again.', 'warning');
       return;
     }
 
@@ -4952,7 +4959,7 @@ function insertAuthoringSheetDescription(input, target, description) {
 
   const closingTag = /<\/element\s*>/i.exec(getAuroraXmlPatterns().xmlMarkupText(target.xml));
   if (!closingTag) {
-    setAuthoringTemplateStatus('Could not find the closing element tag to add a sheet action.', 'warning');
+    setAuthoringTemplateStatus('This entry is missing its closing </element> tag. Add the closing tag, choose Check XML shape, then try adding the action again.', 'warning');
     return;
   }
   const closeStart = target.start + closingTag.index;
@@ -5075,11 +5082,11 @@ async function copyAuthoringTemplateXml() {
     } else {
       input.focus();
       input.select();
-      if (!document.execCommand('copy')) throw new Error('Clipboard access is unavailable.');
+      if (!document.execCommand('copy')) throw userMessages.error('Clipboard access is unavailable.');
     }
     setAuthoringTemplateStatus('XML copied to the clipboard.', 'success');
   } catch (error) {
-    setAuthoringTemplateStatus(error.message || 'Could not copy XML. Select the text and copy it manually.', 'warning');
+    setAuthoringTemplateStatus(userMessages.message(error, 'clipboard'), 'warning');
   }
 }
 
@@ -5090,14 +5097,14 @@ function downloadAuthoringTemplateXml() {
     return;
   }
 
-  const blob = new Blob([xml], { type: 'application/xml;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = selectedAuthoringTemplateFileName;
-  link.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-  setAuthoringTemplateStatus('Downloaded ' + selectedAuthoringTemplateFileName + '.', 'success');
+  try {
+    downloadBlobFile(selectedAuthoringTemplateFileName, new Blob([xml], { type: 'application/xml;charset=utf-8' }));
+    setAuthoringTemplateStatus(selectedAuthoringTemplateFileName + ' prepared for download.', 'success');
+    return true;
+  } catch (error) {
+    setAuthoringTemplateStatus(userMessages.message(error, 'xml-download'), 'warning');
+    return false;
+  }
 }
 
 
@@ -5318,41 +5325,41 @@ function validateAll(options = {}) {
       const label = `${TYPE_LABELS[type] || type} #${i+1}`;
       const name = (item.name || '').trim();
 
-      if (!name) issues.push({ type, i, field: 'name', msg: `${label}: name is blank` });
+      if (!name) issues.push({ type, i, field: 'name', msg: `${label}: enter a name.` });
 
       if (type === 'spell') {
         const lvl = parseInt(item.level);
         if (isNaN(lvl) || lvl < 0 || lvl > 9)
-          issues.push({ type, i, field: 'level', msg: `${label} (${name}): level must be 0-9` });
+          issues.push({ type, i, field: 'level', msg: `${label} (${name}): enter a spell level from 0 to 9. Use 0 for a cantrip.` });
         if (!item.school)
-          issues.push({ type, i, field: 'school', msg: `${label} (${name}): school is blank` });
+          issues.push({ type, i, field: 'school', msg: `${label} (${name}): choose a spell school.` });
         if (!item.description)
-          issues.push({ type, i, field: 'description', msg: `${label} (${name}): description is blank` });
+          issues.push({ type, i, field: 'description', msg: `${label} (${name}): add the description from the source.` });
         if (item.statBlockName && !String(item.statBlock || '').trim())
           issues.push({ type, i, field: 'statBlock', msg: `${label} (${name}): ${item.statBlockName} creature stat block is missing; add its reference text before exporting.` });
       }
 
       if (type === 'archetype') {
         if (!item.class)
-          issues.push({ type, i, field: 'class', msg: `${label} (${name}): class is blank` });
+          issues.push({ type, i, field: 'class', msg: `${label} (${name}): enter the parent class for this subclass.` });
         if (!item.features || item.features.length === 0)
-          issues.push({ type, i, field: null, msg: `${label} (${name}): has no features` });
+          issues.push({ type, i, field: null, msg: `${label} (${name}): add the subclass features and their levels from the source.` });
         (item.features || []).forEach((f, fi) => {
-          if (!f.name) issues.push({ type, i, field: `features.${fi}.name`, msg: `${label} (${name}): feature #${fi+1} has no name` });
+          if (!f.name) issues.push({ type, i, field: `features.${fi}.name`, msg: `${label} (${name}): feature #${fi+1} needs a name. Enter the feature name from the source.` });
           const fl = parseInt(f.level);
           if (isNaN(fl) || fl < 1 || fl > 20)
-            issues.push({ type, i, field: `features.${fi}.level`, msg: `${label} (${name}): feature "${f.name}" has invalid level` });
+            issues.push({ type, i, field: `features.${fi}.level`, msg: `${label} (${name}): feature "${f.name}" needs a level from 1 to 20. Enter the level shown in the source.` });
         });
         const fnames = (item.features||[]).map(f => f.name);
         fnames.forEach((fn, fi) => {
           if (fn && fnames.indexOf(fn) !== fi)
-            issues.push({ type, i, field: null, msg: `${label} (${name}): duplicate feature name "${fn}"` });
+            issues.push({ type, i, field: null, msg: `${label} (${name}): duplicate feature name "${fn}". Rename or remove the duplicate feature.` });
         });
       }
 
       if (type === 'feat') {
         if (!item.benefits || item.benefits.length === 0)
-          issues.push({ type, i, field: 'benefits', msg: `${label} (${name}): has no benefits` });
+          issues.push({ type, i, field: 'benefits', msg: `${label} (${name}): add at least one benefit from the source.` });
       }
       for (const field of (Array.isArray(item._rememberedCollectionFields) ? item._rememberedCollectionFields : [])) issues.push({ type, i, field, category: 'source-review',
         msg: name + ': a remembered correction replaced the ' + field + ' collection. Compare every entry with the fresh source; new or improved content may have been replaced. Use Revert to Generated and reapply the intended edits if needed.' });
@@ -5361,12 +5368,12 @@ function validateAll(options = {}) {
 
       if (type === 'race') {
         if (!item.traits || item.traits.length === 0)
-          issues.push({ type, i, field: 'traits', msg: `${label} (${name}): has no racial traits` });
+          issues.push({ type, i, field: 'traits', msg: `${label} (${name}): add the racial traits from the source.` });
       }
 
       if (type === 'background') {
         if (!item.skillProficiencies || item.skillProficiencies.length === 0)
-          issues.push({ type, i, field: 'skillProficiencies', msg: `${label} (${name}): has no skill proficiencies` });
+          issues.push({ type, i, field: 'skillProficiencies', msg: `${label} (${name}): add the skill proficiencies from the source, or check whether the background provides a choice instead.` });
       }
 
       if (type === 'race' || type === 'background') {
@@ -5397,9 +5404,9 @@ function validateAll(options = {}) {
           && (archetype.supports || archetypeSupport(name)) === item.archetypeSupports)) issues.push({
           type, i, field: 'archetypeSupports', msg: name + ': include or verify compatible subclass definitions for "' + item.archetypeSupports + '" in Aurora. A subclass picker is generated at level ' + item.archetypeLevel + '.' });
         if (!item.hitDie)
-          issues.push({ type, i, field: 'hitDie', msg: `${label} (${name}): hit die is missing` });
+          issues.push({ type, i, field: 'hitDie', msg: `${label} (${name}): enter the class hit die from the source, such as 8 for a d8.` });
         if (!item.features || item.features.length === 0)
-          issues.push({ type, i, field: 'features', msg: `${label} (${name}): has no class features` });
+          issues.push({ type, i, field: 'features', msg: `${label} (${name}): add the class features and their levels from the source.` });
         const missing = uniqueStrings((item.progression || []).flatMap(row => row.features || []))
           .filter(feature => !isPlaceholderClassFeature({ name: feature })
             && !(item.features || []).some(captured => legacyFeatureKey(captured.name) === legacyFeatureKey(feature)));
@@ -5411,21 +5418,21 @@ function validateAll(options = {}) {
 
       if (type === 'other') {
         if (!item.type)
-          issues.push({ type, i, field: 'type', msg: `${label} (${name}): Aurora type is blank` });
+          issues.push({ type, i, field: 'type', msg: `${label} (${name}): enter the Aurora element type, such as Feat or Class Feature.` });
         if (!item.description)
-          issues.push({ type, i, field: 'description', msg: `${label} (${name}): description is blank` });
+          issues.push({ type, i, field: 'description', msg: `${label} (${name}): add the description from the source.` });
       }
 
       // Duplicate name check within same type
       const fieldNames = { 'hit die': 'hitDie', 'saving throws': 'savingThrows', 'skill proficiencies': 'skillProficiencies', 'casting time': 'castingTime' };
       for (const missing of checkCompleteness(item, type).missing) {
         const field = fieldNames[missing] || missing;
-        if (!issues.some(issue => issue.type === type && issue.i === i && issue.field === field)) issues.push({ type, i, field, msg: `${label} (${name}): ${missing} is missing.` });
+        if (!issues.some(issue => issue.type === type && issue.i === i && issue.field === field)) issues.push({ type, i, field, msg: `${label} (${name}): ${missing} is missing. Complete this field using the source.` });
       }
       const sameType = extractedData[type];
       const firstIdx = sameType.findIndex(x => (x.name||'').trim() === name && !x._error);
       if (firstIdx !== -1 && firstIdx < i && name)
-        issues.push({ type, i, field: 'name', msg: `${label}: duplicate name "${name}" will produce duplicate XML IDs` });
+        issues.push({ type, i, field: 'name', msg: `${label}: duplicate name "${name}" will produce duplicate XML IDs. Rename or remove one entry before exporting.` });
     });
   }
   const sourceIssues = window.AuroraSourceReview.findings(extractedData);
@@ -5482,7 +5489,7 @@ function buildZipXmlDocuments(meta) {
 function validateAuroraXmlDocuments(docs, scopeLabel) {
   const api = window.AuroraXmlShape || globalThis.AuroraXmlShape;
   if (!api?.validateAuroraXmlDocuments) {
-    return [{ type: 'xml', i: 0, field: null, msg: `${scopeLabel}: ValidatorModule - Aurora XML shape validator module is not loaded.` }];
+    return [{ type: 'xml', i: 0, field: null, code: 'ValidatorModule', msg: `${scopeLabel}: The XML checker did not load. Export a draft to keep your work, then refresh the app and check again.` }];
   }
   const Parser = typeof DOMParser !== 'undefined' ? DOMParser : null;
   return api.validateAuroraXmlDocuments(docs, scopeLabel, { DOMParser: Parser });
@@ -5796,7 +5803,7 @@ async function downloadZip() {
   zipDownloadBusy = true;
   if (button) button.disabled = true;
   try {
-    if (typeof JSZip === 'undefined') throw new Error('ZIP support did not load. Refresh the app or download Single XML.');
+    if (typeof JSZip === 'undefined') throw userMessages.error('ZIP support did not load. Refresh the app or download Single XML.');
     const zip = new JSZip();
     const folder = zip.folder(meta.slug);
     buildZipXmlDocuments(meta).forEach(doc => folder.file(doc.fileName, doc.xml));
@@ -5809,7 +5816,7 @@ async function downloadZip() {
     setManualAuthorStatus('ZIP prepared for download.' + (revision !== editRevision ? ' Edits made during export are still pending.' : ''), 'success');
     return true;
   } catch (error) {
-    setManualAuthorStatus('ZIP could not be created. Your work is kept. ' + (error?.message || String(error)), 'warning');
+    setManualAuthorStatus('Your work is kept. ' + userMessages.message(error, 'zip'), 'warning');
     return false;
   } finally {
     zipDownloadBusy = false;
@@ -8110,14 +8117,19 @@ function generateAndDownload() {
     setManualAuthorStatus('Add or restore an entry before downloading XML.', 'warning'); return false;
   }
   const download = () => {
-    let xml = generateXml();
-    if (issues.length) {
-      const note = '<!-- ' + escXmlComment(exportReviewText(issues)) + ' -->\n';
-      xml = xml.replace(/^(<\?xml[^\n]*\n)/, declaration => declaration + note);
+    try {
+      let xml = generateXml();
+      if (issues.length) {
+        const note = '<!-- ' + escXmlComment(exportReviewText(issues)) + ' -->\n';
+        xml = xml.replace(/^(<\?xml[^\n]*\n)/, declaration => declaration + note);
+      }
+      downloadBlobFile(meta.slug + '.xml', new Blob([xml], { type: 'application/xml' }));
+      clearChanged();
+      return true;
+    } catch (error) {
+      setManualAuthorStatus(userMessages.message(error, 'xml-download'), 'warning');
+      return false;
     }
-    downloadBlobFile(meta.slug + '.xml', new Blob([xml], { type: 'application/xml' }));
-    clearChanged();
-    return true;
   };
   return showValidationResult(issues) ? download() : performConfirmed(
     'This XML has ' + issues.length + ' unresolved items. Their review notes will be included as an XML comment. Download it for review?',

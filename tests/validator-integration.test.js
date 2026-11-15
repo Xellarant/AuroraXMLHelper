@@ -73,7 +73,7 @@ runTest('extracted browser shape module catches duplicate element IDs', () => {
 
   const issues = validateAuroraXmlDocuments([{ fileName: 'duplicate.xml', xml: '<elements />' }], 'Unit Test', { DOMParser });
 
-  assert.ok(issues.some(issue => issue.msg.includes('DuplicateElementIds') && issue.msg.includes('duplicate.xml')));
+  assert.ok(issues.some(issue => issue.code === 'DuplicateElementIds' && issue.msg.includes('duplicate.xml')));
 });
 
 runTest('generated fixture XML passes Aurora shape validator when available', () => withTempFixture('aurora-xml-helper-validator-', tempRoot => {

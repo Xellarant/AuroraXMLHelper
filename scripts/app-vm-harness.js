@@ -120,6 +120,7 @@ function loadApp(sourceMeta = {}, options = {}) {
 
   vm.createContext(context);
   for (const scriptPath of [
+    path.join(repoRoot, 'src', 'user-messages.js'),
     path.join(repoRoot, 'src', 'aurora-xml-shape.js'),
     path.join(repoRoot, 'src', 'aurora-xml-patterns.js'),
     ...(options.referenceIndex ? [path.join(repoRoot, 'src', 'aurora-reference-index.js')] : []),

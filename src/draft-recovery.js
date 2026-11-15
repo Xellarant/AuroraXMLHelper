@@ -1,5 +1,6 @@
 (function () {
   'use strict';
+  const messages = window.AuroraUserMessages;
   let store;
   let timer;
   let ready = false;
@@ -14,9 +15,10 @@
     status().className = warning ? 'alert alert-warning' : 'text-muted';
   }
 
-  function failed(error) {
+  function failed(error, operation = 'draft-save') {
     blocked = true;
-    notice(error.message || 'Draft saving failed. Export a draft file to keep your work.', true);
+    const message = messages.message(error, operation);
+    notice(message + (/automatic saving is paused/i.test(message) ? '' : ' Automatic saving is paused.'), true);
     document.getElementById('draftRetry').classList.remove('hidden');
   }
 
@@ -55,14 +57,14 @@
       const state = api.validateState(window.AuroraXMLHelper.captureWorkspaceDraft());
       const raw = api.encode(state, undefined, api.MAX_FILE_LENGTH);
       const blob = new Blob([raw], { type: 'application/json' });
-      if (blob.size > api.MAX_FILE_LENGTH) throw new Error('This workspace is too large for one draft file. Download your XML files separately.');
+      if (blob.size > api.MAX_FILE_LENGTH) throw messages.error('This workspace is too large for one draft file. Download your XML files separately.');
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
       link.download = 'aurora-workspace-draft.json';
       link.click();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
-    } catch (error) { notice(error.message, true); }
+    } catch (error) { notice(messages.message(error, 'draft-export'), true); }
   }
 
   window.AuroraDraftRecovery = { changed, flush };
@@ -104,7 +106,7 @@
     window.addEventListener('storage', event => {
       if (event.key === api.KEY || event.key === null) {
         clearTimeout(timer);
-        failed(new Error('Another tab changed the saved draft. Automatic saving is paused. Export this tab’s draft or choose Save this tab.'));
+        failed(messages.error('Another tab changed the saved draft. Automatic saving is paused. Export this tab’s draft or choose Save this tab.'));
       }
     });
     document.getElementById('draftExport').addEventListener('click', download);
@@ -130,14 +132,14 @@
         lastState = JSON.stringify(window.AuroraXMLHelper.captureWorkspaceDraft());
         document.getElementById('draftRetry').classList.add('hidden');
         notice('Saved draft cleared. Your open work is unchanged; the next edit will save a new draft.');
-      } catch (error) { failed(error); }
+      } catch (error) { failed(error, 'draft-clear'); }
     });
     document.getElementById('draftImport').addEventListener('change', async event => {
       const file = event.target.files[0];
       if (!file) return;
       const version = ++importVersion;
       try {
-        if (file.size > api.MAX_FILE_LENGTH) throw new Error('This draft file is too large to import.');
+        if (file.size > api.MAX_FILE_LENGTH) throw messages.error('This draft file is too large to import. Choose a smaller exported draft, or download XML files from the original workspace instead.');
         const raw = await file.text();
         if (version !== importVersion) return;
         const entry = api.decode(raw, api.MAX_FILE_LENGTH);
@@ -149,7 +151,7 @@
         changed();
         flush();
         if (blocked) notice('Draft imported into the open workspace. ' + status().textContent, true);
-      } catch (error) { notice(error.message, true); }
+      } catch (error) { notice(messages.message(error, 'draft-import'), true); }
       finally { ready = true; if (version === importVersion) event.target.value = ''; }
     });
   });

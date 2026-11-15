@@ -27,7 +27,7 @@
     && ['_conditionalOnlyConfirmed', '_conflictsReviewed'].every(field => value[field] == null || typeof value[field] === 'boolean');
 
   function failure(code, message) {
-    return Object.assign(new Error(message), { code });
+    return Object.assign(new Error(message), { code, userMessage: message });
   }
 
   function sourceReference(value) {
@@ -93,7 +93,7 @@
     if (review != null && (!object(review) || review.kind !== 'pdf' || typeof review.fileName !== 'string'
       || !Array.isArray(review.types) || !review.types.every(type => ELEMENT_TYPES.includes(type))
       || ![review.selectedPages, review.continuationPages, review.availabilityPages || []].every(pages => Array.isArray(pages) && pages.every(page => Number.isInteger(page) && page > 0)))) {
-      throw failure('invalid', 'This draft has invalid source review details.');
+      throw failure('invalid', 'This draft has invalid source review details. Choose another backup created with Export draft.');
     }
     if (!object(state) || !['parse', 'repair', 'author'].includes(state.workspace)
       || !object(state.fields) || !Object.values(state.fields).every(value => typeof value === 'string')
@@ -108,13 +108,13 @@
       || !object(state.repair) || !docs(state.repair.inputDocs) || !docs(state.repair.originalDocs)
       || !docs(state.repair.docs) || !(state.repair.undoDocs === null || docs(state.repair.undoDocs))
       || typeof state.repair.inspected !== 'boolean') {
-      throw failure('invalid', 'This draft has an invalid or incomplete workspace.');
+      throw failure('invalid', 'This draft has an invalid or incomplete workspace. Choose another backup created with Export draft.');
     }
     if (![...(state.data.spell || []), ...(state.baseline.spell || [])].every(spell => availability(spell.availability))) {
-      throw failure('invalid', 'This draft has invalid spell availability details.');
+      throw failure('invalid', 'This draft has invalid spell availability details. Choose another backup created with Export draft.');
     }
     if (![...(state.data.class || []), ...(state.baseline.class || [])].every(classProgression)) {
-      throw failure('invalid', 'This draft has invalid class progression or choice details.');
+      throw failure('invalid', 'This draft has invalid class progression or choice details. Choose another backup created with Export draft.');
     }
     return state;
   }
@@ -129,7 +129,7 @@
   }
 
   function decode(raw, maxLength = MAX_LENGTH) {
-    if (typeof raw !== 'string' || raw.length > maxLength) throw failure('invalid', 'This draft file is too large or unreadable.');
+    if (typeof raw !== 'string' || raw.length > maxLength) throw failure('invalid', 'This draft file is too large or unreadable. Choose a smaller draft created with Export draft, or try another backup.');
     let entry;
     try {
       entry = JSON.parse(raw, (key, value) => {
@@ -137,10 +137,10 @@
         return value;
       });
     } catch {
-      throw failure('invalid', 'The saved draft could not be read. It has been left untouched.');
+      throw failure('invalid', 'The saved draft could not be read. It has been left untouched. Use Import draft to open another backup created with Export draft.');
     }
-    if (entry?.format !== FORMAT || entry.version !== 1) throw failure('version', 'This draft uses an unsupported format or version. It has been left untouched.');
-    if (typeof entry.savedAt !== 'string' || !Number.isFinite(Date.parse(entry.savedAt))) throw failure('invalid', 'This draft has no valid save date.');
+    if (entry?.format !== FORMAT || entry.version !== 1) throw failure('version', 'This draft uses an unsupported format or version. It has been left untouched. Use a draft created with Export draft, or try opening it in the app version that created it.');
+    if (typeof entry.savedAt !== 'string' || !Number.isFinite(Date.parse(entry.savedAt))) throw failure('invalid', 'This draft has no valid save date. Choose another backup created with Export draft.');
     validateState(entry.state);
     return entry;
   }
@@ -171,7 +171,7 @@
       clear() {
         // Clearing is an explicit user action, including for unreadable drafts.
         try { storage.removeItem(KEY); }
-        catch { throw failure('storage', 'The browser could not remove the saved draft.'); }
+        catch { throw failure('storage', 'The browser could not remove the saved draft. Export a draft to back up your open work, then try Clear saved draft again.'); }
         lastRaw = null;
       }
     };
